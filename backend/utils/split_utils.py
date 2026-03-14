@@ -1,6 +1,6 @@
 import os
 import subprocess
-from moviepy import VideoFileClip
+from moviepy.editor import VideoFileClip
 
 def split_video(video_path: str, segment_length: int = 30):
     """

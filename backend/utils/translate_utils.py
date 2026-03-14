@@ -69,20 +69,15 @@ def translate_segments(segments, source_lang, target_langs, batch_size=30):
     """
     texts = [s.text for s in segments]
     all_translations = {}
+    warnings: list[str] = []
     
     for lang in target_langs:
         translated_texts = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            try:
-                # 這裡會拋出 ValueError 如果 5 次重試都失敗
-                translated_batch = translate_batch(batch, source_lang, lang)
-                translated_texts.extend(translated_batch)
-            except ValueError as e:
-                # C) 翻譯失敗時，將哪個語言失敗塞到 warnings
-                warnings.append(f"Translation to {lang} failed: {str(e)}")
-                # 如果翻譯失敗，則該語言的翻譯結果為空列表，避免中斷其他語言的翻譯
-                translated_texts.extend([f"[Translation Failed for {lang}] {text}" for text in batch])
+            # 這裡會拋出 ValueError 如果 5 次重試都失敗
+            translated_batch = translate_batch(batch, source_lang, lang)
+            translated_texts.extend(translated_batch)
         all_translations[lang] = translated_texts
         
     return all_translations, warnings

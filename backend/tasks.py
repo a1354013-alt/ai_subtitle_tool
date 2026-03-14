@@ -11,7 +11,7 @@ from .utils.translate_utils import translate_segments, generate_bilingual_srt
 from .utils.ass_utils import generate_ass
 from .utils.split_utils import split_video, merge_segments_subtitles
 from .utils.model_loader import get_model_by_duration
-from .utils.diarization_utils import diarize_audio, merge_speaker_info
+
 from moviepy.editor import VideoFileClip
 
 class SimpleSegment:
@@ -76,19 +76,25 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         # C) 品質優化：精準清理暫存目錄
         if segments_dir and os.path.exists(segments_dir):
             shutil.rmtree(segments_dir)
-        
-        # 2. 說話者偵測
+        # 2. 說話者偵測 (Lazy Import)
         if hf_token:
-            if update_state_func:
-                update_state_func(state='PROGRESS', meta={'progress': 50, 'status': 'Performing speaker diarization...'})
             try:
-                audio_path = f"{base_path}_temp.wav"
-                subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], check=True)
-                diarization_result = diarize_audio(audio_path, hf_token)
-                segments = merge_speaker_info(segments, diarization_result)
-                if os.path.exists(audio_path): os.remove(audio_path)
-            except Exception as e:
-                warnings.append(f"Diarization failed: {str(e)}")
+                from .utils.diarization_utils import diarize_audio, merge_speaker_info
+            except ImportError:
+                warnings.append("Diarization dependencies not installed. Skipping speaker diarization.")
+                hf_token = None # 禁用 diarization
+            
+                if update_state_func:
+                    update_state_func(state='PROGRESS', meta={'progress': 50, 'status': 'Performing speaker diarization...'})       
+                try:
+                    audio_path = f"{base_path}_temp.wav"
+                    subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], check=True)
+                    diarization_result = diarize_audio(audio_path, hf_token)
+                    segments = merge_speaker_info(segments, diarization_result)
+                except Exception as e:
+                    warnings.append(f"Diarization failed: {str(e)}")
+                finally:
+                    if 'audio_path' in locals() and os.path.exists(audio_path): os.remove(audio_path)
 
         # 3. 多語種同步翻譯
         if update_state_func:
@@ -97,19 +103,15 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         translations = {}
         for lang in target_langs:
             try:
-                lang_trans, translate_warnings = translate_segments(segments, "Auto", [lang])
+                lang_trans, _ = translate_segments(segments, "Auto", [lang]) # translate_segments 現在會直接拋出異常，所以這裡不需要接收 warnings
                 translations[lang] = lang_trans[lang]
-                warnings.extend(translate_warnings)
-            except Exception as e:
-                # B) 翻譯 parse 失敗會靜默回原文 -> 這裡捕捉並記錄警告
-                msg = f"Translation failed for {lang}. Using original text."
+            except Exception as e:                # B) 翻譯 parse 失敗會靜默回原文 -> 這裡捕捉並記錄警告
+                msg = f"Translation to {lang} failed: {e}. Using original text."
                 warnings.append(msg)
                 translations[lang] = [s.text for s in segments]
                 if update_state_func:
                     update_state_func(state='PROGRESS', meta={'progress': 70, 'status': msg})
-        
-        # 4. 生成字幕檔案
-        if update_state_func:
+        # 4. 生成字幕檔案        if update_state_func:
             update_state_func(state='PROGRESS', meta={'progress': 85, 'status': 'Generating final subtitles...'})
         result_files = {}
         for lang in target_langs:
@@ -185,8 +187,7 @@ def process_video_task(self, video_path: str, options: dict = None):
         if do_remove_silence:
             self.update_state(state='PROGRESS', meta={'progress': 5, 'status': 'Removing silence...'})
             silence_removed_video = f"{base_path}_no_silence.mp4"
-            remove_silence(video_path, silence_removed_video)
-            current_video = silence_removed_video
+            current_video = remove_silence(video_path, silence_removed_video)
 
         video = VideoFileClip(current_video)
         duration = video.duration
