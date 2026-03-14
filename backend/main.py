@@ -7,9 +7,9 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List
-from tasks import process_video_task
+from .tasks import process_video_task
 from celery.result import AsyncResult
-from celery_app import celery_app
+from .celery_app import celery_app
 
 app = FastAPI(title="AI Video Subtitle Tool")
 
@@ -49,12 +49,10 @@ async def upload_video(
     if not file.filename.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
-    # 統一 ID：業務 ID 即為 Celery Task ID
     task_id = str(uuid.uuid4())
     file_extension = os.path.splitext(file.filename)[1]
     file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
     
-    # 串流寫入
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -73,7 +71,6 @@ async def upload_video(
         "hf_token": hf_token
     }
     
-    # 啟動任務，指定 task_id
     process_video_task.apply_async(args=[file_path, options], task_id=task_id)
     
     return TaskStatus(task_id=task_id, status="PENDING", progress=0)
@@ -82,7 +79,6 @@ async def upload_video(
 async def get_status(task_id: str):
     task_result = AsyncResult(task_id, app=celery_app)
     
-    # 由於 tasks.py 使用了 self.replace，AsyncResult(task_id) 會自動追蹤到最終結果
     status = task_result.status
     progress = 0
     message = ""
@@ -105,24 +101,17 @@ async def get_status(task_id: str):
 
 @app.get("/download/{task_id}")
 async def download_result(task_id: str, lang: Optional[str] = None):
-    """
-    下載結果，支援透過 lang 參數指定語言
-    """
-    # 1. 優先找燒錄後的影片 (通常只燒錄第一種語言)
     final_video = os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4")
     if os.path.exists(final_video) and not lang:
         return FileResponse(final_video, filename=f"video_{task_id}.mp4")
     
-    # 2. 找字幕檔
     for ext in ["ass", "srt"]:
         if lang:
-            # 找指定語言
             lang_suffix = lang.replace(" ", "_")
             target_file = os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.{ext}")
             if os.path.exists(target_file):
                 return FileResponse(target_file, filename=f"subtitle_{task_id}_{lang_suffix}.{ext}")
         else:
-            # 找第一個符合的字幕
             files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
             if files:
                 return FileResponse(os.path.join(UPLOAD_DIR, files[0]), filename=f"subtitle_{task_id}.{ext}")
