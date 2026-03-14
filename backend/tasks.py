@@ -97,8 +97,9 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         translations = {}
         for lang in target_langs:
             try:
-                lang_trans = translate_segments(segments, "Auto", [lang])
+                lang_trans, translate_warnings = translate_segments(segments, "Auto", [lang])
                 translations[lang] = lang_trans[lang]
+                warnings.extend(translate_warnings)
             except Exception as e:
                 # B) 翻譯 parse 失敗會靜默回原文 -> 這裡捕捉並記錄警告
                 msg = f"Translation failed for {lang}. Using original text."
@@ -146,7 +147,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
             "status": "COMPLETED", 
             "business_id": business_id, 
             "video_path": final_video_path,
-            "warnings": warnings or []
+            "warnings": list(set(warnings)) or [] # 使用 set 去重，避免重複警告
         }
     finally:
         remove_task_lock(business_id)

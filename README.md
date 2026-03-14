@@ -1,4 +1,4 @@
-# AI 自動影片上字幕與剪輯工具 (Pro Production Ready v9)
+# AI 自動影片上字幕與剪輯工具 (Ultimate Production Ready v11)
 
 這是一個專業級的自動化影片處理工具，整合了 Faster-Whisper、GPT-4o 與 Celery 並行架構。
 
@@ -13,15 +13,31 @@
 ## 快速啟動
 
 ### 1. 安裝依賴
+
+為了支援 CPU-only 部署，我們將依賴分為核心功能與選配的說話者偵測功能。
+
+**核心依賴 (Core Dependencies):**
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-core.txt
 ```
+
+**說話者偵測依賴 (Diarization Dependencies - 選配):**
+如果您需要啟用說話者偵測功能，請安裝此依賴。此功能需要 Hugging Face Token。
+```bash
+pip install -r requirements-diarization.txt
+```
+
+**CPU-only 部署注意事項:**
+`requirements-core.txt` 中包含 `torch` 依賴。如果您在 CPU-only 環境部署，建議參考 PyTorch 官方網站，手動安裝適合您環境的 CPU 版本 `torch`，以避免安裝到不必要的 GPU 相關套件。
+例如：`pip install torch==2.1.2 --index-url https://download.pytorch.org/whl/cpu`
 
 ### 2. 設定環境變數
 建立 `.env` 檔案或直接設定：
 - `OPENAI_API_KEY`: 您的 OpenAI API 金鑰
 - `REDIS_URL`: Redis 連線位址 (預設: redis://localhost:6379/0)
 - `UPLOAD_DIR`: 檔案上傳目錄 (預設: ./backend/uploads)
+- `CORS_ALLOWED_ORIGINS`: 允許跨域請求的來源網域，多個請用逗號分隔 (預設: "*")
+- `TRANSLATE_MODEL`: 翻譯模型名稱 (預設: gpt-4o-mini)
 
 ### 3. 啟動服務 (請在專案根目錄執行)
 

@@ -14,7 +14,7 @@ from .celery_app import celery_app
 app = FastAPI(title="AI Video Subtitle Tool")
 
 # CORS 設定 - 支援環境變數配置
-allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
+allowed_origins = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -103,16 +103,20 @@ async def get_status(task_id: str):
     result_url = None
     warnings = []
     
+    # B) 統一 Celery 狀態判斷邏輯，確保 PROGRESS 狀態能穩定對應到前端的進度顯示
     if status == "PROGRESS":
         info = task_result.info or {}
         progress = info.get("progress", 0)
         message = info.get("status", "")
+        if "warnings" in info:
+            warnings.extend(info["warnings"])
+        status = "PROCESSING" # 將 Celery 的 PROGRESS 狀態映射為 PROCESSING
     elif status == "SUCCESS":
         progress = 100
         message = "Completed"
         result_url = f"/results/{task_id}"
         if isinstance(task_result.result, dict):
-            warnings = task_result.result.get("warnings", [])
+            warnings.extend(task_result.result.get("warnings", []))
     elif status == "FAILURE":
         message = str(task_result.result)
     elif status == "PENDING":
