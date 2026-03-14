@@ -1,10 +1,12 @@
 import os
 import uuid
 import asyncio
-from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
+import shutil
+from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from tasks import process_video_task
 from celery.result import AsyncResult
 from celery_app import celery_app
@@ -19,137 +21,146 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "/home/ubuntu/ai_subtitle_tool/backend/uploads"
+# 環境配置
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 class TaskStatus(BaseModel):
     task_id: str
     status: str
     progress: int
+    message: Optional[str] = None
     result_url: Optional[str] = None
 
-class TaskOptions(BaseModel):
-    target_langs: list = ["Traditional Chinese"]
-    burn_subtitles: bool = True
-    subtitle_format: str = "ass"
-    remove_silence: bool = False
-    hf_token: Optional[str] = None
-
 class SubtitleEdit(BaseModel):
-    content: str # 新的 SRT 內容
+    content: str
 
 @app.post("/upload", response_model=TaskStatus)
 async def upload_video(
     file: UploadFile = File(...),
-    target_langs: str = "Traditional Chinese", # 接收逗號分隔字串
+    target_langs: str = Query("Traditional Chinese", description="Comma separated languages"),
     burn_subtitles: bool = True,
     subtitle_format: str = "ass",
     remove_silence: bool = False,
+    parallel: bool = True,
     hf_token: Optional[str] = None
 ):
-    if not file.filename.endswith((".mp4", ".mkv", ".avi", ".mov")):
+    if not file.filename.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
         raise HTTPException(status_code=400, detail="Unsupported file format")
     
+    # 統一 ID：業務 ID 即為 Celery Task ID
     task_id = str(uuid.uuid4())
     file_extension = os.path.splitext(file.filename)[1]
     file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
     
-    with open(file_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
+    # 串流寫入
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+    finally:
+        file.file.close()
     
     options = {
-        "target_langs": target_langs.split(","),
+        "business_id": task_id,
+        "target_langs": [l.strip() for l in target_langs.split(",")],
         "burn_subtitles": burn_subtitles,
         "subtitle_format": subtitle_format,
         "remove_silence": remove_silence,
+        "parallel": parallel,
         "hf_token": hf_token
     }
     
-    # 啟動 Celery 任務
-    task = process_video_task.delay(file_path, options)
+    # 啟動任務，指定 task_id
+    process_video_task.apply_async(args=[file_path, options], task_id=task_id)
     
-    return TaskStatus(task_id=task.id, status="PENDING", progress=0)
+    return TaskStatus(task_id=task_id, status="PENDING", progress=0)
 
 @app.get("/status/{task_id}", response_model=TaskStatus)
 async def get_status(task_id: str):
     task_result = AsyncResult(task_id, app=celery_app)
     
+    # 處理 Chord 情況：如果主任務已完成但進入了 callback，AsyncResult(task_id) 可能會顯示 SUCCESS
+    # 但實際上我們需要追蹤整個鏈路的狀態。這裡簡化處理：
     status = task_result.status
     progress = 0
+    message = ""
     result_url = None
     
     if status == "PROGRESS":
-        progress = task_result.info.get("progress", 0)
+        info = task_result.info or {}
+        progress = info.get("progress", 0)
+        message = info.get("status", "")
     elif status == "SUCCESS":
-        progress = 100
-        result_url = f"/download/{task_id}"
+        # 檢查是否有最終產物，若無則可能還在 callback 中 (DISPATCHED 狀態)
+        if isinstance(task_result.result, dict) and task_result.result.get("status") == "DISPATCHED":
+            status = "PROCESSING"
+            progress = 20
+            message = "Parallel tasks in progress..."
+        else:
+            progress = 100
+            message = "Completed"
+            result_url = f"/download/{task_id}"
     elif status == "FAILURE":
-        progress = 0
+        message = str(task_result.result)
         
-    return TaskStatus(
-        task_id=task_id,
-        status=status,
-        progress=progress,
-        result_url=result_url
-    )
+    return TaskStatus(task_id=task_id, status=status, progress=progress, message=message, result_url=result_url)
+
+@app.get("/download/{task_id}")
+async def download_result(task_id: str):
+    # 1. 優先找燒錄後的影片
+    final_video = os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4")
+    if os.path.exists(final_video):
+        return FileResponse(final_video, filename=f"video_{task_id}.mp4")
+    
+    # 2. 找字幕檔
+    for ext in ["ass", "srt"]:
+        # 找第一個語言的雙語字幕
+        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
+        if files:
+            return FileResponse(os.path.join(UPLOAD_DIR, files[0]), filename=f"subtitle_{task_id}.{ext}")
+            
+    raise HTTPException(status_code=404, detail="Result not found")
 
 @app.websocket("/ws/status/{task_id}")
 async def websocket_status(websocket: WebSocket, task_id: str):
     await websocket.accept()
     try:
         while True:
-            task_result = AsyncResult(task_id, app=celery_app)
-            status = task_result.status
-            progress = 0
-            
-            if status == "PROGRESS":
-                progress = task_result.info.get("progress", 0)
-            elif status == "SUCCESS":
-                progress = 100
-            
-            await websocket.send_json({
-                "task_id": task_id,
-                "status": status,
-                "progress": progress
-            })
-            
-            if status in ["SUCCESS", "FAILURE", "REVOKED"]:
+            res = await get_status(task_id)
+            await websocket.send_json(res.dict())
+            if res.status in ["SUCCESS", "FAILURE", "REVOKED"]:
                 break
-                
-            await asyncio.sleep(1) # 每秒推送一次
+            await asyncio.sleep(1)
     except WebSocketDisconnect:
-        print(f"Client disconnected from task {task_id}")
-    except Exception as e:
-        print(f"WebSocket error: {e}")
+        pass
     finally:
         await websocket.close()
 
 @app.get("/subtitle/{task_id}")
 async def get_subtitle(task_id: str):
-    # 尋找該任務對應的 SRT 檔案
-    srt_path = os.path.join(UPLOAD_DIR, f"{task_id}_bilingual.srt")
-    if not os.path.exists(srt_path):
-        srt_path = os.path.join(UPLOAD_DIR, f"{task_id}.srt")
-        
-    if not os.path.exists(srt_path):
-        raise HTTPException(status_code=404, detail="Subtitle not found")
-        
-    with open(srt_path, "r", encoding="utf-8") as f:
-        return {"content": f.read()}
+    for ext in ["ass", "srt"]:
+        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
+        if files:
+            path = os.path.join(UPLOAD_DIR, files[0])
+            with open(path, "r", encoding="utf-8") as f:
+                return {"content": f.read(), "format": ext}
+    raise HTTPException(status_code=404, detail="Subtitle not found")
 
 @app.put("/subtitle/{task_id}")
 async def update_subtitle(task_id: str, edit: SubtitleEdit):
-    srt_path = os.path.join(UPLOAD_DIR, f"{task_id}_bilingual.srt")
-    if not os.path.exists(srt_path):
-        srt_path = os.path.join(UPLOAD_DIR, f"{task_id}.srt")
-        
-    if not os.path.exists(srt_path):
+    updated = False
+    for ext in ["ass", "srt"]:
+        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
+        for f in files:
+            path = os.path.join(UPLOAD_DIR, f)
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(edit.content)
+            updated = True
+    if not updated:
         raise HTTPException(status_code=404, detail="Subtitle not found")
-        
-    with open(srt_path, "w", encoding="utf-8") as f:
-        f.write(edit.content)
-        
     return {"status": "updated"}
 
 if __name__ == "__main__":
