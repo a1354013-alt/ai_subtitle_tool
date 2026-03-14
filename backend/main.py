@@ -82,8 +82,7 @@ async def upload_video(
 async def get_status(task_id: str):
     task_result = AsyncResult(task_id, app=celery_app)
     
-    # 處理 Chord 情況：如果主任務已完成但進入了 callback，AsyncResult(task_id) 可能會顯示 SUCCESS
-    # 但實際上我們需要追蹤整個鏈路的狀態。這裡簡化處理：
+    # 由於 tasks.py 使用了 self.replace，AsyncResult(task_id) 會自動追蹤到最終結果
     status = task_result.status
     progress = 0
     message = ""
@@ -94,33 +93,39 @@ async def get_status(task_id: str):
         progress = info.get("progress", 0)
         message = info.get("status", "")
     elif status == "SUCCESS":
-        # 檢查是否有最終產物，若無則可能還在 callback 中 (DISPATCHED 狀態)
-        if isinstance(task_result.result, dict) and task_result.result.get("status") == "DISPATCHED":
-            status = "PROCESSING"
-            progress = 20
-            message = "Parallel tasks in progress..."
-        else:
-            progress = 100
-            message = "Completed"
-            result_url = f"/download/{task_id}"
+        progress = 100
+        message = "Completed"
+        result_url = f"/download/{task_id}"
     elif status == "FAILURE":
         message = str(task_result.result)
+    elif status == "PENDING":
+        message = "Waiting for worker..."
         
     return TaskStatus(task_id=task_id, status=status, progress=progress, message=message, result_url=result_url)
 
 @app.get("/download/{task_id}")
-async def download_result(task_id: str):
-    # 1. 優先找燒錄後的影片
+async def download_result(task_id: str, lang: Optional[str] = None):
+    """
+    下載結果，支援透過 lang 參數指定語言
+    """
+    # 1. 優先找燒錄後的影片 (通常只燒錄第一種語言)
     final_video = os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4")
-    if os.path.exists(final_video):
+    if os.path.exists(final_video) and not lang:
         return FileResponse(final_video, filename=f"video_{task_id}.mp4")
     
     # 2. 找字幕檔
     for ext in ["ass", "srt"]:
-        # 找第一個語言的雙語字幕
-        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
-        if files:
-            return FileResponse(os.path.join(UPLOAD_DIR, files[0]), filename=f"subtitle_{task_id}.{ext}")
+        if lang:
+            # 找指定語言
+            lang_suffix = lang.replace(" ", "_")
+            target_file = os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.{ext}")
+            if os.path.exists(target_file):
+                return FileResponse(target_file, filename=f"subtitle_{task_id}_{lang_suffix}.{ext}")
+        else:
+            # 找第一個符合的字幕
+            files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
+            if files:
+                return FileResponse(os.path.join(UPLOAD_DIR, files[0]), filename=f"subtitle_{task_id}.{ext}")
             
     raise HTTPException(status_code=404, detail="Result not found")
 
@@ -140,20 +145,26 @@ async def websocket_status(websocket: WebSocket, task_id: str):
         await websocket.close()
 
 @app.get("/subtitle/{task_id}")
-async def get_subtitle(task_id: str):
+async def get_subtitle(task_id: str, lang: Optional[str] = None):
     for ext in ["ass", "srt"]:
-        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
+        pattern = f"{task_id}_"
+        if lang: pattern += lang.replace(" ", "_")
+        
+        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
         if files:
             path = os.path.join(UPLOAD_DIR, files[0])
             with open(path, "r", encoding="utf-8") as f:
-                return {"content": f.read(), "format": ext}
+                return {"content": f.read(), "format": ext, "filename": files[0]}
     raise HTTPException(status_code=404, detail="Subtitle not found")
 
 @app.put("/subtitle/{task_id}")
-async def update_subtitle(task_id: str, edit: SubtitleEdit):
+async def update_subtitle(task_id: str, edit: SubtitleEdit, lang: Optional[str] = None):
     updated = False
     for ext in ["ass", "srt"]:
-        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
+        pattern = f"{task_id}_"
+        if lang: pattern += lang.replace(" ", "_")
+        
+        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
         for f in files:
             path = os.path.join(UPLOAD_DIR, f)
             with open(path, "w", encoding="utf-8") as file:

@@ -19,21 +19,21 @@ def format_timestamp(seconds: float):
 )
 def translate_batch(texts, source_lang, target_lang):
     """
-    批次翻譯：將多段文字合併為一個 JSON 陣列發送，節省 API 呼叫次數與成本
+    批次翻譯：將多段文字合併為一個 JSON 物件發送，確保模型輸出穩定
     """
     if not texts:
         return []
         
-    prompt = f"""Translate the following JSON array of strings from {source_lang} to {target_lang}.
-Return ONLY a JSON array of strings in the same order. 
-Do not include any explanations or extra text.
+    # 統一要求回傳 {"translations": ["...", "..."]} 格式
+    prompt = f"""Translate the following strings from {source_lang} to {target_lang}.
+Return a JSON object with a key "translations" containing the array of translated strings in the same order.
 
 Input: {json.dumps(texts, ensure_ascii=False)}"""
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a professional translator. Output only valid JSON arrays."},
+            {"role": "system", "content": "You are a professional translator. Always output a JSON object with a 'translations' key."},
             {"role": "user", "content": prompt}
         ],
         response_format={"type": "json_object"}
@@ -42,12 +42,10 @@ Input: {json.dumps(texts, ensure_ascii=False)}"""
     try:
         content = response.choices[0].message.content
         result = json.loads(content)
-        # 處理模型可能回傳 {"translations": [...]} 或直接回傳陣列的情況
-        if isinstance(result, dict):
-            for key in result:
-                if isinstance(result[key], list):
-                    return result[key]
-        return result if isinstance(result, list) else []
+        # 強制讀取 translations 鍵值
+        if isinstance(result, dict) and "translations" in result:
+            return result["translations"]
+        return texts # 格式不符時回傳原文
     except Exception as e:
         print(f"Translation parsing error: {e}")
         return texts # 失敗時回傳原文

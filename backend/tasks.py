@@ -1,6 +1,7 @@
 import os
 import time
 import shutil
+import subprocess
 from celery import chord
 from celery_app import celery_app
 from utils.subtitle_utils import transcribe_video
@@ -22,7 +23,7 @@ def transcribe_segment_task(segment_data: dict, model_size: str):
     temp_srt = f"{path}.srt"
     # 執行辨識
     segments = transcribe_video(path, temp_srt, model_size=model_size)
-    # 轉換為 dict 格式以利序列化與後續處理
+    # 轉換為 dict 格式以利序列化
     segment_dicts = []
     for s in segments:
         segment_dicts.append({
@@ -35,7 +36,7 @@ def transcribe_segment_task(segment_data: dict, model_size: str):
 @celery_app.task(bind=True)
 def merge_and_finalize_task(self, segment_results, video_path, options):
     """
-    Callback 任務：合併結果並執行後續流程 (翻譯、燒錄等)
+    Callback 任務：合併結果並執行後續流程
     """
     business_id = options.get("business_id")
     target_langs = options.get("target_langs", ["Traditional Chinese"])
@@ -47,7 +48,7 @@ def merge_and_finalize_task(self, segment_results, video_path, options):
     
     # 1. 合併片段結果
     self.update_state(state='PROGRESS', meta={'progress': 40, 'status': 'Merging parallel results...'})
-    # 這裡需要一個簡單的 Mock 物件來適配 merge_segments_subtitles
+    
     class SimpleSegment:
         def __init__(self, start, end, text):
             self.start = start
@@ -69,11 +70,10 @@ def merge_and_finalize_task(self, segment_results, video_path, options):
     if os.path.exists(segments_dir):
         shutil.rmtree(segments_dir)
     
-    # 2. 可選：說話者偵測 (Diarization)
+    # 2. 說話者偵測 (Diarization)
     if hf_token:
         self.update_state(state='PROGRESS', meta={'progress': 50, 'status': 'Performing speaker diarization...'})
         try:
-            # 提取音軌進行偵測
             audio_path = f"{base_path}.wav"
             subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", audio_path], check=True)
             diarization_result = diarize_audio(audio_path, hf_token)
@@ -96,7 +96,6 @@ def merge_and_finalize_task(self, segment_results, video_path, options):
         
         if subtitle_format == "ass":
             bilingual_ass = f"{base_path}_{lang_suffix}.ass"
-            # 建立 ASS 專用 segment 物件
             ass_segments = [SimpleSegment(s.start, s.end, f"{translations[lang][i]}\\N{s.text}") for i, s in enumerate(segments)]
             generate_ass(ass_segments, bilingual_ass)
             result_files[lang] = bilingual_ass
@@ -107,6 +106,7 @@ def merge_and_finalize_task(self, segment_results, video_path, options):
     final_video = video_path
     if do_burn:
         self.update_state(state='PROGRESS', meta={'progress': 95, 'status': 'Burning subtitles...'})
+        # 預設燒錄第一個語言
         first_lang_file = list(result_files.values())[0]
         final_video = f"{base_path}_final.mp4"
         burn_subtitles(video_path, first_lang_file, final_video)
@@ -135,26 +135,23 @@ def process_video_task(self, video_path: str, options: dict = None):
     video.close()
     model_size = get_model_by_duration(duration)
     
-    # 1. 語音辨識 (分段並行處理)
+    # 1. 語音辨識
     if parallel and duration > 60:
         self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Splitting video for parallel processing...'})
         video_segments = split_video(current_video)
         
-        # 使用 chord 建立非阻塞並行鏈路
+        # 核心修復：使用 self.replace(chord(...))
+        # 這會讓當前的 task_id 變成 chord 的結果，解決追蹤不到 callback 的問題
         header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
         callback = merge_and_finalize_task.s(current_video, options)
-        chord(header)(callback)
-        
-        self.update_state(state='PROGRESS', meta={'progress': 20, 'status': f'Parallel tasks dispatched ({len(video_segments)} segments).'})
-        return {"status": "DISPATCHED", "parallel": True}
+        return self.replace(chord(header)(callback))
     else:
-        # 非並行流程：直接執行辨識與後續
+        # 非並行流程
         self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Transcribing (Single Worker)...'})
         srt_path = f"{base_path}.srt"
         segments = transcribe_video(current_video, srt_path, model_size=model_size)
-        
-        # 轉換格式以符合 merge_and_finalize_task 的輸入
         segment_dicts = [{"start": s.start, "end": s.end, "text": s.text} for s in segments]
+        # 直接執行並回傳結果
         return merge_and_finalize_task([{"start_offset": 0, "segments": segment_dicts}], current_video, options)
 
 @celery_app.task
