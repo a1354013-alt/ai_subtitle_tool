@@ -35,6 +35,7 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     silence_starts = [float(x) for x in re.findall(r"silence_start: ([\d\.]+)", output)]
     silence_ends = [float(x) for x in re.findall(r"silence_end: ([\d\.]+)", output)]
     
+    # A) 致命級修復：確保一定會產出 output_path
     if not silence_starts:
         subprocess.run(["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path], check=True)
         return output_path
@@ -53,8 +54,10 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     if last_end < duration:
         keep_segments.append((last_end, duration))
 
+    # A) 致命級修復：若 keep_segments 為空，至少 copy 一份
     if not keep_segments:
-        return input_path
+        subprocess.run(["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path], check=True)
+        return output_path
 
     video_filters = ""
     audio_filters = ""
@@ -78,13 +81,31 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     return output_path
 
 def burn_subtitles(video_path, subtitle_path, output_path):
+    """
+    燒錄字幕到影片中。
+    實作兩階段策略：先嘗試快速燒錄，失敗則使用保守參數 Fallback。
+    """
     abs_subtitle_path = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:")
-    # 中風險修復：將音訊編碼改為 aac 以提升相容性
-    cmd = [
+    
+    # 第一階段：快速燒錄 (aac)
+    cmd_fast = [
         "ffmpeg", "-y", "-i", video_path,
         "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
         "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
         output_path
     ]
-    subprocess.run(cmd, check=True)
-    return output_path
+    
+    try:
+        subprocess.run(cmd_fast, check=True)
+        return output_path
+    except subprocess.CalledProcessError:
+        # 第二階段：保守參數 Fallback
+        cmd_fallback = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            output_path
+        ]
+        subprocess.run(cmd_fallback, check=True)
+        return output_path

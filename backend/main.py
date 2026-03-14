@@ -6,7 +6,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSock
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 from .tasks import process_video_task
 from celery.result import AsyncResult
 from .celery_app import celery_app
@@ -32,9 +32,23 @@ class TaskStatus(BaseModel):
     progress: int
     message: Optional[str] = None
     result_url: Optional[str] = None
+    warnings: List[str] = []
 
 class SubtitleEdit(BaseModel):
     content: str
+
+class FileInfo(BaseModel):
+    lang: str
+    display_name: str
+    ass: bool
+    srt: bool
+
+class TaskResultManifest(BaseModel):
+    task_id: str
+    has_video: bool
+    subtitle_languages: List[str]
+    available_files: List[FileInfo]
+    warnings: List[str] = []
 
 @app.post("/upload", response_model=TaskStatus)
 async def upload_video(
@@ -83,6 +97,7 @@ async def get_status(task_id: str):
     progress = 0
     message = ""
     result_url = None
+    warnings = []
     
     if status == "PROGRESS":
         info = task_result.info or {}
@@ -91,40 +106,78 @@ async def get_status(task_id: str):
     elif status == "SUCCESS":
         progress = 100
         message = "Completed"
-        result_url = f"/download/{task_id}"
+        result_url = f"/results/{task_id}"
+        if isinstance(task_result.result, dict):
+            warnings = task_result.result.get("warnings", [])
     elif status == "FAILURE":
         message = str(task_result.result)
     elif status == "PENDING":
         message = "Waiting for worker..."
         
-    return TaskStatus(task_id=task_id, status=status, progress=progress, message=message, result_url=result_url)
+    return TaskStatus(task_id=task_id, status=status, progress=progress, message=message, result_url=result_url, warnings=warnings)
+
+@app.get("/results/{task_id}", response_model=TaskResultManifest)
+async def get_results_manifest(task_id: str):
+    """
+    C) 品質優化：提供標準化語系名稱，解決前端下載對接問題。
+    """
+    task_result = AsyncResult(task_id, app=celery_app)
+    warnings = []
+    if task_result.status == "SUCCESS" and isinstance(task_result.result, dict):
+        warnings = task_result.result.get("warnings", [])
+
+    has_video = os.path.exists(os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4"))
+    
+    files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_")]
+    
+    lang_map = {}
+    for f in files:
+        if f.endswith((".ass", ".srt")):
+            # 檔名格式: {task_id}_{lang_suffix}.{ext}
+            parts = f.replace(f"{task_id}_", "").split(".")
+            if len(parts) < 2: continue
+            lang_suffix = parts[0]
+            ext = parts[1]
+            if lang_suffix not in lang_map:
+                lang_map[lang_suffix] = {"ass": False, "srt": False}
+            lang_map[lang_suffix][ext] = True
+            
+    available_files = []
+    for lang_suffix, exts in lang_map.items():
+        # C) 品質優化：提供 display_name (還原底線為空白)
+        display_name = lang_suffix.replace("_", " ")
+        available_files.append(FileInfo(
+            lang=lang_suffix, 
+            display_name=display_name,
+            ass=exts["ass"], 
+            srt=exts["srt"]
+        ))
+        
+    return TaskResultManifest(
+        task_id=task_id,
+        has_video=has_video,
+        subtitle_languages=[f.display_name for f in available_files],
+        available_files=available_files,
+        warnings=warnings
+    )
 
 @app.get("/download/{task_id}")
-async def download_result(task_id: str, lang: Optional[str] = Query(None, description="Language for subtitle")):
-    """
-    下載結果。
-    如果沒帶 lang，優先找燒錄後的影片。
-    如果帶了 lang，找對應語言的字幕檔。
-    """
-    # 優先找燒錄後的影片
+async def download_result(task_id: str, lang: Optional[str] = Query(None, description="Language for subtitle (e.g. Traditional_Chinese)")):
     final_video = os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4")
     if os.path.exists(final_video) and not lang:
         return FileResponse(final_video, filename=f"video_{task_id}.mp4")
     
-    # 找字幕檔
+    if not lang:
+        raise HTTPException(status_code=400, detail="Please specify 'lang' parameter for subtitles")
+
+    # 支援 Traditional Chinese 或 Traditional_Chinese
+    lang_suffix = lang.replace(" ", "_")
     for ext in ["ass", "srt"]:
-        if lang:
-            lang_suffix = lang.replace(" ", "_")
-            target_file = os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.{ext}")
-            if os.path.exists(target_file):
-                return FileResponse(target_file, filename=f"subtitle_{task_id}_{lang_suffix}.{ext}")
-        else:
-            # 沒帶 lang 且沒影片時，找第一個字幕
-            files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
-            if files:
-                return FileResponse(os.path.join(UPLOAD_DIR, files[0]), filename=f"subtitle_{task_id}.{ext}")
+        target_file = os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.{ext}")
+        if os.path.exists(target_file):
+            return FileResponse(target_file, filename=f"subtitle_{task_id}_{lang_suffix}.{ext}")
             
-    raise HTTPException(status_code=404, detail="Result not found")
+    raise HTTPException(status_code=404, detail=f"Result for language '{lang}' not found")
 
 @app.websocket("/ws/status/{task_id}")
 async def websocket_status(websocket: WebSocket, task_id: str):
@@ -142,45 +195,29 @@ async def websocket_status(websocket: WebSocket, task_id: str):
         await websocket.close()
 
 @app.get("/subtitle/{task_id}")
-async def get_subtitle(task_id: str, lang: Optional[str] = Query(None, description="Language for subtitle")):
-    """
-    獲取字幕內容。強烈建議前端帶上 lang 參數。
-    """
+async def get_subtitle(task_id: str, lang: str = Query(..., description="Language for subtitle")):
+    lang_suffix = lang.replace(" ", "_")
     for ext in ["ass", "srt"]:
-        pattern = f"{task_id}_"
-        if lang:
-            pattern += lang.replace(" ", "_")
-            files = [f for f in os.listdir(UPLOAD_DIR) if f == f"{pattern}.{ext}"]
-        else:
-            files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
-            
-        if files:
-            path = os.path.join(UPLOAD_DIR, files[0])
+        filename = f"{task_id}_{lang_suffix}.{ext}"
+        path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
-                return {"content": f.read(), "format": ext, "filename": files[0]}
-    raise HTTPException(status_code=404, detail="Subtitle not found")
+                return {"content": f.read(), "format": ext, "filename": filename}
+    raise HTTPException(status_code=404, detail=f"Subtitle for language '{lang}' not found")
 
 @app.put("/subtitle/{task_id}")
-async def update_subtitle(task_id: str, edit: SubtitleEdit, lang: Optional[str] = Query(None, description="Language for subtitle")):
-    """
-    更新字幕內容。
-    """
+async def update_subtitle(task_id: str, edit: SubtitleEdit, lang: str = Query(..., description="Language for subtitle")):
+    lang_suffix = lang.replace(" ", "_")
     updated = False
     for ext in ["ass", "srt"]:
-        pattern = f"{task_id}_"
-        if lang:
-            pattern += lang.replace(" ", "_")
-            files = [f for f in os.listdir(UPLOAD_DIR) if f == f"{pattern}.{ext}"]
-        else:
-            files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
-            
-        for f in files:
-            path = os.path.join(UPLOAD_DIR, f)
+        filename = f"{task_id}_{lang_suffix}.{ext}"
+        path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(path):
             with open(path, "w", encoding="utf-8") as file:
                 file.write(edit.content)
             updated = True
     if not updated:
-        raise HTTPException(status_code=404, detail="Subtitle not found")
+        raise HTTPException(status_code=404, detail=f"Subtitle for language '{lang}' not found")
     return {"status": "updated"}
 
 if __name__ == "__main__":

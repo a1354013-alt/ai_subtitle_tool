@@ -1,6 +1,6 @@
 import json
 from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 client = OpenAI()
 
@@ -15,16 +15,17 @@ def format_timestamp(seconds: float):
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type(ValueError),
     reraise=True
 )
 def translate_batch(texts, source_lang, target_lang):
     """
-    批次翻譯：將多段文字合併為一個 JSON 物件發送，確保模型輸出穩定
+    批次翻譯：將多段文字合併為一個 JSON 物件發送。
+    B) 翻譯可靠度：格式不符就 raise 讓 tenacity retry。
     """
     if not texts:
         return []
         
-    # 統一要求回傳 {"translations": ["...", "..."]} 格式
     prompt = f"""Translate the following strings from {source_lang} to {target_lang}.
 Return a JSON object with a key "translations" containing the array of translated strings in the same order.
 
@@ -39,20 +40,28 @@ Input: {json.dumps(texts, ensure_ascii=False)}"""
         response_format={"type": "json_object"}
     )
     
+    content = response.choices[0].message.content
     try:
-        content = response.choices[0].message.content
         result = json.loads(content)
-        # 強制讀取 translations 鍵值
-        if isinstance(result, dict) and "translations" in result:
-            return result["translations"]
-        return texts # 格式不符時回傳原文
-    except Exception as e:
-        print(f"Translation parsing error: {e}")
-        return texts # 失敗時回傳原文
+        if not isinstance(result, dict) or "translations" not in result:
+            raise ValueError("Missing 'translations' key in response")
+        
+        translations = result["translations"]
+        if not isinstance(translations, list):
+            raise ValueError("'translations' is not a list")
+        
+        if len(translations) != len(texts):
+            raise ValueError(f"Length mismatch: expected {len(texts)}, got {len(translations)}")
+            
+        return translations
+    except (json.JSONDecodeError, ValueError) as e:
+        # 拋出異常以觸發 Tenacity 重試
+        raise ValueError(f"Translation parsing failed: {str(e)}")
 
 def translate_segments(segments, source_lang, target_langs, batch_size=30):
     """
-    對所有字幕段落進行多語種批次翻譯
+    對所有字幕段落進行多語種批次翻譯。
+    注意：此處不捕捉異常，讓它向上拋出給 tasks.py 處理語言級別的 fallback。
     """
     texts = [s.text for s in segments]
     all_translations = {}
@@ -61,10 +70,8 @@ def translate_segments(segments, source_lang, target_langs, batch_size=30):
         translated_texts = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
+            # 這裡會拋出 ValueError 如果 5 次重試都失敗
             translated_batch = translate_batch(batch, source_lang, lang)
-            # 確保長度一致，若不一致則補原文
-            if len(translated_batch) != len(batch):
-                translated_batch = translated_batch[:len(batch)] + batch[len(translated_batch):]
             translated_texts.extend(translated_batch)
         all_translations[lang] = translated_texts
         

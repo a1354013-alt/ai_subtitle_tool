@@ -16,7 +16,11 @@ celery_app.conf.update(
     accept_content=["json"],
     result_serializer="json",
     timezone="Asia/Taipei",
-    enable_utc=True,
+    # B) 高風險修復：一致化時區設定
+    enable_utc=False,
+    # 任務超時設定
+    task_soft_time_limit=1800,  # 30 分鐘
+    task_time_limit=2100,       # 35 分鐘
     beat_schedule={
         "cleanup-old-files-every-hour": {
             "task": "backend.tasks.cleanup_old_files",

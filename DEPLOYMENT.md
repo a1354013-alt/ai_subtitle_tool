@@ -1,4 +1,4 @@
-# AI 自動影片上字幕與剪輯工具 - 部署教學文件
+# AI 自動影片上字幕與剪輯工具 - 部署教學文件 (v9)
 
 這份文件將引導你完成專案的環境配置與服務啟動。
 
@@ -29,9 +29,8 @@ brew services start redis
 
 ## 3. 專案環境設定
 
-### 1. 複製專案並建立虛擬環境
+### 1. 建立虛擬環境
 ```bash
-git clone <your-repo-url>
 cd ai_subtitle_tool
 python3 -m venv venv
 source venv/bin/activate
@@ -47,63 +46,52 @@ pip install -r requirements.txt
 在專案根目錄建立 `.env` 檔案，或直接匯出環境變數：
 ```bash
 export OPENAI_API_KEY="your_openai_api_key_here"
-# 若需使用說話者偵測功能
-export HF_TOKEN="your_huggingface_token_here" 
+export REDIS_URL="redis://localhost:6379/0"
+export UPLOAD_DIR="./backend/uploads"
 ```
 
-## 4. 啟動服務
+## 4. 啟動服務 (請在專案根目錄執行)
 
-為了讓系統正常運作，你需要啟動四個主要組件。建議在開發環境中使用多個終端機視窗，或在生產環境中使用 `tmux` / `systemd`。
+為了讓系統正常運作，你需要啟動以下組件。建議在生產環境中使用 `systemd` 管理。
 
-### 1. 啟動 Redis (若尚未啟動)
+### 1. 啟動 Redis
 ```bash
-redis-server
+sudo service redis-server start
 ```
 
-### 2. 啟動 Celery Worker 與 Beat (核心處理單元)
+### 2. 啟動 Celery Worker (核心處理單元)
 ```bash
-# --beat 用於執行定時檔案清理任務
-source venv/bin/activate
-cd backend
-celery -A tasks worker --beat --loglevel=info
+celery -A backend.celery_app:celery_app worker --loglevel=info
 ```
 
-### 3. 啟動 Flower (監控介面)
+### 3. 啟動 Celery Beat (定時清理任務)
 ```bash
-source venv/bin/activate
-cd backend
-celery -A tasks flower --port=5555
+celery -A backend.celery_app:celery_app beat --loglevel=info
 ```
-*啟動後可訪問 `http://localhost:5555` 查看任務狀態。*
 
 ### 4. 啟動 FastAPI Server (API 接口)
 ```bash
-source venv/bin/activate
-cd backend
-python main.py
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
-*預設運行於 `http://localhost:8000`。*
+
+### 5. 啟動 Flower (監控介面，選配)
+```bash
+celery -A backend.celery_app:celery_app flower --port=5555
+```
 
 ## 5. 生產環境部署建議 (Production)
 
-### 1. 使用 Gunicorn 運行 FastAPI
-在生產環境中，建議使用 Gunicorn 搭配 Uvicorn worker 以獲得更好的穩定性：
-```bash
-pip install gunicorn
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8000
-```
+### 1. 使用 Systemd 管理服務
+為 Celery 和 FastAPI 撰寫 Systemd service 檔案，確保伺服器重啟後服務能自動啟動。**請務必確保 `WorkingDirectory` 設定為專案根目錄。**
 
-### 2. 使用 Systemd 管理服務
-為 Celery 和 FastAPI 撰寫 Systemd service 檔案，確保伺服器重啟後服務能自動啟動。
+### 2. Nginx 反向代理
+使用 Nginx 作為反向代理，處理 SSL 憑證 (HTTPS) 並轉發請求至 FastAPI 與 Flower。請設定 `client_max_body_size 2G;` 以支援大影片上傳。
 
-### 3. Nginx 反向代理
-使用 Nginx 作為反向代理，處理 SSL 憑證 (HTTPS) 並轉發請求至 FastAPI 與 Flower。
-
-### 4. GPU 支援確認
+### 3. GPU 支援確認
 若要確認 GPU 是否被正確使用，啟動 Worker 後觀察日誌，應顯示：
 `Using device: cuda`
 
 ## 6. 常見問題排除 (FAQ)
-*   **Whisper 載入太慢**: 第一次執行會下載模型檔，請確保網路暢通。
-*   **FFmpeg 報錯**: 請確認 `ffmpeg` 已加入系統路徑 (`PATH`)。
-*   **Redis 連線失敗**: 請檢查 Redis 是否已啟動且監聽於預設的 6379 埠。
+*   **ImportError**: 請確保在專案根目錄執行啟動指令，並已安裝 `requirements.txt`。
+*   **MoviePy 報錯**: 專案已使用 `moviepy.editor` 以提升相容性。
+*   **任務超時**: 預設超時為 30 分鐘，可在 `backend/celery_app.py` 中調整。
