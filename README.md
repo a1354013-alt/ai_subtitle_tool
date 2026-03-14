@@ -1,4 +1,4 @@
-# AI 自動影片上字幕與剪輯工具 (Ultimate Production Ready v11)
+# AI 自動影片上字幕與剪輯工具 (Ultimate Production Ready v2.0)
 
 這是一個專業級的自動化影片處理工具，整合了 Faster-Whisper、GPT-4o 與 Celery 並行架構。
 
