@@ -1,8 +1,12 @@
+import os
 import json
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 client = OpenAI()
+
+# B) 翻譯模型與版本 pin：成本/品質不一定是你想要的（可配置比較好）
+TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "gpt-4o-mini")
 
 def format_timestamp(seconds: float):
     """將秒數轉換為 SRT 時間格式 (00:00:00,000)"""
@@ -32,7 +36,7 @@ Return a JSON object with a key "translations" containing the array of translate
 Input: {json.dumps(texts, ensure_ascii=False)}"""
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=TRANSLATE_MODEL,
         messages=[
             {"role": "system", "content": "You are a professional translator. Always output a JSON object with a 'translations' key."},
             {"role": "user", "content": prompt}

@@ -5,7 +5,7 @@ import shutil
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any
 from .tasks import process_video_task
 from celery.result import AsyncResult
@@ -13,10 +13,12 @@ from .celery_app import celery_app
 
 app = FastAPI(title="AI Video Subtitle Tool")
 
-# CORS 設定
+# CORS 設定 - 支援環境變數配置
+allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,7 +34,8 @@ class TaskStatus(BaseModel):
     progress: int
     message: Optional[str] = None
     result_url: Optional[str] = None
-    warnings: List[str] = []
+    # A) 修復 Pydantic Model 用「可變預設值」[]
+    warnings: List[str] = Field(default_factory=list)
 
 class SubtitleEdit(BaseModel):
     content: str
@@ -48,7 +51,8 @@ class TaskResultManifest(BaseModel):
     has_video: bool
     subtitle_languages: List[str]
     available_files: List[FileInfo]
-    warnings: List[str] = []
+    # A) 修復 Pydantic Model 用「可變預設值」[]
+    warnings: List[str] = Field(default_factory=list)
 
 @app.post("/upload", response_model=TaskStatus)
 async def upload_video(
@@ -118,9 +122,6 @@ async def get_status(task_id: str):
 
 @app.get("/results/{task_id}", response_model=TaskResultManifest)
 async def get_results_manifest(task_id: str):
-    """
-    C) 品質優化：提供標準化語系名稱，解決前端下載對接問題。
-    """
     task_result = AsyncResult(task_id, app=celery_app)
     warnings = []
     if task_result.status == "SUCCESS" and isinstance(task_result.result, dict):
@@ -133,7 +134,6 @@ async def get_results_manifest(task_id: str):
     lang_map = {}
     for f in files:
         if f.endswith((".ass", ".srt")):
-            # 檔名格式: {task_id}_{lang_suffix}.{ext}
             parts = f.replace(f"{task_id}_", "").split(".")
             if len(parts) < 2: continue
             lang_suffix = parts[0]
@@ -144,7 +144,6 @@ async def get_results_manifest(task_id: str):
             
     available_files = []
     for lang_suffix, exts in lang_map.items():
-        # C) 品質優化：提供 display_name (還原底線為空白)
         display_name = lang_suffix.replace("_", " ")
         available_files.append(FileInfo(
             lang=lang_suffix, 
@@ -170,7 +169,6 @@ async def download_result(task_id: str, lang: Optional[str] = Query(None, descri
     if not lang:
         raise HTTPException(status_code=400, detail="Please specify 'lang' parameter for subtitles")
 
-    # 支援 Traditional Chinese 或 Traditional_Chinese
     lang_suffix = lang.replace(" ", "_")
     for ext in ["ass", "srt"]:
         target_file = os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.{ext}")
@@ -191,8 +189,8 @@ async def websocket_status(websocket: WebSocket, task_id: str):
             await asyncio.sleep(1)
     except WebSocketDisconnect:
         pass
-    finally:
-        await websocket.close()
+    # A) WebSocket finally 一律 close()，在已斷線情境可能丟例外 -> 移除 finally close
+    # FastAPI/Starlette 會自動處理
 
 @app.get("/subtitle/{task_id}")
 async def get_subtitle(task_id: str, lang: str = Query(..., description="Language for subtitle")):

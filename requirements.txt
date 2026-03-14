@@ -1,3 +1,4 @@
+# Core Dependencies (Required)
 fastapi==0.109.0
 uvicorn==0.27.0
 python-multipart==0.0.6
@@ -9,11 +10,13 @@ faster-whisper==0.10.0
 torch==2.1.2
 openai==1.12.0
 tenacity==8.2.3
-pyannote.audio==3.1.1
-librosa==0.10.1
 numpy==1.26.3
 websockets==12.0
 pydantic==2.6.0
 pydantic-settings==2.1.0
 python-dotenv==1.0.1
 shutilwhich==1.1.0
+
+# Diarization Dependencies (Optional, requires HF_TOKEN)
+# pyannote.audio==3.1.1
+# librosa==0.10.1

@@ -100,9 +100,12 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                 lang_trans = translate_segments(segments, "Auto", [lang])
                 translations[lang] = lang_trans[lang]
             except Exception as e:
+                # B) 翻譯 parse 失敗會靜默回原文 -> 這裡捕捉並記錄警告
                 msg = f"Translation failed for {lang}. Using original text."
                 warnings.append(msg)
                 translations[lang] = [s.text for s in segments]
+                if update_state_func:
+                    update_state_func(state='PROGRESS', meta={'progress': 70, 'status': msg})
         
         # 4. 生成字幕檔案
         if update_state_func:
@@ -138,11 +141,12 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         if update_state_func:
             update_state_func(state='PROGRESS', meta={'progress': 100, 'status': 'Completed'})
         
+        # B) warnings 若空就回 []
         return {
             "status": "COMPLETED", 
             "business_id": business_id, 
             "video_path": final_video_path,
-            "warnings": warnings
+            "warnings": warnings or []
         }
     finally:
         remove_task_lock(business_id)
@@ -164,6 +168,10 @@ def merge_and_finalize_task(self, segment_results, video_path, options, segments
 def process_video_task(self, video_path: str, options: dict = None):
     options = options or {}
     business_id = options.get("business_id")
+    # B) 4 建議：一開始就 assert
+    if not business_id:
+        raise ValueError("options.business_id is required")
+        
     create_task_lock(business_id)
     
     try:
@@ -187,7 +195,6 @@ def process_video_task(self, video_path: str, options: dict = None):
         if parallel and duration > 60:
             self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Splitting video...'})
             video_segments = split_video(current_video)
-            # C) 品質優化：精準傳遞暫存目錄路徑
             segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
             header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
             callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir)
@@ -235,9 +242,10 @@ def cleanup_old_files():
         file_path = os.path.join(upload_dir, filename)
         if now - os.path.getmtime(file_path) > retention_period:
             try:
+                # B) 3 建議：先判斷 isdir() 再判斷 isfile()
                 if os.path.isdir(file_path):
                     shutil.rmtree(file_path)
-                else:
+                elif os.path.isfile(file_path):
                     os.remove(file_path)
             except Exception as e:
                 print(f"Cleanup failed for {file_path}: {e}")
