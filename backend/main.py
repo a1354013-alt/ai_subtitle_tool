@@ -100,11 +100,18 @@ async def get_status(task_id: str):
     return TaskStatus(task_id=task_id, status=status, progress=progress, message=message, result_url=result_url)
 
 @app.get("/download/{task_id}")
-async def download_result(task_id: str, lang: Optional[str] = None):
+async def download_result(task_id: str, lang: Optional[str] = Query(None, description="Language for subtitle")):
+    """
+    下載結果。
+    如果沒帶 lang，優先找燒錄後的影片。
+    如果帶了 lang，找對應語言的字幕檔。
+    """
+    # 優先找燒錄後的影片
     final_video = os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4")
     if os.path.exists(final_video) and not lang:
         return FileResponse(final_video, filename=f"video_{task_id}.mp4")
     
+    # 找字幕檔
     for ext in ["ass", "srt"]:
         if lang:
             lang_suffix = lang.replace(" ", "_")
@@ -112,6 +119,7 @@ async def download_result(task_id: str, lang: Optional[str] = None):
             if os.path.exists(target_file):
                 return FileResponse(target_file, filename=f"subtitle_{task_id}_{lang_suffix}.{ext}")
         else:
+            # 沒帶 lang 且沒影片時，找第一個字幕
             files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_") and f.endswith(f".{ext}")]
             if files:
                 return FileResponse(os.path.join(UPLOAD_DIR, files[0]), filename=f"subtitle_{task_id}.{ext}")
@@ -134,12 +142,18 @@ async def websocket_status(websocket: WebSocket, task_id: str):
         await websocket.close()
 
 @app.get("/subtitle/{task_id}")
-async def get_subtitle(task_id: str, lang: Optional[str] = None):
+async def get_subtitle(task_id: str, lang: Optional[str] = Query(None, description="Language for subtitle")):
+    """
+    獲取字幕內容。強烈建議前端帶上 lang 參數。
+    """
     for ext in ["ass", "srt"]:
         pattern = f"{task_id}_"
-        if lang: pattern += lang.replace(" ", "_")
-        
-        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
+        if lang:
+            pattern += lang.replace(" ", "_")
+            files = [f for f in os.listdir(UPLOAD_DIR) if f == f"{pattern}.{ext}"]
+        else:
+            files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
+            
         if files:
             path = os.path.join(UPLOAD_DIR, files[0])
             with open(path, "r", encoding="utf-8") as f:
@@ -147,13 +161,19 @@ async def get_subtitle(task_id: str, lang: Optional[str] = None):
     raise HTTPException(status_code=404, detail="Subtitle not found")
 
 @app.put("/subtitle/{task_id}")
-async def update_subtitle(task_id: str, edit: SubtitleEdit, lang: Optional[str] = None):
+async def update_subtitle(task_id: str, edit: SubtitleEdit, lang: Optional[str] = Query(None, description="Language for subtitle")):
+    """
+    更新字幕內容。
+    """
     updated = False
     for ext in ["ass", "srt"]:
         pattern = f"{task_id}_"
-        if lang: pattern += lang.replace(" ", "_")
-        
-        files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
+        if lang:
+            pattern += lang.replace(" ", "_")
+            files = [f for f in os.listdir(UPLOAD_DIR) if f == f"{pattern}.{ext}"]
+        else:
+            files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(pattern) and f.endswith(f".{ext}")]
+            
         for f in files:
             path = os.path.join(UPLOAD_DIR, f)
             with open(path, "w", encoding="utf-8") as file:

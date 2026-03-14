@@ -21,11 +21,9 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     audio_exists = has_audio(input_path)
     
     if not audio_exists:
-        # 無音軌影片不進行靜音剪輯，直接複製
         subprocess.run(["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path], check=True)
         return output_path
 
-    # 1. 偵測靜音區段
     cmd = [
         "ffmpeg", "-i", input_path,
         "-af", f"silencedetect=noise={noise_threshold}dB:d={min_silence_duration}",
@@ -34,7 +32,6 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     result = subprocess.run(cmd, capture_output=True, text=True)
     output = result.stderr
 
-    # 2. 解析靜音區段 (修正 zip 邏輯，處理有頭無尾的情況)
     silence_starts = [float(x) for x in re.findall(r"silence_start: ([\d\.]+)", output)]
     silence_ends = [float(x) for x in re.findall(r"silence_end: ([\d\.]+)", output)]
     
@@ -42,7 +39,6 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
         subprocess.run(["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path], check=True)
         return output_path
 
-    # 補齊 silence_ends (如果最後一段是靜音且沒偵測到 end)
     if len(silence_starts) > len(silence_ends):
         silence_ends.append(duration)
 
@@ -57,7 +53,6 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     if last_end < duration:
         keep_segments.append((last_end, duration))
 
-    # 3. 建立 FFmpeg filter_complex
     if not keep_segments:
         return input_path
 
@@ -84,10 +79,11 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
 
 def burn_subtitles(video_path, subtitle_path, output_path):
     abs_subtitle_path = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:")
+    # 中風險修復：將音訊編碼改為 aac 以提升相容性
     cmd = [
         "ffmpeg", "-y", "-i", video_path,
         "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
-        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy",
+        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
         output_path
     ]
     subprocess.run(cmd, check=True)
