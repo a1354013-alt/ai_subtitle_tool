@@ -1,6 +1,5 @@
 import { apiRequest, buildApiUrl, buildQuery } from "@/api/client";
 import type { ResultsManifestResponse } from "@/types/result";
-import { getPreferredLang } from "@/api/subtitles";
 import type { SubtitleFormat } from "@/types/subtitle";
 
 export async function getResultsManifest(taskId: string): Promise<ResultsManifestResponse> {
@@ -9,12 +8,14 @@ export async function getResultsManifest(taskId: string): Promise<ResultsManifes
 
 // 規格：buildDownloadUrl(taskId, format?, lang?)
 // - format 未給表示下載 final video
-// - lang 未給時使用偏好語言（可由 UI selector 設定，但不應只靠 localStorage 作唯一控制來源）
+// - 下載字幕時必須明確給 lang（不要由 localStorage 等隱性狀態決定 URL）
 export function buildDownloadUrl(taskId: string, format?: SubtitleFormat, lang?: string): string {
   const basePath = `/download/${encodeURIComponent(taskId)}`;
   if (!format) return buildApiUrl(basePath);
 
-  const resolvedLang = lang ?? getPreferredLang();
-  const q = buildQuery({ lang: resolvedLang, format });
+  if (!lang) {
+    throw new Error("buildDownloadUrl(taskId, format, lang): lang is required when downloading subtitles");
+  }
+  const q = buildQuery({ lang, format });
   return buildApiUrl(`${basePath}${q}`);
 }

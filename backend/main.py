@@ -89,62 +89,29 @@ def validate_path_traversal(filepath: str, allowed_root: str) -> str:
     # 回傳安全的字串表示，避免路徑在不同地方用不同格式
     return str(resolved_path)
 
-def write_text_atomic_best_effort(target_path: str, content: str) -> None:
+def write_text_atomic(target_path: str, content: str) -> None:
     """
-    以「同目錄暫存檔 + os.replace()」嘗試原子更新文字檔。
+    原子寫檔（同目錄暫存檔 + os.replace）：
+    1) write temp
+    2) flush + fsync
+    3) os.replace(temp, target)
 
-    在某些受限執行環境可能無法 rename/replace（PermissionError）。
-    此時改用「最佳努力」的 in-place overwrite，並在可行時嘗試回復原內容，
-    以避免寫入失敗時破壞原檔。
+    若失敗：不應破壞原始檔；暫存檔清理由 best-effort log 處理。
     """
     tmp_path = f"{target_path}.tmp.{_uuid.uuid4().hex}"
-
-    def _cleanup_tmp() -> None:
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except OSError:
-            logger.warning("Failed to remove temp file: %s", tmp_path, exc_info=True)
-
     try:
         with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
-
-        try:
-            os.replace(tmp_path, target_path)
-            return
-        except PermissionError:
-            # 受限環境：不允許 replace/rename，改用 in-place overwrite
-            logger.warning("os.replace() not permitted; falling back to in-place overwrite: %s", target_path, exc_info=True)
-
-            original: str | None = None
-            try:
-                with open(target_path, "r", encoding="utf-8") as rf:
-                    original = rf.read()
-            except OSError:
-                original = None
-
-            try:
-                with open(target_path, "w", encoding="utf-8", newline="\n") as wf:
-                    wf.write(content)
-                    wf.flush()
-                    os.fsync(wf.fileno())
-            except OSError:
-                if original is not None:
-                    try:
-                        with open(target_path, "w", encoding="utf-8", newline="\n") as wf:
-                            wf.write(original)
-                            wf.flush()
-                            os.fsync(wf.fileno())
-                    except OSError:
-                        logger.error("Failed to restore original subtitle after write failure: %s", target_path, exc_info=True)
-                raise
-            return
+        os.replace(tmp_path, target_path)
     finally:
-        # os.replace 成功時 tmp 已不存在；其他情況（包含例外）做保底清理
-        _cleanup_tmp()
+        # os.replace 成功時 tmp 已不存在；失敗時 best-effort 清理
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            logger.warning("Failed to remove temp file: %s", tmp_path, exc_info=True)
 
 
 def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> None:
@@ -537,7 +504,7 @@ async def update_subtitle(
         raise HTTPException(status_code=404, detail=f"Subtitle '{target_format}' for language '{lang}' not found")
     
     try:
-        write_text_atomic_best_effort(filepath, edit.content)
+        write_text_atomic(filepath, edit.content)
     except OSError:
         logger.error("Failed to write subtitle file: %s", filepath, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to write subtitle file")

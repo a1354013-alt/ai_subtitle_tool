@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
+import { createRouter, createMemoryHistory } from "vue-router";
 import HomePage from "@/pages/HomePage.vue";
 import UploadForm from "@/components/UploadForm.vue";
 
@@ -10,12 +12,18 @@ describe("smoke", () => {
   });
 
   it("HomePage renders", () => {
+    const pinia = createPinia();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/", name: "home", component: HomePage }],
+    });
     const wrapper = mount(HomePage, {
       global: {
-        stubs: { RouterLink: true },
+        plugins: [pinia, router],
       },
     });
     expect(wrapper.text()).toContain("上傳影片");
+    expect(wrapper.find('input[type="file"]').exists()).toBe(true);
   });
 
   it("UploadForm renders", () => {
@@ -23,4 +31,3 @@ describe("smoke", () => {
     expect(wrapper.text()).toContain("建立任務");
   });
 });
-

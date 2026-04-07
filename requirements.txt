@@ -6,16 +6,20 @@ celery==5.3.6
 redis==5.0.1
 flower==2.0.1
 moviepy==1.0.3
-faster-whisper==0.10.0
-torch==2.1.2
+faster-whisper>=1.0.0
+# torch wheels are Python-version/platform specific; pinning an exact version tends to break installs on newer Pythons.
+torch>=2.1.2
 openai==1.12.0
 tenacity==8.2.3
-numpy==1.26.3
+# NumPy wheels are Python-version specific; keep a minimum but allow newer versions on newer Pythons.
+numpy>=1.26.3
 websockets==12.0
-pydantic==2.6.0
-pydantic-settings==2.1.0
+# pydantic-core wheels are Python-version specific; keep minimums to avoid source builds on newer Pythons.
+pydantic>=2.10.0,<3
+pydantic-settings>=2.6.0,<3
 python-dotenv==1.0.1
 psutil==5.9.7
+pytest==8.3.2
 
 # Diarization Dependencies (Optional, requires HF_TOKEN)
 # pyannote.audio==3.1.1

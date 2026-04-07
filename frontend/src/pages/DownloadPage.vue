@@ -21,7 +21,9 @@
             <select class="select" v-model="selectedLang" @change="persistLang">
               <option v-for="f in files" :key="f.lang" :value="f.lang">{{ f.display_name }}</option>
             </select>
-            <div class="help">下載字幕需要 lang；此選項只影響下載 URL，不會觸發任何重建。</div>
+            <div class="help">
+              下載字幕需要同時指定 <code class="mono">language + format</code>；此選項只影響下載 URL，不會觸發任何重建或背景工作。
+            </div>
           </div>
         </div>
       </div>
@@ -40,8 +42,12 @@
         <div class="card-inner">
           <div class="label">注意</div>
           <div class="help">
-            final.mp4 不存在：可能是任務尚未完成，或你曾在字幕編輯後刪除了 final.mp4（後端會這樣做以避免舊字幕被誤用）。
-            下載頁不會也不應該隱性重建影片。
+            <div>
+              <strong>final.mp4 不存在</strong>：可能是任務尚未完成，或你曾在字幕編輯後更新了字幕（後端可能會刪除舊的 final.mp4 以避免舊字幕被誤用）。
+            </div>
+            <div style="margin-top: 6px">
+              此頁只負責下載已存在的結果：不會也不應該隱性重建影片。若要套用新字幕到影片，請重新建立任務（或使用未來的明確重建/燒錄流程）。
+            </div>
           </div>
         </div>
       </div>

@@ -17,6 +17,7 @@
 
 ```bash
 cd frontend
+rm -rf node_modules
 npm install
 npm run dev
 ```
@@ -26,6 +27,12 @@ Build：
 ```bash
 npm run build
 npm run preview
+```
+
+測試：
+
+```bash
+npm test
 ```
 
 ## 環境變數
@@ -53,6 +60,7 @@ VITE_API_BASE_URL=http://localhost:8000
 - **字幕編輯只更新字幕檔**，不會自動重建影片
 - **下載頁只負責下載**已存在的結果，不會做隱性背景工作
 - **任務輪詢集中管理**：離開狀態頁會停止輪詢；任務到終態（SUCCESS/FAILURE/REVOKED）也會自動停止
+- **Warnings 會顯示但不視為 error**：後端 status response 的 `warnings` 會以列表呈現，方便使用者理解非致命問題
 
 ## 假設
 
@@ -61,3 +69,8 @@ VITE_API_BASE_URL=http://localhost:8000
   - 語言選項優先來自 `GET /results/{task_id}` 的 manifest（`available_files`）
   - 字幕頁與下載頁都有明確的 Language selector
   - 仍會把使用者選擇寫入 localStorage 作偏好（不是唯一控制來源）
+
+## Download URL 規則
+
+- 下載字幕時，前端會**明確帶上** `lang`（不會在 API 層依賴 localStorage 來拼 URL）
+- 下載影片（final.mp4）不需要 `lang`

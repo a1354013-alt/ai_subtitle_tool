@@ -17,12 +17,14 @@ export const useTaskStore = defineStore("task", {
     status: "PENDING" as string,
     progress: 0 as number,
     message: "" as string,
+    warnings: [] as string[],
     error: null as APIError | null,
     pollingTimer: null as PollTimer,
   }),
   actions: {
     async createTask(formData: FormData) {
       this.error = null;
+      this.warnings = [];
       const rawLangs = String(formData.get("target_langs") ?? "").trim();
       const first = rawLangs.split(",").map((s) => s.trim()).filter(Boolean)[0];
       if (first) setPreferredLang(first.replaceAll(" ", "_"));
@@ -45,6 +47,7 @@ export const useTaskStore = defineStore("task", {
       this.status = res.status;
       this.progress = res.progress;
       this.message = res.message ?? "";
+      this.warnings = Array.isArray(res.warnings) ? res.warnings : [];
     },
     async startPolling(taskId: string) {
       this.stopPolling();

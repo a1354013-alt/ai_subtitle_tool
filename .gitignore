@@ -76,6 +76,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/coverage/
+release_pkg/
 
 # OS
 .DS_Store

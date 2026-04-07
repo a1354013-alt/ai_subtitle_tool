@@ -20,6 +20,13 @@
       </div>
 
       <div v-if="message" class="msg">{{ message }}</div>
+
+      <div v-if="warnings.length" class="warn">
+        <div class="warn-title">Warnings</div>
+        <ul class="warn-list">
+          <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
+        </ul>
+      </div>
     </div>
   </div>
 </template>
@@ -33,6 +40,7 @@ defineProps<{
   status: string;
   progress: number;
   message?: string;
+  warnings: string[];
 }>();
 </script>
 
@@ -50,5 +58,24 @@ defineProps<{
   font-size: 13px;
   color: var(--muted);
 }
+.warn {
+  margin-top: 12px;
+  padding: 12px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 193, 7, 0.35);
+  background: rgba(255, 193, 7, 0.08);
+}
+.warn-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.warn-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 </style>
-

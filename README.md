@@ -141,6 +141,12 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
 python -m unittest
 ```
 
+也可用 pytest（與 unittest 共用同一套測試檔）：
+
+```bash
+pytest
+```
+
 ## 🖥️ 前端（Vue 3 SPA）
 
 前端專案位於 `frontend/`，使用 Vue 3 + Vite + TypeScript + Vue Router + Pinia。
@@ -152,6 +158,14 @@ npm run dev
 ```
 
 前後端不同源（不同網域/port）部署時，請設定 `VITE_API_BASE_URL` 指向 FastAPI（此設定同時影響 API request 與下載連結）。詳見 `frontend/README.md`。
+
+## ⚠️ Warnings
+
+後端的 `GET /status/{task_id}` 回應包含 `warnings: string[]`（非致命問題）。前端會在任務狀態頁以列表方式顯示 warnings，但不會把 warnings 當成 error。
+
+## 📥 Download URL（字幕需要明確 lang）
+
+下載字幕時必須提供 `lang`（例如 `Traditional_Chinese`）；前端不會在 API 層用 localStorage 等隱性狀態來推導下載 URL。
 
 ## 🔒 安全性
 

@@ -19,3 +19,4 @@ frontend/.vite/
 *.log
 *.zip
 *.tar.gz
+release_pkg/

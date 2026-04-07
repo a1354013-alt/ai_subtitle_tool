@@ -51,6 +51,12 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 python -m unittest
 ```
 
+也可用 pytest（與 unittest 共用同一套測試檔）：
+
+```bash
+pytest
+```
+
 ## 6. 發佈/交付建議
 
 - 建議用 `git archive` 或其他方式打包，避免把 `.git/` 一起帶入交付包
@@ -67,4 +73,18 @@ npm install
 npm run build
 ```
 
+測試：
+
+```bash
+npm test
+```
+
 前後端不同源部署時，前端需要設定 `VITE_API_BASE_URL` 指向 FastAPI（此設定同時影響 API request 與下載連結 URL）。詳見 `frontend/README.md`。
+
+## 8. Warnings 顯示
+
+後端 status 回應包含 `warnings: string[]`（非致命問題）。前端會在任務狀態頁以列表顯示 warnings，方便除錯與理解處理過程，但不會把 warnings 當成錯誤。
+
+## 9. Download URL（字幕需要明確 lang）
+
+下載字幕時必須提供 `lang` query（例如 `Traditional_Chinese`）。前端會由 UI 的 Language selector 明確傳入 `lang`，不會在 API 層使用 localStorage 等隱性狀態來推導下載 URL。

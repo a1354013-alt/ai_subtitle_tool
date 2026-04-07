@@ -12,6 +12,7 @@
       :status="task.status"
       :progress="task.progress"
       :message="task.message"
+      :warnings="task.warnings"
     />
 
     <div class="row actions">

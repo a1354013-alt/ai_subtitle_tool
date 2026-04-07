@@ -12,12 +12,6 @@ vi.mock("@/api/client", () => {
   };
 });
 
-vi.mock("@/api/subtitles", () => {
-  return {
-    getPreferredLang: () => "English",
-  };
-});
-
 describe("buildDownloadUrl", () => {
   it("uses the shared buildApiUrl() base URL logic", async () => {
     const { buildDownloadUrl } = await import("@/api/results");
@@ -30,5 +24,9 @@ describe("buildDownloadUrl", () => {
       "http://api.example/download/abc?lang=Traditional_Chinese&format=ass"
     );
   });
-});
 
+  it("requires lang when downloading subtitles", async () => {
+    const { buildDownloadUrl } = await import("@/api/results");
+    expect(() => buildDownloadUrl("abc", "srt")).toThrow(/lang is required/i);
+  });
+});
