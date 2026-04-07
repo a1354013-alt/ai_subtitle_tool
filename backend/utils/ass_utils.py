@@ -1,17 +1,28 @@
 import os
+from datetime import timedelta
 
 def format_ass_timestamp(seconds: float):
+    """將秒數轉換為 ASS 時間格式 (h:mm:ss.cc)"""
     td = timedelta(seconds=seconds)
     total_seconds = int(td.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
-    millis = int(td.microseconds / 10000) # ASS 使用百分之一秒
+    millis = int(td.microseconds / 10000)  # ASS 使用百分之一秒
     return f"{hours}:{minutes:02}:{secs:02}.{millis:02}"
 
-from datetime import timedelta
-
 def generate_ass(segments, output_path: str, title="AI Subtitles"):
+    """
+    生成 ASS 格式字幕檔案。
+    
+    Args:
+        segments: list of SimpleSegment objects
+        output_path: 輸出檔案路徑
+        title: 字幕標題
+        
+    Returns:
+        output_path
+    """
     header = f"""[Script Info]
 Title: {title}
 ScriptType: v4.00+

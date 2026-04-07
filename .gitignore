@@ -1,0 +1,105 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv
+venv/
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project specific
+backend/uploads/
+backend/uploads/*
+!backend/uploads/.gitkeep
+*.lock
+*.srt
+*.ass
+*.mp4
+*.wav
+*.mov
+*.mkv
+*.avi
+
+# Logs
+*.log
+logs/
+celery_beat.pid
+
+# Redis
+dump.rdb
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Production artifacts
+*.tar.gz
+*.zip
+*.tar.bz2
+
+# IDE settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace

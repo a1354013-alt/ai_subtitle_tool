@@ -15,6 +15,7 @@ websockets==12.0
 pydantic==2.6.0
 pydantic-settings==2.1.0
 python-dotenv==1.0.1
+psutil==5.9.7
 
 # Diarization Dependencies (Optional, requires HF_TOKEN)
 # pyannote.audio==3.1.1
