@@ -42,6 +42,10 @@ venv/
 backend/uploads/
 backend/uploads/*
 !backend/uploads/.gitkeep
+*_segments/
+*_segments/*
+*_no_silence.*
+*_temp.wav
 *.lock
 *.srt
 *.ass
@@ -64,6 +68,14 @@ dump.rdb
 tmp/
 temp/
 *.tmp
+tests/_tmp/
+data_tmp/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
 
 # OS
 .DS_Store

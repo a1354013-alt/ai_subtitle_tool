@@ -1,0 +1,122 @@
+<template>
+  <div class="card">
+    <div class="card-inner">
+      <form @submit.prevent="onSubmit">
+        <div class="row">
+          <div class="col">
+            <div class="label">影片檔案</div>
+            <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" @change="onFileChange" />
+            <div class="help">支援 mp4 / mkv / avi / mov。後端會以 ffprobe 做最終判定。</div>
+          </div>
+
+          <div class="col">
+            <div class="label">target_langs</div>
+            <input v-model="targetLangs" class="input" type="text" placeholder="Traditional Chinese" />
+            <div class="help">逗號分隔，例如：Traditional Chinese, English</div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 12px">
+          <div class="col">
+            <div class="label">subtitle_format</div>
+            <select v-model="subtitleFormat" class="select">
+              <option value="ass">ass</option>
+              <option value="srt">srt</option>
+            </select>
+          </div>
+
+          <div class="col">
+            <div class="label">burn_subtitles</div>
+            <label class="check">
+              <input v-model="burnSubtitles" type="checkbox" />
+              <span>把字幕燒錄進影片（產出 final.mp4）</span>
+            </label>
+          </div>
+
+          <div class="col">
+            <div class="label">remove_silence</div>
+            <label class="check">
+              <input v-model="removeSilence" type="checkbox" />
+              <span>移除靜音片段（可能改變時間軸）</span>
+            </label>
+          </div>
+
+          <div class="col">
+            <div class="label">parallel</div>
+            <label class="check">
+              <input v-model="parallel" type="checkbox" />
+              <span>長影片採平行分段處理（>60s）</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="divider" />
+
+        <div class="row" style="align-items: center; justify-content: space-between">
+          <div class="pill">
+            <span>API Base URL</span>
+            <code class="mono">{{ apiBaseUrl }}</code>
+          </div>
+          <button class="btn primary" type="submit" :disabled="props.submitting || !file">
+            {{ props.submitting ? "Uploading..." : "建立任務" }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from "vue";
+import type { SubtitleFormat } from "@/types/subtitle";
+
+const emit = defineEmits<{
+  (e: "submit", payload: FormData): void;
+}>();
+
+const file = ref<File | null>(null);
+const props = withDefaults(
+  defineProps<{
+    submitting?: boolean;
+  }>(),
+  { submitting: false }
+);
+
+const targetLangs = ref("Traditional Chinese");
+const subtitleFormat = ref<SubtitleFormat>("ass");
+const burnSubtitles = ref(true);
+const removeSilence = ref(false);
+const parallel = ref(true);
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "(same origin)";
+
+function onFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  file.value = input.files?.[0] ?? null;
+}
+
+async function onSubmit() {
+  if (!file.value) return;
+  const fd = new FormData();
+  fd.append("file", file.value);
+  fd.append("target_langs", targetLangs.value);
+  fd.append("subtitle_format", subtitleFormat.value);
+  fd.append("burn_subtitles", String(burnSubtitles.value));
+  fd.append("remove_silence", String(removeSilence.value));
+  fd.append("parallel", String(parallel.value));
+  emit("submit", fd);
+}
+</script>
+
+<style scoped>
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  color: var(--muted);
+}
+</style>

@@ -3,17 +3,17 @@ import uuid
 import asyncio
 import shutil
 import re
+import logging
+import uuid as _uuid
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Query, Form
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Any
-from .tasks import process_video_task
-from celery.result import AsyncResult
-from .celery_app import celery_app
 
 app = FastAPI(title="AI Video Subtitle Tool")
+logger = logging.getLogger(__name__)
 
 # CORS 設定 - 支援環境變數配置，並驗證合法性
 def configure_cors():
@@ -89,6 +89,90 @@ def validate_path_traversal(filepath: str, allowed_root: str) -> str:
     # 回傳安全的字串表示，避免路徑在不同地方用不同格式
     return str(resolved_path)
 
+def write_text_atomic_best_effort(target_path: str, content: str) -> None:
+    """
+    以「同目錄暫存檔 + os.replace()」嘗試原子更新文字檔。
+
+    在某些受限執行環境可能無法 rename/replace（PermissionError）。
+    此時改用「最佳努力」的 in-place overwrite，並在可行時嘗試回復原內容，
+    以避免寫入失敗時破壞原檔。
+    """
+    tmp_path = f"{target_path}.tmp.{_uuid.uuid4().hex}"
+
+    def _cleanup_tmp() -> None:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            logger.warning("Failed to remove temp file: %s", tmp_path, exc_info=True)
+
+    try:
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+
+        try:
+            os.replace(tmp_path, target_path)
+            return
+        except PermissionError:
+            # 受限環境：不允許 replace/rename，改用 in-place overwrite
+            logger.warning("os.replace() not permitted; falling back to in-place overwrite: %s", target_path, exc_info=True)
+
+            original: str | None = None
+            try:
+                with open(target_path, "r", encoding="utf-8") as rf:
+                    original = rf.read()
+            except OSError:
+                original = None
+
+            try:
+                with open(target_path, "w", encoding="utf-8", newline="\n") as wf:
+                    wf.write(content)
+                    wf.flush()
+                    os.fsync(wf.fileno())
+            except OSError:
+                if original is not None:
+                    try:
+                        with open(target_path, "w", encoding="utf-8", newline="\n") as wf:
+                            wf.write(original)
+                            wf.flush()
+                            os.fsync(wf.fileno())
+                    except OSError:
+                        logger.error("Failed to restore original subtitle after write failure: %s", target_path, exc_info=True)
+                raise
+            return
+    finally:
+        # os.replace 成功時 tmp 已不存在；其他情況（包含例外）做保底清理
+        _cleanup_tmp()
+
+
+def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> None:
+    """
+    將任務送入 Celery。抽成函式便於測試與避免 main 模組 import 時就硬依賴 Celery。
+    """
+    try:
+        from .tasks import process_video_task
+    except Exception:
+        logger.error("Task module unavailable; cannot enqueue process_video_task", exc_info=True)
+        raise HTTPException(status_code=503, detail="Task worker unavailable")
+
+    process_video_task.apply_async(args=[file_path, options], task_id=task_id)
+
+
+def _get_async_result(task_id: str):
+    """
+    取得 Celery AsyncResult。抽成函式以避免缺少 Celery 時整個 main 無法 import。
+    """
+    try:
+        from celery.result import AsyncResult
+        from .celery_app import celery_app
+    except Exception:
+        logger.error("Celery unavailable; cannot query task status/results", exc_info=True)
+        raise HTTPException(status_code=503, detail="Task backend unavailable")
+
+    return AsyncResult(task_id, app=celery_app)
+
 class TaskStatus(BaseModel):
     task_id: str
     status: str
@@ -129,8 +213,10 @@ async def upload_video(
     
     說話者偵測使用環境變數 HF_TOKEN 配置（不通過 URL 傳遞）。
     """
-    # 1. P1.7 MIME 初篩：簡單的內容類型檢查
-    if file.content_type and not file.content_type.startswith("video/"):
+    # 1. MIME 弱檢查：只做初篩，最終以 ffprobe 為準
+    # 允許：video/*、空值、application/octet-stream
+    content_type = (file.content_type or "").lower()
+    if content_type and (not content_type.startswith("video/")) and content_type != "application/octet-stream":
         raise HTTPException(status_code=400, detail=f"Invalid content type: {file.content_type}. Expected video/*")
     
     # 2. 驗證副檔名
@@ -162,6 +248,8 @@ async def upload_video(
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+    except HTTPException:
+        raise
     except Exception as e:
         # 清理已上傳的檔案
         if os.path.exists(file_path):
@@ -185,6 +273,8 @@ async def upload_video(
         )
         if ffprobe_result.returncode != 0 or "video" not in ffprobe_result.stdout:
             raise ValueError("Not a valid video file")
+    except HTTPException:
+        raise
     except Exception as e:
         # 驗證失敗，清理檔案
         try:
@@ -206,12 +296,19 @@ async def upload_video(
     
     # 9. 提交任務到 Celery
     try:
-        process_video_task.apply_async(args=[file_path, options], task_id=task_id)
+        _enqueue_process_video_task(file_path, options, task_id)
+    except HTTPException as e:
+        # 保留正確狀態碼（例如 503），但仍嘗試清理上傳檔
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise e
     except Exception as e:
         # 任務提交失敗，清理上傳的檔案
         try:
             os.remove(file_path)
-        except:
+        except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to enqueue task: {str(e)}")
     
@@ -220,7 +317,7 @@ async def upload_video(
 @app.get("/status/{task_id}", response_model=TaskStatus)
 async def get_status(task_id: str):
     task_id = validate_task_id(task_id)
-    task_result = AsyncResult(task_id, app=celery_app)
+    task_result = _get_async_result(task_id)
     
     status = task_result.status
     progress = 0
@@ -252,7 +349,7 @@ async def get_status(task_id: str):
 @app.get("/results/{task_id}", response_model=TaskResultManifest)
 async def get_results_manifest(task_id: str):
     task_id = validate_task_id(task_id)
-    task_result = AsyncResult(task_id, app=celery_app)
+    task_result = _get_async_result(task_id)
     warnings = []
     if task_result.status == "SUCCESS" and isinstance(task_result.result, dict):
         warnings = task_result.result.get("warnings", [])
@@ -440,32 +537,35 @@ async def update_subtitle(
         raise HTTPException(status_code=404, detail=f"Subtitle '{target_format}' for language '{lang}' not found")
     
     try:
-        # 只更新指定格式的檔案
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(edit.content)
-        
-        # 編輯後刪除 final video 來避免包含舊字幕的誤用
-        # 若要新影片，應重新執行任務或未來新增明確的 rebuild endpoint
-        final_video_path = os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4")
-        final_video_path = validate_path_traversal(final_video_path, UPLOAD_DIR)
-        
-        result = {
-            "status": "updated",
-            "format": target_format,
-            "language": lang,
-            "message": f"Successfully updated {target_format.upper()} subtitle for {lang}."
-        }
-        
-        if os.path.exists(final_video_path):
-            try:
-                os.remove(final_video_path)
-                result["warning"] = "Final video was deleted to prevent using old subtitles. To apply subtitles to video, create a new task or use a dedicated burn endpoint."
-            except Exception as e:
-                result["warning"] = f"Subtitle updated but final video could not be deleted: {str(e)}"
-        
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update subtitle: {str(e)}")
+        write_text_atomic_best_effort(filepath, edit.content)
+    except OSError:
+        logger.error("Failed to write subtitle file: %s", filepath, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to write subtitle file")
+
+    # 編輯後刪除 final video 來避免包含舊字幕的誤用
+    # 若要新影片，應重新執行任務或未來新增明確的 rebuild endpoint
+    final_video_path = os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4")
+    final_video_path = validate_path_traversal(final_video_path, UPLOAD_DIR)
+
+    result = {
+        "status": "updated",
+        "format": target_format,
+        "language": lang,
+        "message": f"Successfully updated {target_format.upper()} subtitle for {lang}.",
+    }
+
+    if os.path.exists(final_video_path):
+        try:
+            os.remove(final_video_path)
+            result["warning"] = (
+                "Final video was deleted to prevent using old subtitles. "
+                "To apply subtitles to video, create a new task or use a dedicated burn endpoint."
+            )
+        except OSError:
+            logger.warning("Failed to delete final video after subtitle update: %s", final_video_path, exc_info=True)
+            result["warning"] = "Subtitle updated but final video could not be deleted."
+
+    return result
 
 if __name__ == "__main__":
     import uvicorn

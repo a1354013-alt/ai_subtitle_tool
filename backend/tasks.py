@@ -3,6 +3,7 @@ import time
 import shutil
 import subprocess
 import json
+import logging
 from celery import chord
 from .celery_app import celery_app
 from .utils.subtitle_utils import transcribe_video
@@ -11,14 +12,16 @@ from .utils.translate_utils import translate_segments, generate_bilingual_srt
 from .utils.ass_utils import generate_ass
 from .utils.split_utils import split_video, merge_segments_subtitles
 from .utils.model_loader import get_model_by_duration
+from .pipeline_segments import (
+    SimpleSegment,
+    prepare_segment_results_for_merge,
+    transcribe_segment,
+    build_full_video_payload,
+)
 
 from moviepy.editor import VideoFileClip
 
-class SimpleSegment:
-    def __init__(self, start, end, text):
-        self.start = start
-        self.end = end
-        self.text = text
+logger = logging.getLogger(__name__)
 
 def create_task_lock(business_id):
     """建立任務鎖定檔，防止被 cleanup 誤刪"""
@@ -82,7 +85,7 @@ def is_lock_stale(lock_path, stale_threshold_seconds=3600):
     except Exception:
         # 如果無法解析 lock，視為過舊
         return True
-
+ 
 def finalize_pipeline(segment_results, video_path, options, update_state_func=None, segments_dir=None):
     """
     核心處理流程：合併、翻譯、燒錄。
@@ -104,20 +107,10 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         if update_state_func:
             update_state_func(state='PROGRESS', meta={'progress': 40, 'status': 'Merging parallel results...'})
         
-        adapted_results = []
-        for res in segment_results:
-            # P0.1 修正：保留完整的元數據，包括 end_offset, overlap, segment_idx
-            # 以確保 overlap dedup 機制真正生效
-            adapted_res = {
-                "start_offset": res["start_offset"],
-                "end_offset": res.get("end_offset", res["start_offset"]),
-                "overlap": res.get("overlap", 0),
-                "segment_idx": res.get("segment_idx", 0),
-                "segments": [SimpleSegment(s["start"], s["end"], s["text"]) for s in res["segments"]]
-            }
-            adapted_results.append(adapted_res)
-            
-        segments = merge_segments_subtitles(adapted_results)
+        # 任務間交換資料一律使用 dict 結構；finalize_pipeline 只接受統一格式的 segment payload。
+        # 進入 merge_segments_subtitles() 前，在此單一地方轉成 SimpleSegment（避免 finalize_pipeline 默默相容多種輸入格式）。
+        prepared_results = prepare_segment_results_for_merge(segment_results)
+        segments = merge_segments_subtitles(prepared_results)
         
         # 2. 說話者偵測 (Lazy Import)
         if hf_token:
@@ -207,34 +200,22 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         if segments_dir and os.path.exists(segments_dir):
             try:
                 shutil.rmtree(segments_dir)
-            except Exception as e:
-                warnings.append(f"Warning: Could not clean up segments directory: {e}")
-        
-        remove_task_lock(business_id)
+            except Exception:
+                # cleanup failure 一律寫 log，不依賴 finally append warnings 回傳
+                logger.warning("Could not clean up segments directory: %s", segments_dir, exc_info=True)
+
+        if business_id:
+            try:
+                remove_task_lock(business_id)
+            except Exception:
+                logger.warning("Failed to remove task lock: business_id=%s", business_id, exc_info=True)
 
 @celery_app.task
 def transcribe_segment_task(segment_data: dict, model_size: str):
     """
     轉錄單個分段，並回傳完整的段落資訊（含 overlap、segment_idx、end_offset）。
     """
-    path = segment_data['path']
-    offset = segment_data['start_offset']
-    end_offset = segment_data['end_offset']
-    overlap = segment_data.get('overlap', 0)
-    segment_idx = segment_data.get('segment_idx', 0)
-    
-    temp_srt = f"{path}.srt"
-    segments = transcribe_video(path, temp_srt, model_size=model_size)
-    segment_dicts = [{"start": s.start, "end": s.end, "text": s.text} for s in segments]
-    
-    # 回傳完整資訊以支持去重
-    return {
-        "start_offset": offset,
-        "end_offset": end_offset,
-        "overlap": overlap,
-        "segment_idx": segment_idx,
-        "segments": segment_dicts
-    }
+    return transcribe_segment(segment_data, model_size, transcribe_video)
 
 @celery_app.task(bind=True)
 def merge_and_finalize_task(self, segment_results, video_path, options, segments_dir=None):
@@ -278,8 +259,8 @@ def process_video_task(self, video_path: str, options: dict = None):
             self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Transcribing...'})
             srt_path = f"{base_path}.srt"
             segments = transcribe_video(current_video, srt_path, model_size=model_size)
-            segment_dicts = [{"start": s.start, "end": s.end, "text": s.text} for s in segments]
-            return finalize_pipeline([{"start_offset": 0, "segments": segment_dicts}], current_video, options, update_state_func=self.update_state)
+            payload = build_full_video_payload(segments, duration)
+            return finalize_pipeline([payload], current_video, options, update_state_func=self.update_state)
     except Exception as e:
         remove_task_lock(business_id)
         raise e

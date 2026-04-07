@@ -1,51 +1,35 @@
-# AI 自動影片上字幕與剪輯工具 - 詳細測試計畫
+﻿# AI 自動影片上字幕工具 - 測試計畫
 
-本計畫旨在驗證系統的各項功能、效能與穩定性，確保在不同情境下皆能正常運作。
+本文件描述「目前版本」可實際驗證的測試方式；未涵蓋的項目一律列在手動整合測試中，避免文件比程式更自信。
 
-## 1. 基礎功能測試 (Functional Testing)
+## 1. 自動化行為測試（建議）
 
-| 測試項目 | 測試步驟 | 預期結果 |
-| :--- | :--- | :--- |
-| **影片上傳** | 透過 `/upload` API 上傳 MP4 檔案。 | 成功回傳 `task_id`，狀態為 `PENDING`。 |
-| **格式限制** | 上傳 `.txt` 或 `.exe` 檔案。 | 回傳 `400 Bad Request`，提示格式不支援。 |
-| **語音辨識** | 上傳一段清晰的英文影片。 | 成功生成 `.srt` 檔案，文字內容與語音相符。 |
-| **雙語翻譯** | 啟用 `translate=True` 上傳影片。 | 生成包含原始語言與中文翻譯的雙語字幕。 |
-| **字幕燒錄** | 啟用 `burn_subtitles=True`。 | 產出的影片檔中已內嵌可見字幕。 |
-| **狀態查詢** | 使用 `task_id` 呼叫 `/status/{task_id}`。 | 正確顯示當前進度 (如：Transcribing, Translating)。 |
+執行方式：
 
-## 2. 進階功能測試 (Advanced Features)
+```bash
+python -m unittest
+```
 
-| 測試項目 | 測試步驟 | 預期結果 |
-| :--- | :--- | :--- |
-| **自動靜音剪輯** | 上傳一段中間有 5 秒空白的影片，啟用 `remove_silence=True`。 | 產出的影片長度縮短，空白片段被移除。 |
-| **說話者偵測** | 提供 HF Token，上傳兩人對話影片。 | 字幕中出現 `[Speaker 0]` 與 `[Speaker 1]` 標記。 |
-| **線上字幕編輯** | 呼叫 `PUT /subtitle/{task_id}` 修改內容後下載。 | 下載的字幕檔或燒錄影片反映了修改後的文字。 |
-| **WebSocket 推送** | 連線至 `/ws/status/{task_id}`。 | 瀏覽器能即時收到 JSON 格式的進度更新，無需重新整理。 |
+測試位置：`tests/test_behavior.py`
 
-## 3. 效能與穩定性測試 (Performance & Stability)
+### 自動化測試覆蓋範圍
 
-| 測試項目 | 測試步驟 | 預期結果 |
-| :--- | :--- | :--- |
-| **GPU 加速驗證** | 在具備 GPU 的環境啟動 Worker。 | 日誌顯示 `Using device: cuda`，辨識速度顯著提升。 |
-| **API 重試機制** | 模擬網路斷線或 OpenAI API 暫時失效。 | 系統自動進行最多 5 次重試，並在網路恢復後成功完成。 |
-| **併發處理** | 同時上傳 3 段影片。 | Celery 依序或並行處理任務，Redis 隊列運作正常。 |
-| **自動清理** | 手動修改檔案時間為 25 小時前，等待定時任務執行。 | 檔案被自動刪除，釋放磁碟空間。 |
+- `finalize_pipeline()` / merge：segment payload 統一格式驗證與「單點」轉換（dict -> SimpleSegment 後才進入 merge）
+- 平行分段：`transcribe_segment_task()` 會回傳完整 metadata（`start_offset/end_offset/overlap/segment_idx`）且在成功後主動清理自己的 `temp_srt`
+- overlap 去重：`merge_segments_subtitles()` 在 overlap 區使用「時間接近 + 簡單 normalize」去重（空白/大小寫/前後標點）
+- 字幕編輯：`PUT /subtitle/{task_id}` 只更新指定格式、不污染其他格式；更新後會刪除 `{task_id}_final.mp4`（若存在）
+- 字幕/下載：`GET /subtitle/{task_id}` / `GET /download/{task_id}` 能回對應檔案；`final.mp4` 不存在時 `/download` 回 404
+- 上傳驗證：`POST /upload` MIME 僅做初篩（允許 `video/*`、空值、`application/octet-stream`），最終以 `ffprobe` 判定
+- 安全性：`validate_path_traversal()` 防止路徑逃逸；`/results/{task_id}` 的 manifest 檔名解析（語言後綴含 `.`）
 
-## 4. 監控測試 (Monitoring)
+## 2. 手動整合測試（需要 ffmpeg/redis/celery/模型環境）
 
-| 測試項目 | 測試步驟 | 預期結果 |
-| :--- | :--- | :--- |
-| **Flower 介面** | 訪問 `http://localhost:5555`。 | 看到當前 Worker 狀態、已完成任務數與失敗任務詳情。 |
-| **錯誤追蹤** | 故意上傳損毀的影片檔。 | Flower 中顯示任務為 `FAILURE`，並能查看 Traceback 報錯。 |
+以下項目需要實際環境與外部依賴（ffmpeg、redis、celery worker、whisper 模型、OpenAI API），不納入自動化行為測試：
 
-## 5. 測試環境建議
-*   **測試影片**: 準備 30 秒、5 分鐘、15 分鐘三種長度的影片進行壓力測試。
-*   **語言測試**: 分別測試純英文、純日文以及英日混雜的影片。
-*   **網路模擬**: 使用工具限制頻寬，測試 WebSocket 的連線穩定性。
+- 長影片平行處理端到端（切片 -> chord -> 合併 -> 產出字幕）
+- `burn_subtitles=true` 的影片燒錄結果
+- `remove_silence=true` 的剪輯結果
+- 翻譯與重試策略（需要可控的網路/外部 API）
+- diarization（需要 HF_TOKEN 與額外依賴）
 
-## 6. 驗證清單 (Checklist)
-- [ ] 所有 API 路由皆能正常回應
-- [ ] 字幕時間軸精準度 (誤差 < 0.5s)
-- [ ] 翻譯語意通順且無亂碼
-- [ ] 靜音剪輯無破音或畫面跳格
-- [ ] 檔案清理任務準時執行
+建議至少用 30 秒與 5 分鐘兩種影片各跑一次，並在 `/status/{task_id}` / WebSocket 觀察進度與結果檔案是否正確產出。

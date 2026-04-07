@@ -135,12 +135,30 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
 | [architecture.md](architecture.md) | 系統架構、流程、安全機制 |
 | [TEST_PLAN.md](TEST_PLAN.md) | 測試計畫與驗證方式 |
 
+## ✅ 測試
+
+```bash
+python -m unittest
+```
+
+## 🖥️ 前端（Vue 3 SPA）
+
+前端專案位於 `frontend/`，使用 Vue 3 + Vite + TypeScript + Vue Router + Pinia。
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+前後端不同源（不同網域/port）部署時，請設定 `VITE_API_BASE_URL` 指向 FastAPI（此設定同時影響 API request 與下載連結）。詳見 `frontend/README.md`。
+
 ## 🔒 安全性
 
 - **路徑驗證**: task_id 必須為 UUID，lang 白名單驗證，防止 path traversal
 - **Token 隔離**: HF_TOKEN、OPENAI_API_KEY 只從環境變數讀取，不在 URL 中傳遞
 - **CORS 驗證**: 啟動時檢查 allow_origins + allow_credentials 組合合法性
-- **檔案驗證**: ffprobe 驗證上傳檔案有效性，大小限制 2GB
+- **檔案驗證**: MIME 僅做初篩（允許 `video/*`、空值、`application/octet-stream`），最終以 ffprobe 判定；大小限制 2GB
 - **Stale Lock 回收**: 自動清除 1 小時以上或對應 PID 不存在的鎖定檔
 
 ## ⚙️ 環境變數說明
@@ -201,7 +219,7 @@ ai_subtitle_tool/
 - ✅ 路徑安全驗證（UUID、lang 白名單、traversal 防護）
 - ✅ CORS 配置驗證（避免非法 credentials 組合）
 - ✅ 移除 query string hf_token，改用環境變數
-- ✅ split_utils 加入 overlap 與去重機制
+- ✅ split_utils 加入 overlap 去重（時間接近 + 簡單 normalize）
 - ✅ Stale lock 自動回收（1 小時或 PID 不存在）
 - ✅ 任務提交失敗時清理已上傳檔案
 - ✅ 檔案上傳驗證加強 (ffprobe、大小限制)

@@ -1,6 +1,6 @@
 import os
 import subprocess
-from moviepy.editor import VideoFileClip
+import re
 
 class SimpleSegment:
     """簡單的字幕段落物件"""
@@ -28,6 +28,7 @@ def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
     if segment_length <= overlap:
         raise ValueError(f"segment_length ({segment_length}s) must be > overlap ({overlap}s)")
     
+    from moviepy.editor import VideoFileClip
     video = VideoFileClip(video_path)
     duration = video.duration
     video.close()
@@ -110,7 +111,7 @@ def merge_segments_subtitles(segment_results):
                     found_duplicate = False
                     for existing in all_segments[-10:]:  # 只檢查最後 10 個
                         time_diff = abs(existing.start - seg_start)
-                        text_match = existing.text.strip() == seg.text.strip()
+                        text_match = _normalize_subtitle_text(existing.text) == _normalize_subtitle_text(seg.text)
                         if time_diff < 0.5 and text_match:
                             found_duplicate = True
                             break
@@ -126,3 +127,24 @@ def merge_segments_subtitles(segment_results):
     all_segments.sort(key=lambda x: x.start)
     
     return all_segments
+
+
+_PUNCT_STRIP_CHARS = "\"'`.,!?;:()[]{}<>，。！？；：、（）「」『』《》〈〉…—-"
+
+
+def _normalize_subtitle_text(text: str) -> str:
+    """
+    穩定且可預測的去重 normalize：
+    - strip 前後空白
+    - collapse 多個空白為單一空白
+    - lower case
+    - 去掉前後標點干擾（只移除前後，不做模糊比對）
+    """
+    if text is None:
+        return ""
+
+    normalized = text.strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = normalized.lower()
+    normalized = normalized.strip(_PUNCT_STRIP_CHARS).strip()
+    return normalized
