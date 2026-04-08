@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { createRouter, createMemoryHistory } from "vue-router";
@@ -17,17 +17,19 @@ describe("smoke", () => {
       history: createMemoryHistory(),
       routes: [{ path: "/", name: "home", component: HomePage }],
     });
+
     const wrapper = mount(HomePage, {
       global: {
         plugins: [pinia, router],
       },
     });
-    expect(wrapper.text()).toContain("上傳影片");
+
+    expect(wrapper.text()).toContain("Upload");
     expect(wrapper.find('input[type="file"]').exists()).toBe(true);
   });
 
   it("UploadForm renders", () => {
     const wrapper = mount(UploadForm, { props: { submitting: false } });
-    expect(wrapper.text()).toContain("建立任務");
+    expect(wrapper.text()).toContain("Create task");
   });
 });

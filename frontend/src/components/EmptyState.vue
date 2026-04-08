@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="card">
     <div class="card-inner">
       <div class="title">{{ title }}</div>
@@ -18,7 +18,7 @@ withDefaults(
   }>(),
   {
     title: "No data",
-    description: "目前沒有可顯示的資料。",
+    description: "Nothing to show yet.",
   }
 );
 </script>
@@ -36,4 +36,3 @@ withDefaults(
   margin-top: 12px;
 }
 </style>
-

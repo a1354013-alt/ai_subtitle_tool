@@ -3,6 +3,9 @@ from datetime import timedelta
 from .model_loader import get_model, get_model_by_duration
 from .audio_utils import preprocess_audio
 import moviepy
+import logging
+
+logger = logging.getLogger(__name__)
 
 def format_timestamp(seconds: float):
     td = timedelta(seconds=seconds)
@@ -71,5 +74,5 @@ def transcribe_video(video_path: str, output_srt_path: str, model_size=None):
         if audio_path and os.path.exists(audio_path):
             try:
                 os.remove(audio_path)
-            except Exception as e:
-                print(f"Warning: Failed to remove temp audio {audio_path}: {e}")
+            except OSError:
+                logger.warning("Failed to remove temp audio: %s", audio_path, exc_info=True)

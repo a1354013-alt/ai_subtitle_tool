@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="card">
     <div class="card-inner">
       <div class="row">
@@ -20,7 +20,7 @@ withDefaults(
   }>(),
   {
     title: "Loading...",
-    description: "請稍候",
+    description: "Please wait.",
   }
 );
 </script>
@@ -49,4 +49,3 @@ withDefaults(
   }
 }
 </style>
-

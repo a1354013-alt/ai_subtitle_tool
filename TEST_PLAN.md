@@ -7,7 +7,7 @@
 執行方式：
 
 ```bash
-python -m unittest
+pytest
 ```
 
 測試位置：`tests/test_behavior.py`
@@ -21,6 +21,23 @@ python -m unittest
 - 字幕/下載：`GET /subtitle/{task_id}` / `GET /download/{task_id}` 能回對應檔案；`final.mp4` 不存在時 `/download` 回 404
 - 上傳驗證：`POST /upload` MIME 僅做初篩（允許 `video/*`、空值、`application/octet-stream`），最終以 `ffprobe` 判定
 - 安全性：`validate_path_traversal()` 防止路徑逃逸；`/results/{task_id}` 的 manifest 檔名解析（語言後綴含 `.`）
+
+## 1.1 前端自動化測試（建議）
+
+前端測試使用 Vitest，並假設在乾淨環境中先安裝依賴（release package 不應包含 `node_modules/`）：
+
+```bash
+cd frontend
+rm -rf node_modules
+npm install
+npm test
+```
+
+前端建置驗證：
+
+```bash
+npm run build
+```
 
 ## 2. 手動整合測試（需要 ffmpeg/redis/celery/模型環境）
 

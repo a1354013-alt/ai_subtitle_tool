@@ -1,6 +1,8 @@
 import os
 import torch
-from pyannote.audio import Pipeline
+import logging
+
+logger = logging.getLogger(__name__)
 
 def diarize_audio(audio_path: str, hf_token: str):
     """
@@ -10,6 +12,9 @@ def diarize_audio(audio_path: str, hf_token: str):
         return []
         
     try:
+        # Optional dependency: only import when diarization is actually requested.
+        from pyannote.audio import Pipeline
+
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
             use_auth_token=hf_token
@@ -29,8 +34,8 @@ def diarize_audio(audio_path: str, hf_token: str):
                 "speaker": speaker
             })
         return speaker_segments
-    except Exception as e:
-        print(f"Diarization error: {e}")
+    except Exception:
+        logger.exception("Diarization error")
         return []
 
 def merge_speaker_info(whisper_segments, speaker_segments):

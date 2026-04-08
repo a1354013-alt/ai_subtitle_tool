@@ -1,6 +1,8 @@
 ﻿import asyncio
 import importlib
 import io
+import json
+import time
 import os
 import unittest
 import uuid
@@ -162,6 +164,9 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "updated")
+        self.assertIn("warnings", result)
+        self.assertIsInstance(result["warnings"], list)
+        self.assertNotIn("warning", result)
         self.assertEqual(srt_path.read_text(encoding="utf-8"), "NEW_SRT")
         self.assertEqual(ass_path.read_text(encoding="utf-8"), "OLD_ASS")
         remove_mock.assert_called()
@@ -291,6 +296,55 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
         self.assertTrue(uuid.UUID(result.task_id))
         self.assertEqual(result.status, "PENDING")
 
+    def test_upload_filters_empty_target_langs(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+
+        fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
+        captured: dict = {}
+
+        def _capture_enqueue(_file_path: str, options: dict, _task_id: str) -> None:
+            captured.update(options)
+
+        with (
+            patch("subprocess.run", return_value=fake_ffprobe),
+            patch.object(main, "_enqueue_process_video_task", side_effect=_capture_enqueue),
+        ):
+            _run(
+                main.upload_video(
+                    file=_UploadFileStub("video.mp4", b"dummy", "application/octet-stream"),
+                    target_langs="Traditional Chinese,",
+                    burn_subtitles=True,
+                    subtitle_format="ass",
+                    remove_silence=False,
+                    parallel=False,
+                )
+            )
+
+        self.assertEqual(captured["target_langs"], ["Traditional Chinese"])
+
+    def test_upload_rejects_empty_target_langs(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+
+        fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
+        with (
+            patch("subprocess.run", return_value=fake_ffprobe),
+            patch.object(main, "_enqueue_process_video_task", return_value=None),
+        ):
+            with self.assertRaises(main.HTTPException) as ctx:
+                _run(
+                    main.upload_video(
+                        file=_UploadFileStub("video.mp4", b"dummy", "application/octet-stream"),
+                        target_langs=" ,  ,",
+                        burn_subtitles=True,
+                        subtitle_format="ass",
+                        remove_silence=False,
+                        parallel=False,
+                    )
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
     def test_upload_rejects_illegal_mime_before_ffprobe(self):
         tmpdir = _make_tmpdir()
         main = _load_app_with_upload_dir(str(tmpdir))
@@ -387,3 +441,173 @@ class TestPathTraversalAndManifest(unittest.TestCase):
 
         langs = {f.lang for f in manifest.available_files}
         self.assertIn("English.UK", langs)
+
+    def test_results_manifest_available_files_is_sorted(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+        task_id = str(uuid.uuid4())
+
+        # out-of-order file list
+        fake_files = [
+            f"{task_id}_Zulu.srt",
+            f"{task_id}_alpha.ass",
+            f"{task_id}_Bravo.srt",
+        ]
+
+        class _FakeAsyncResult:
+            status = "SUCCESS"
+            result = {"warnings": []}
+
+        with (
+            patch.object(main, "_get_async_result", return_value=_FakeAsyncResult()),
+            patch.object(main.os, "listdir", return_value=fake_files),
+            patch.object(main.os.path, "exists", return_value=False),
+        ):
+            manifest = _run(main.get_results_manifest(task_id=task_id))
+
+        ordered = [f.lang for f in manifest.available_files]
+        self.assertEqual(ordered, ["alpha", "Bravo", "Zulu"])
+
+
+class TestStatusEndpoint(unittest.TestCase):
+    def test_status_pending_progress_success_failure(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+        task_id = str(uuid.uuid4())
+
+        class _R:
+            def __init__(self, status, info=None, result=None):
+                self.status = status
+                self.info = info
+                self.result = result
+
+        # PENDING
+        with patch.object(main, "_get_async_result", return_value=_R("PENDING")):
+            res = _run(main.get_status(task_id=task_id))
+            self.assertEqual(res.status, "PENDING")
+            self.assertIsInstance(res.warnings, list)
+
+        # PROGRESS -> PROCESSING
+        with patch.object(main, "_get_async_result", return_value=_R("PROGRESS", info={"progress": 12, "status": "x", "warnings": ["w1"]})):
+            res = _run(main.get_status(task_id=task_id))
+            self.assertEqual(res.status, "PROCESSING")
+            self.assertEqual(res.progress, 12)
+            self.assertEqual(res.warnings, ["w1"])
+
+        # SUCCESS
+        with patch.object(main, "_get_async_result", return_value=_R("SUCCESS", result={"warnings": ["w2"]})):
+            res = _run(main.get_status(task_id=task_id))
+            self.assertEqual(res.status, "SUCCESS")
+            self.assertEqual(res.progress, 100)
+            self.assertEqual(res.warnings, ["w2"])
+
+        # FAILURE
+        with patch.object(main, "_get_async_result", return_value=_R("FAILURE", result="boom")):
+            res = _run(main.get_status(task_id=task_id))
+            self.assertEqual(res.status, "FAILURE")
+            self.assertTrue(isinstance(res.message, str))
+
+
+class TestSubtitleFallbackAndDownload(unittest.TestCase):
+    def test_get_subtitle_fallback_prefers_ass_then_srt(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+        task_id = str(uuid.uuid4())
+        lang = "Traditional Chinese"  # backend normalizes whitespace -> underscore
+
+        (tmpdir / f"{task_id}_Traditional_Chinese.srt").write_text("SRT", encoding="utf-8")
+        (tmpdir / f"{task_id}_Traditional_Chinese.ass").write_text("ASS", encoding="utf-8")
+
+        res = _run(main.get_subtitle(task_id=task_id, lang=lang, format=None))
+        self.assertEqual(res["format"], "ass")
+        self.assertEqual(res["content"], "ASS")
+
+    def test_download_video_when_exists(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+        task_id = str(uuid.uuid4())
+
+        (tmpdir / f"{task_id}_final.mp4").write_bytes(b"video")
+        res = _run(main.download_result(task_id=task_id, lang=None, format=None))
+        self.assertTrue(hasattr(res, "path"))
+
+
+class TestCleanupOldFiles(unittest.TestCase):
+    def test_cleanup_respects_valid_lock(self):
+        import backend.utils.cleanup_utils as cu
+
+        now = time.time()
+        business_id = "biz_valid"
+        locked_file = f"{business_id}_final.mp4"
+        lock_name = f"{business_id}.lock"
+
+        with (
+            patch.object(cu, "is_lock_stale", return_value=False),
+            patch.object(cu.os, "listdir", return_value=[lock_name, locked_file]),
+            patch.object(cu.os.path, "exists", return_value=True),
+            patch.object(cu.os.path, "getmtime", return_value=now - (25 * 3600)),
+            patch.object(cu.os.path, "isdir", return_value=False),
+            patch.object(cu.os.path, "isfile", return_value=True),
+            patch.object(cu.os, "remove") as remove_mock,
+        ):
+            cu.cleanup_old_files(upload_dir="X")
+
+        # A valid lock must prevent deletion of task files.
+        removed_paths = " ".join(str(c.args[0]) for c in remove_mock.call_args_list)
+        self.assertNotIn(locked_file, removed_paths)
+        self.assertNotIn(lock_name, removed_paths)
+
+    def test_cleanup_removes_stale_lock_and_old_files(self):
+        import backend.utils.cleanup_utils as cu
+
+        now = time.time()
+        business_id = "biz_stale"
+        lock_name = f"{business_id}.lock"
+        old_file = f"{business_id}_final.mp4"
+
+        def _is_stale(lock_path, _threshold):
+            return str(lock_path).endswith(lock_name)
+
+        with (
+            patch.object(cu, "is_lock_stale", side_effect=_is_stale),
+            patch.object(cu.os, "listdir", return_value=[lock_name, old_file]),
+            patch.object(cu.os.path, "exists", return_value=True),
+            patch.object(cu.os.path, "getmtime", return_value=now - (25 * 3600)),
+            patch.object(cu.os.path, "isdir", return_value=False),
+            patch.object(cu.os.path, "isfile", return_value=True),
+            patch.object(cu.os, "remove") as remove_mock,
+        ):
+            cu.cleanup_old_files(upload_dir="X")
+
+        removed_paths = [str(c.args[0]) for c in remove_mock.call_args_list]
+        self.assertTrue(any(p.endswith(lock_name) for p in removed_paths))
+        self.assertTrue(any(p.endswith(old_file) for p in removed_paths))
+
+    def test_cleanup_removes_old_unlocked_files_and_dirs(self):
+        import backend.utils.cleanup_utils as cu
+
+        now = time.time()
+        old_file = "orphan.mp4"
+        old_dir = "orphan_dir"
+
+        def _isdir(p):
+            return str(p).endswith(old_dir)
+
+        def _isfile(p):
+            return str(p).endswith(old_file)
+
+        with (
+            patch.object(cu.os, "listdir", return_value=[old_file, old_dir]),
+            patch.object(cu.os.path, "exists", return_value=True),
+            patch.object(cu.os.path, "getmtime", return_value=now - (25 * 3600)),
+            patch.object(cu.os.path, "isdir", side_effect=_isdir),
+            patch.object(cu.os.path, "isfile", side_effect=_isfile),
+            patch.object(cu.os, "remove") as remove_mock,
+            patch.object(cu.shutil, "rmtree") as rmtree_mock,
+        ):
+            cu.cleanup_old_files(upload_dir="X")
+
+        removed_paths = [str(c.args[0]) for c in remove_mock.call_args_list]
+        rmtree_paths = [str(c.args[0]) for c in rmtree_mock.call_args_list]
+        self.assertTrue(any(p.endswith(old_file) for p in removed_paths))
+        self.assertTrue(any(p.endswith(old_dir) for p in rmtree_paths))

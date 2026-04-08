@@ -1,11 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
 import DownloadPage from "@/pages/DownloadPage.vue";
 import { useResultStore } from "@/stores/result";
 
+function flush() {
+  return Promise.resolve();
+}
+
 describe("DownloadPage", () => {
-  it("shows message when final.mp4 is missing", async () => {
+  it("shows a clear note when final.mp4 is missing", async () => {
     setActivePinia(createPinia());
     const result = useResultStore();
     result.manifest = {
@@ -21,12 +25,27 @@ describe("DownloadPage", () => {
 
     const wrapper = mount(DownloadPage, {
       props: { taskId: "t" },
-      global: {
-        stubs: { RouterLink: true },
-      },
+      global: { stubs: { RouterLink: true } },
     });
 
-    await Promise.resolve();
-    expect(wrapper.text()).toContain("final.mp4 不存在");
+    await flush();
+    expect(wrapper.text()).toContain("final.mp4 is missing");
+  });
+
+  it("renders EmptyState when manifest is null", async () => {
+    setActivePinia(createPinia());
+    const result = useResultStore();
+    result.manifest = null;
+    result.loading = false;
+    result.error = null;
+    vi.spyOn(result, "fetchManifest").mockResolvedValue(null as any);
+
+    const wrapper = mount(DownloadPage, {
+      props: { taskId: "t" },
+      global: { stubs: { RouterLink: true } },
+    });
+
+    await flush();
+    expect(wrapper.text()).toContain("No manifest");
   });
 });

@@ -1,5 +1,8 @@
 import torch
 from faster_whisper import WhisperModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ModelLoader:
     _instances = {}
@@ -7,13 +10,13 @@ class ModelLoader:
     @classmethod
     def get_faster_whisper_model(cls, model_size="base"):
         if model_size not in cls._instances:
-            print(f"Loading Faster-Whisper model: {model_size}...")
+            logger.info("Loading Faster-Whisper model: %s", model_size)
             # 自動偵測 GPU
             device = "cuda" if torch.cuda.is_available() else "cpu"
             # Faster-Whisper 支援 int8 量化以節省記憶體
             compute_type = "float16" if device == "cuda" else "int8"
             
-            print(f"Using device: {device}, compute_type: {compute_type}")
+            logger.info("Using device=%s compute_type=%s", device, compute_type)
             
             # 載入模型並快取
             cls._instances[model_size] = WhisperModel(

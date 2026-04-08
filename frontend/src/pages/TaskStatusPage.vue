@@ -1,8 +1,8 @@
-<template>
+﻿<template>
   <div>
     <PageHeader
-      title="任務狀態"
-      subtitle="此頁只負責顯示狀態並輪詢；輪詢邏輯集中在 store，任務到終態或離開頁面都會停止輪詢。"
+      title="Task Status"
+      subtitle="This page polls the backend for task progress. Polling is managed by the store and stops on terminal status."
     />
 
     <ErrorAlert v-if="task.error" :error="task.error" />
@@ -16,9 +16,21 @@
     />
 
     <div class="row actions">
-      <RouterLink class="btn" :to="{ name: 'home' }">回到上傳</RouterLink>
-      <RouterLink v-if="isSuccess" class="btn primary" :to="{ name: 'subtitles', params: { taskId } }">檢視 / 編輯字幕</RouterLink>
-      <RouterLink v-if="isSuccess" class="btn primary" :to="{ name: 'downloads', params: { taskId } }">下載結果</RouterLink>
+      <RouterLink class="btn" :to="{ name: 'home' }">Back</RouterLink>
+      <RouterLink
+        v-if="isSuccess"
+        class="btn primary"
+        :to="{ name: 'subtitles', params: { taskId } }"
+      >
+        Subtitles
+      </RouterLink>
+      <RouterLink
+        v-if="isSuccess"
+        class="btn primary"
+        :to="{ name: 'downloads', params: { taskId } }"
+      >
+        Downloads
+      </RouterLink>
     </div>
   </div>
 </template>

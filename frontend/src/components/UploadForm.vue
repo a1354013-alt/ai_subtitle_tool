@@ -1,18 +1,18 @@
-<template>
+﻿<template>
   <div class="card">
     <div class="card-inner">
       <form @submit.prevent="onSubmit">
         <div class="row">
           <div class="col">
-            <div class="label">影片檔案</div>
+            <div class="label">Video file</div>
             <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" @change="onFileChange" />
-            <div class="help">支援 mp4 / mkv / avi / mov。後端會以 ffprobe 做最終判定。</div>
+            <div class="help">Accepted: mp4 / mkv / avi / mov (final validation is done by ffprobe).</div>
           </div>
 
           <div class="col">
             <div class="label">target_langs</div>
             <input v-model="targetLangs" class="input" type="text" placeholder="Traditional Chinese" />
-            <div class="help">逗號分隔，例如：Traditional Chinese, English</div>
+            <div class="help">Comma-separated languages, e.g. <code class="mono">Traditional Chinese, English</code>.</div>
           </div>
         </div>
 
@@ -29,7 +29,7 @@
             <div class="label">burn_subtitles</div>
             <label class="check">
               <input v-model="burnSubtitles" type="checkbox" />
-              <span>把字幕燒錄進影片（產出 final.mp4）</span>
+              <span>Burn subtitles into final.mp4</span>
             </label>
           </div>
 
@@ -37,7 +37,7 @@
             <div class="label">remove_silence</div>
             <label class="check">
               <input v-model="removeSilence" type="checkbox" />
-              <span>移除靜音片段（可能改變時間軸）</span>
+              <span>Remove silent parts (may change timings)</span>
             </label>
           </div>
 
@@ -45,7 +45,7 @@
             <div class="label">parallel</div>
             <label class="check">
               <input v-model="parallel" type="checkbox" />
-              <span>長影片採平行分段處理（>60s）</span>
+              <span>Parallel segments (recommended for longer videos)</span>
             </label>
           </div>
         </div>
@@ -58,7 +58,7 @@
             <code class="mono">{{ apiBaseUrl }}</code>
           </div>
           <button class="btn primary" type="submit" :disabled="props.submitting || !file">
-            {{ props.submitting ? "Uploading..." : "建立任務" }}
+            {{ props.submitting ? "Uploading..." : "Create task" }}
           </button>
         </div>
       </form>

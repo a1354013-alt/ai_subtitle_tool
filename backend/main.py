@@ -55,7 +55,9 @@ def validate_task_id(task_id: str) -> str:
         raise HTTPException(status_code=400, detail=f"Invalid task_id format: {task_id}. Must be a valid UUID.")
 
 def validate_lang(lang: str) -> str:
-    """驗證 lang 只包含允許的字元（英數、底線、連字號）"""
+    """驗證 lang 並做可預期的正規化：trim + 將空白序列轉為底線"""
+    lang = (lang or "").strip()
+    lang = re.sub(r"\s+", "_", lang)
     if not re.match(r'^[a-zA-Z0-9_-]+$', lang):
         raise HTTPException(status_code=400, detail=f"Invalid lang format: '{lang}'. Only alphanumeric, underscore, and hyphen allowed.")
     return lang
@@ -222,8 +224,8 @@ async def upload_video(
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
-            except:
-                pass
+            except OSError:
+                logger.warning("Failed to remove partially uploaded file: %s", file_path, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
     finally:
         file.file.close()
@@ -246,14 +248,19 @@ async def upload_video(
         # 驗證失敗，清理檔案
         try:
             os.remove(file_path)
-        except:
-            pass
+        except OSError:
+            logger.warning("Failed to remove invalid uploaded file: %s", file_path, exc_info=True)
         raise HTTPException(status_code=400, detail=f"Invalid video file: {str(e)}")
     
     # 8. 組織選項（hf_token 從環境變數取得，不從 URL 傳遞）
+    langs = [l.strip() for l in target_langs.split(",")]
+    langs = [l for l in langs if l]
+    if not langs:
+        raise HTTPException(status_code=400, detail="target_langs must contain at least one non-empty language")
+
     options = {
         "business_id": task_id,
-        "target_langs": [l.strip() for l in target_langs.split(",")],
+        "target_langs": langs,
         "burn_subtitles": burn_subtitles,
         "subtitle_format": subtitle_format,
         "remove_silence": remove_silence,
@@ -326,7 +333,7 @@ async def get_results_manifest(task_id: str):
     
     has_video = os.path.exists(final_video_path)
     
-    files = [f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_")]
+    files = sorted([f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_")])
     
     lang_map = {}
     for f in files:
@@ -343,7 +350,7 @@ async def get_results_manifest(task_id: str):
                 lang_map[lang_suffix][ext] = True
             
     available_files = []
-    for lang_suffix, exts in lang_map.items():
+    for lang_suffix, exts in sorted(lang_map.items(), key=lambda kv: kv[0].lower()):
         display_name = lang_suffix.replace("_", " ")
         available_files.append(FileInfo(
             lang=lang_suffix, 
@@ -391,7 +398,7 @@ async def download_result(
     
     # 指定 lang 時下載字幕
     lang = validate_lang(lang)
-    lang_suffix = lang.replace(" ", "_")
+    lang_suffix = lang
     
     # 決定要檢查的格式順序
     if format:
@@ -450,7 +457,7 @@ async def get_subtitle(
     if format and format not in ("ass", "srt"):
         raise HTTPException(status_code=400, detail="format must be 'ass' or 'srt'")
     
-    lang_suffix = lang.replace(" ", "_")
+    lang_suffix = lang
     
     # 決定要檢查的格式順序
     if format:
@@ -496,7 +503,7 @@ async def update_subtitle(
     if target_format not in ("ass", "srt"):
         raise HTTPException(status_code=400, detail="Format must be 'ass' or 'srt'")
     
-    lang_suffix = lang.replace(" ", "_")
+    lang_suffix = lang
     filepath = os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.{target_format}")
     filepath = validate_path_traversal(filepath, UPLOAD_DIR)
     
@@ -519,18 +526,19 @@ async def update_subtitle(
         "format": target_format,
         "language": lang,
         "message": f"Successfully updated {target_format.upper()} subtitle for {lang}.",
+        "warnings": [],
     }
 
     if os.path.exists(final_video_path):
         try:
             os.remove(final_video_path)
-            result["warning"] = (
+            result["warnings"].append(
                 "Final video was deleted to prevent using old subtitles. "
                 "To apply subtitles to video, create a new task or use a dedicated burn endpoint."
             )
         except OSError:
             logger.warning("Failed to delete final video after subtitle update: %s", final_video_path, exc_info=True)
-            result["warning"] = "Subtitle updated but final video could not be deleted."
+            result["warnings"].append("Subtitle updated but final video could not be deleted.")
 
     return result
 

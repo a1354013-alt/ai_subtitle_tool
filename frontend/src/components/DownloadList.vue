@@ -1,8 +1,8 @@
-<template>
+﻿<template>
   <div class="card">
     <div class="card-inner">
       <div class="label">Downloads</div>
-      <div v-if="items.length === 0" class="help">沒有可下載項目。</div>
+      <div v-if="items.length === 0" class="help">No downloadable items.</div>
 
       <div class="list">
         <div v-for="it in items" :key="it.key" class="item">
@@ -11,8 +11,8 @@
             <div v-if="it.description" class="desc">{{ it.description }}</div>
           </div>
           <div>
-            <a v-if="it.available && it.url" class="btn primary" :href="it.url">下載</a>
-            <button v-else class="btn" disabled>不可下載</button>
+            <a v-if="it.available && it.url" class="btn primary" :href="it.url">Download</a>
+            <button v-else class="btn" disabled>Not available</button>
           </div>
         </div>
       </div>
@@ -51,4 +51,3 @@ defineProps<{ items: DownloadItem[] }>();
   color: var(--muted);
 }
 </style>
-

@@ -48,12 +48,6 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ## 5. 測試
 
 ```bash
-python -m unittest
-```
-
-也可用 pytest（與 unittest 共用同一套測試檔）：
-
-```bash
 pytest
 ```
 
@@ -69,6 +63,7 @@ pytest
 
 ```bash
 cd frontend
+rm -rf node_modules
 npm install
 npm run build
 ```
@@ -80,6 +75,11 @@ npm test
 ```
 
 前後端不同源部署時，前端需要設定 `VITE_API_BASE_URL` 指向 FastAPI（此設定同時影響 API request 與下載連結 URL）。詳見 `frontend/README.md`。
+
+## 10. 交付包清潔原則
+
+- 交付包不包含：`.git/`、`frontend/node_modules/`、`frontend/dist/`、`tests/_tmp/`、`__pycache__/`、`backend/uploads/*` 等中間產物。
+- 建議使用乾淨工作樹打包（或用專案內的打包腳本）以避免權限/快取污染驗收。
 
 ## 8. Warnings 顯示
 

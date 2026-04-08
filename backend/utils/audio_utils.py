@@ -1,5 +1,8 @@
 import os
 import subprocess
+import logging
+
+logger = logging.getLogger(__name__)
 
 def preprocess_audio(video_path: str, output_audio_path: str):
     """
@@ -20,8 +23,17 @@ def preprocess_audio(video_path: str, output_audio_path: str):
         subprocess.run(command, check=True, capture_output=True)
         return output_audio_path
     except subprocess.CalledProcessError as e:
-        print(f"Audio preprocessing failed: {e.stderr.decode()}")
+        stderr = ""
+        try:
+            stderr = (e.stderr or b"").decode(errors="replace")
+        except Exception:
+            stderr = "<decode_failed>"
+        logger.warning("Audio preprocessing failed; falling back to basic ffmpeg. stderr=%s", stderr)
         # 如果降噪失敗，嘗試僅提取原始音訊
         fallback_command = ["ffmpeg", "-y", "-i", video_path, "-vn", "-ar", "16000", "-ac", "1", output_audio_path]
-        subprocess.run(fallback_command, check=True)
+        try:
+            subprocess.run(fallback_command, check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            logger.exception("Audio preprocessing fallback ffmpeg failed")
+            raise
         return output_audio_path

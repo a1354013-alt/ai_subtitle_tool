@@ -22,7 +22,7 @@
       <div v-if="message" class="msg">{{ message }}</div>
 
       <div v-if="warnings.length" class="warn">
-        <div class="warn-title">Warnings</div>
+        <div class="warn-title">Non-fatal warnings</div>
         <ul class="warn-list">
           <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
         </ul>

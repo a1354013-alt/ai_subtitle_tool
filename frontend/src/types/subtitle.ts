@@ -11,3 +11,10 @@ export type UpdateSubtitlePayload = {
   format: SubtitleFormat;
 };
 
+export type UpdateSubtitleResponse = {
+  status: string;
+  format: SubtitleFormat;
+  language: string;
+  message: string;
+  warnings: string[];
+};

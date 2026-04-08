@@ -1,14 +1,15 @@
-<template>
+﻿<template>
   <div class="alert card">
     <div class="card-inner">
-      <div class="title">{{ title }}</div>
-      <div class="msg">{{ message }}</div>
-      <div v-if="detail" class="detail mono">{{ detail }}</div>
+      <div class="title">{{ titleText }}</div>
+      <div class="msg">{{ messageText }}</div>
+      <div v-if="detailText" class="detail mono">{{ detailText }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import type { APIError } from "@/types/api";
 
 const props = defineProps<{
@@ -16,9 +17,9 @@ const props = defineProps<{
   error: APIError | null;
 }>();
 
-const title = props.title ?? "發生錯誤";
-const message = props.error?.message ?? "Unknown error";
-const detail = typeof props.error?.detail === "string" ? props.error?.detail : "";
+const titleText = computed(() => props.title ?? "Error");
+const messageText = computed(() => props.error?.message ?? "Unknown error");
+const detailText = computed(() => (typeof props.error?.detail === "string" ? props.error?.detail : ""));
 </script>
 
 <style scoped>
@@ -39,4 +40,3 @@ const detail = typeof props.error?.detail === "string" ? props.error?.detail : "
   white-space: pre-wrap;
 }
 </style>
-

@@ -7,6 +7,8 @@ __pycache__/
 *.pyd
 
 tests/_tmp/
+tests/_tmp_mplconfig/
+tests/_tmp_file_inventory.txt
 data_tmp/
 
 backend/uploads/
@@ -15,8 +17,10 @@ backend/uploads/*
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/.npm-cache/
 
 *.log
 *.zip
 *.tar.gz
 release_pkg/
+.release_staging/

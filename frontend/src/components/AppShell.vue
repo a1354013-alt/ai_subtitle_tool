@@ -1,12 +1,12 @@
-<template>
+﻿<template>
   <div>
     <header class="shell">
       <div class="container shell-inner">
         <div class="brand">
           <div class="logo">AI</div>
           <div>
-            <div class="title">Subtitle Tool</div>
-            <div class="subtitle">上傳、追蹤、編輯字幕、下載結果</div>
+            <div class="title">AI Subtitle Tool</div>
+            <div class="subtitle">Upload → Process → Edit subtitles → Download</div>
           </div>
         </div>
 
@@ -85,4 +85,3 @@ import { RouterLink } from "vue-router";
   background: rgba(110, 168, 254, 0.10);
 }
 </style>
-

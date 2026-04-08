@@ -69,6 +69,8 @@ tmp/
 temp/
 *.tmp
 tests/_tmp/
+tests/_tmp_mplconfig/
+tests/_tmp_file_inventory.txt
 data_tmp/
 
 # Frontend
@@ -76,7 +78,9 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/coverage/
+frontend/.npm-cache/
 release_pkg/
+.release_staging/
 
 # OS
 .DS_Store

@@ -32,7 +32,7 @@ describe("TaskStatusPage warnings", () => {
 
     const lis = wrapper.findAll("li");
     expect(lis.length).toBe(2);
-    expect(wrapper.text()).toContain("Warnings");
+    expect(wrapper.text()).toContain("Non-fatal warnings");
     expect(wrapper.text()).toContain("a");
     expect(wrapper.text()).toContain("b");
   });
