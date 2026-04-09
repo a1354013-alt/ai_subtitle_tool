@@ -7,6 +7,7 @@ export type FileInfo = {
 
 export type ResultsManifestResponse = {
   task_id: string;
+  task_status?: string;
   has_video: boolean;
   /**
    * Convenience list of languages included in the manifest.
@@ -19,6 +20,8 @@ export type ResultsManifestResponse = {
    */
   available_files: FileInfo[];
   warnings: string[];
+  is_partial?: boolean;
+  orphaned_files_detected?: boolean;
 };
 
 export type DownloadItem = {

@@ -1,4 +1,4 @@
-﻿# AI Subtitle Tool
+# AI Subtitle Tool
 
 AI subtitle generation + editing tool with a FastAPI backend (Celery + Redis) and a Vue 3 SPA frontend.
 
@@ -7,7 +7,7 @@ Core workflow (must remain stable):
 1. Upload video and options
 2. Celery task processes the video
 3. Frontend polls task status
-4. Results manifest lists available outputs
+4. Results manifest lists available outputs (only when task is `SUCCESS`)
 5. View/edit subtitles (ASS/SRT)
 6. Download final video / subtitles
 
@@ -37,7 +37,9 @@ Do NOT include these in a release package:
 - `__pycache__/` and `*.pyc`
 - `backend/uploads/*` (runtime outputs)
 
-This repo includes `make_release_zip.ps1` which stages a clean tree and excludes the above.
+This repo includes `make_release_zip.ps1` which stages a clean tree and produces a zip release package (default output: `release_out/ai_subtitle_tool_release.zip`).
+
+Important: the script does **not** keep a second copy of the source tree (no committed `release_pkg/`). The staging directory is temporary and removed after the zip is created.
 
 ## Backend Setup
 

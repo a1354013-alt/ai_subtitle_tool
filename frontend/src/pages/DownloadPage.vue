@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <PageHeader
       title="Downloads"
@@ -17,7 +17,7 @@
         <RouterLink class="btn" :to="{ name: 'task', params: { taskId } }">Back to status</RouterLink>
       </div>
 
-      <div class="row" style="margin-bottom: 12px">
+      <div v-if="manifest && isSuccessManifest" class="row" style="margin-bottom: 12px">
         <div class="col card">
           <div class="card-inner">
             <div class="label">Language</div>
@@ -36,6 +36,14 @@
         v-if="!manifest"
         title="No manifest"
         description="The results manifest is not available yet. Check task status first."
+      >
+        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">Go to status</RouterLink>
+      </EmptyState>
+
+      <EmptyState
+        v-else-if="!isSuccessManifest"
+        title="Results not ready"
+        description="The task has not completed yet, so downloads are not available. Go back to the status page and wait for SUCCESS."
       >
         <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">Go to status</RouterLink>
       </EmptyState>
@@ -61,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import PageHeader from "@/components/PageHeader.vue";
 import DownloadList from "@/components/DownloadList.vue";
@@ -74,13 +82,18 @@ import { buildDownloadUrl } from "@/api/results";
 import { setPreferredLang, getPreferredLang } from "@/api/subtitles";
 
 const props = defineProps<{ taskId: string }>();
-const taskId = props.taskId;
+const taskId = computed(() => props.taskId);
 
 const res = useResultStore();
 const selectedLang = ref(getPreferredLang());
 
 const manifest = computed(() => res.manifest);
 const files = computed(() => manifest.value?.available_files ?? []);
+const isSuccessManifest = computed(() => {
+  const s = manifest.value?.task_status;
+  if (!s) return true; // backwards-compat for older manifests
+  return String(s).toUpperCase() === "SUCCESS";
+});
 
 watch(
   files,
@@ -108,7 +121,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
     label: "Final Video (final.mp4)",
     description: "Download the final video if it exists.",
     available: manifest.value.has_video,
-    url: manifest.value.has_video ? buildDownloadUrl(taskId) : undefined,
+    url: manifest.value.has_video ? buildDownloadUrl(taskId.value) : undefined,
   });
 
   const langInfo = files.value.find((f) => f.lang === selectedLang.value);
@@ -119,20 +132,27 @@ const downloadItems = computed<DownloadItem[]>(() => {
     key: "ass",
     label: `Subtitle (ASS) - ${selectedLang.value}`,
     available: hasAss,
-    url: hasAss ? buildDownloadUrl(taskId, "ass", selectedLang.value) : undefined,
+    url: hasAss ? buildDownloadUrl(taskId.value, "ass", selectedLang.value) : undefined,
   });
 
   items.push({
     key: "srt",
     label: `Subtitle (SRT) - ${selectedLang.value}`,
     available: hasSrt,
-    url: hasSrt ? buildDownloadUrl(taskId, "srt", selectedLang.value) : undefined,
+    url: hasSrt ? buildDownloadUrl(taskId.value, "srt", selectedLang.value) : undefined,
   });
 
   return items;
 });
 
-onMounted(async () => {
-  await res.fetchManifest(taskId);
-});
+watch(
+  taskId,
+  async (next) => {
+    if (!next) return;
+    // Reset UI selection to the current preference; manifest watcher will correct if unavailable.
+    selectedLang.value = getPreferredLang();
+    await res.fetchManifest(next);
+  },
+  { immediate: true }
+);
 </script>

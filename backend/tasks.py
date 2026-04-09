@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import os
 import shutil
 import subprocess
@@ -98,7 +98,9 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                         check=True,
                         capture_output=True,
                     )
-                    diarization_result = diarize_audio(audio_path, hf_token)
+                    diarization_result, diarization_warning = diarize_audio(audio_path, hf_token)
+                    if diarization_warning:
+                        warnings.append(diarization_warning)
                     segments = merge_speaker_info(segments, diarization_result)
                 except Exception as e:
                     warnings.append(f"Diarization failed: {str(e)}")
@@ -243,9 +245,12 @@ def process_video_task(self, video_path: str, options: dict = None):
         payload = build_full_video_payload(segments, duration)
         return finalize_pipeline([payload], current_video, options, update_state_func=self.update_state)
 
-    except Exception as e:
-        remove_task_lock(business_id)
-        raise e
+    except Exception:
+        try:
+            remove_task_lock(business_id)
+        except Exception:
+            logger.warning("Failed to remove task lock after exception: business_id=%s", business_id, exc_info=True)
+        raise
 
 
 @celery_app.task

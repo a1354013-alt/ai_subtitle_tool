@@ -42,18 +42,11 @@ venv/
 backend/uploads/
 backend/uploads/*
 !backend/uploads/.gitkeep
-*_segments/
-*_segments/*
-*_no_silence.*
-*_temp.wav
-*.lock
-*.srt
-*.ass
-*.mp4
-*.wav
-*.mov
-*.mkv
-*.avi
+backend/uploads/*_segments/
+backend/uploads/*_segments/*
+backend/uploads/*_no_silence.*
+backend/uploads/*_temp.wav
+backend/uploads/*.lock
 
 # Logs
 *.log
@@ -81,6 +74,7 @@ frontend/coverage/
 frontend/.npm-cache/
 release_pkg/
 .release_staging/
+release_out/
 
 # OS
 .DS_Store

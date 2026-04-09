@@ -5,7 +5,10 @@ import { getSubtitle, updateSubtitle } from "@/api/subtitles";
 
 export const useSubtitleStore = defineStore("subtitle", {
   state: () => ({
-    lang: "Traditional_Chinese" as string,
+    taskId: null as string | null,
+    // Current selection for the active task (task-scoped state).
+    // User preference (localStorage) is handled in the page layer via getPreferredLang/setPreferredLang.
+    lang: "" as string,
     format: "ass" as SubtitleFormat,
     content: "" as string,
     isDirty: false as boolean,
@@ -15,6 +18,18 @@ export const useSubtitleStore = defineStore("subtitle", {
     lastSavedAt: null as number | null,
   }),
   actions: {
+    resetForTask(taskId: string) {
+      if (this.taskId === taskId) return;
+      this.taskId = taskId;
+      this.lang = "";
+      this.format = "ass";
+      this.content = "";
+      this.isDirty = false;
+      this.loading = false;
+      this.saving = false;
+      this.error = null;
+      this.lastSavedAt = null;
+    },
     setLang(lang: string) {
       this.lang = lang;
     },
@@ -29,6 +44,7 @@ export const useSubtitleStore = defineStore("subtitle", {
       this.isDirty = false;
     },
     async fetchSubtitle(taskId: string, lang: string, format: SubtitleFormat) {
+      this.resetForTask(taskId);
       this.error = null;
       this.loading = true;
       this.lang = lang;

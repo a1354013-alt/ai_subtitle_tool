@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="alert card">
     <div class="card-inner">
       <div class="title">{{ titleText }}</div>

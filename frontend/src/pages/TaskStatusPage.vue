@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <PageHeader
       title="Task Status"
@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from "vue";
+import { computed, onBeforeUnmount, watch } from "vue";
 import { RouterLink } from "vue-router";
 import PageHeader from "@/components/PageHeader.vue";
 import TaskProgressCard from "@/components/TaskProgressCard.vue";
@@ -44,14 +44,19 @@ import ErrorAlert from "@/components/ErrorAlert.vue";
 import { useTaskStore } from "@/stores/task";
 
 const props = defineProps<{ taskId: string }>();
-const taskId = props.taskId;
+const taskId = computed(() => props.taskId);
 
 const task = useTaskStore();
 const isSuccess = computed(() => String(task.status).toUpperCase() === "SUCCESS");
 
-onMounted(() => {
-  void task.startPolling(taskId);
-});
+watch(
+  taskId,
+  (next) => {
+    if (!next) return;
+    void task.startPolling(next);
+  },
+  { immediate: true }
+);
 
 onBeforeUnmount(() => {
   task.stopPolling();

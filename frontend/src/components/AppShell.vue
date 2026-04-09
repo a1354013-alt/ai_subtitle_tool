@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <header class="shell">
       <div class="container shell-inner">

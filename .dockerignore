@@ -24,3 +24,4 @@ frontend/.npm-cache/
 *.tar.gz
 release_pkg/
 .release_staging/
+release_out/

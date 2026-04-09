@@ -97,7 +97,7 @@ Input: {json.dumps(texts, ensure_ascii=False)}"""
         )
     except (APIConnectionError, RateLimitError, APIError, TimeoutError) as e:
         # 這些異常會由 retry_if_exception(is_retriable_exception) 判斷是否重試
-        raise e
+        raise
     
     content = response.choices[0].message.content
     try:

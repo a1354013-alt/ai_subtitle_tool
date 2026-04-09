@@ -1,19 +1,20 @@
 import os
-import torch
 import logging
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-def diarize_audio(audio_path: str, hf_token: str):
+def diarize_audio(audio_path: str, hf_token: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """
     執行說話者偵測 (Diarization)
     """
     if not hf_token:
-        return []
+        return [], "Diarization skipped: HF_TOKEN not set"
         
     try:
         # Optional dependency: only import when diarization is actually requested.
         from pyannote.audio import Pipeline
+        import torch
 
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
@@ -33,10 +34,12 @@ def diarize_audio(audio_path: str, hf_token: str):
                 "end": turn.end,
                 "speaker": speaker
             })
-        return speaker_segments
+        return speaker_segments, None
+    except ImportError:
+        return [], "Diarization skipped: optional dependency 'pyannote.audio' is not installed"
     except Exception:
         logger.exception("Diarization error")
-        return []
+        return [], "Diarization failed: pipeline inference error (see server logs for details)"
 
 def merge_speaker_info(whisper_segments, speaker_segments):
     """

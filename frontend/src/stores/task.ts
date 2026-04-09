@@ -22,6 +22,15 @@ export const useTaskStore = defineStore("task", {
     pollingTimer: null as PollTimer,
   }),
   actions: {
+    resetForTask(taskId: string) {
+      if (this.taskId === taskId) return;
+      this.taskId = taskId;
+      this.status = "PENDING";
+      this.progress = 0;
+      this.message = "";
+      this.warnings = [];
+      this.error = null;
+    },
     async createTask(formData: FormData) {
       this.error = null;
       this.warnings = [];
@@ -51,7 +60,7 @@ export const useTaskStore = defineStore("task", {
     },
     async startPolling(taskId: string) {
       this.stopPolling();
-      this.taskId = taskId;
+      this.resetForTask(taskId);
 
       // 先抓一次，避免「任務已終態但仍建立 timer」的競態條件
       try {

@@ -1,9 +1,11 @@
-﻿import asyncio
+import asyncio
 import importlib
 import io
 import json
 import time
 import os
+import shutil
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -17,15 +19,19 @@ from backend.pipeline_segments import (
 )
 
 
-_TMP_ROOT = Path(__file__).resolve().parent / "_tmp"
-_TMP_ROOT.mkdir(parents=True, exist_ok=True)
+_TEMP_DIRS: list[Path] = []
 
 
 def _make_tmpdir() -> Path:
-    # 某些受限環境會拒絕刪檔/刪資料夾；測試不做自動清理，統一落在 workspace 內的忽略目錄
-    d = _TMP_ROOT / uuid.uuid4().hex
-    d.mkdir(parents=True, exist_ok=True)
+    d = Path(tempfile.mkdtemp(prefix="ai_subtitle_tool_test_"))
+    _TEMP_DIRS.append(d)
     return d
+
+
+def tearDownModule():  # noqa: N802 (unittest naming convention)
+    # Best-effort cleanup to avoid leaving artifacts in the repo/workspace.
+    for d in _TEMP_DIRS:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def _run(coro):
@@ -468,6 +474,39 @@ class TestPathTraversalAndManifest(unittest.TestCase):
         ordered = [f.lang for f in manifest.available_files]
         self.assertEqual(ordered, ["alpha", "Bravo", "Zulu"])
 
+    def test_results_manifest_non_success_does_not_expose_outputs(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+        task_id = str(uuid.uuid4())
+
+        # Even if files exist, non-success statuses should not expose them as available outputs.
+        fake_files = [f"{task_id}_Traditional_Chinese.srt"]
+
+        class _FakeAsyncResult:
+            status = "PENDING"
+            result = None
+            info = None
+
+        with (
+            patch.object(main, "_get_async_result", return_value=_FakeAsyncResult()),
+            patch.object(main.os, "listdir", return_value=fake_files),
+        ):
+            manifest = _run(main.get_results_manifest(task_id=task_id))
+
+        self.assertEqual(manifest.task_status, "PENDING")
+        self.assertEqual(manifest.available_files, [])
+        self.assertTrue(manifest.orphaned_files_detected)
+
+
+class TestTargetLangNormalization(unittest.TestCase):
+    def test_normalize_target_langs_filters_empty_and_dedups_preserving_order(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+
+        raw = "Traditional Chinese,  English,English , , Traditional   Chinese,"
+        langs = main.normalize_target_langs(raw)
+        self.assertEqual(langs, ["Traditional Chinese", "English"])
+
 
 class TestStatusEndpoint(unittest.TestCase):
     def test_status_pending_progress_success_failure(self):
@@ -530,6 +569,17 @@ class TestSubtitleFallbackAndDownload(unittest.TestCase):
         (tmpdir / f"{task_id}_final.mp4").write_bytes(b"video")
         res = _run(main.download_result(task_id=task_id, lang=None, format=None))
         self.assertTrue(hasattr(res, "path"))
+
+
+class TestDiarizationObservability(unittest.TestCase):
+    def test_diarize_audio_reports_reason_when_dependency_missing(self):
+        # This test must be runnable without installing heavy diarization deps.
+        from backend.utils.diarization_utils import diarize_audio
+
+        segments, warning = diarize_audio(audio_path="dummy.wav", hf_token="token")
+        self.assertEqual(segments, [])
+        self.assertTrue(isinstance(warning, str) and len(warning) > 0)
+        self.assertIn("pyannote", warning.lower())
 
 
 class TestCleanupOldFiles(unittest.TestCase):

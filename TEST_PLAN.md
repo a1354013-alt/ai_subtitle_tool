@@ -1,4 +1,4 @@
-﻿# AI 自動影片上字幕工具 - 測試計畫
+# AI 自動影片上字幕工具 - 測試計畫
 
 本文件描述「目前版本」可實際驗證的測試方式；未涵蓋的項目一律列在手動整合測試中，避免文件比程式更自信。
 
@@ -37,6 +37,33 @@ npm test
 
 ```bash
 npm run build
+```
+
+## 1.2 Release 打包驗證（建議）
+
+Release zip 需由單一 source tree 透過腳本產生（不可內嵌 `node_modules/` 或保留第二份 `release_pkg/` source 副本）。
+
+```bash
+# from repo root
+powershell -ExecutionPolicy Bypass -File .\\make_release_zip.ps1
+```
+
+預設輸出：`release_out/ai_subtitle_tool_release.zip`
+
+建議再做一次內容檢查（避免把 `.git/`、`node_modules/`、`dist/`、`__pycache__/`、測試快取等打進交付包）：
+
+```bash
+tar -tf release_out/ai_subtitle_tool_release.zip | rg "(^|/)(\\.git|node_modules|dist|__pycache__|_tmp|_tmp_mplconfig|\\.pytest_cache|htmlcov|\\.coverage)(/|$)"
+```
+
+（Windows 若無 `rg`，可用 PowerShell `Select-String` 替代；重點是檢查 forbidden paths 不存在。）
+
+## 1.3 API Smoke Test（建議）
+
+本專案的 API 行為 smoke test 已由 `pytest` 覆蓋（見 `tests/test_behavior.py`）。建議驗收時至少執行：
+
+```bash
+python -m pytest -q
 ```
 
 ## 2. 手動整合測試（需要 ffmpeg/redis/celery/模型環境）

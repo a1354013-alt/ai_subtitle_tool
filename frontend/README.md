@@ -1,4 +1,4 @@
-﻿# AI Subtitle Tool Frontend
+# AI Subtitle Tool Frontend
 
 Vue 3 SPA for the AI Subtitle Tool backend.
 

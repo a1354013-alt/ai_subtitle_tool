@@ -1,4 +1,4 @@
-﻿# AI 自動影片上字幕工具 - 部署指南
+# AI 自動影片上字幕工具 - 部署指南
 
 本指南以「可重現、可交付」為目標，描述目前版本的必要依賴與建議操作。
 
@@ -76,10 +76,16 @@ npm test
 
 前後端不同源部署時，前端需要設定 `VITE_API_BASE_URL` 指向 FastAPI（此設定同時影響 API request 與下載連結 URL）。詳見 `frontend/README.md`。
 
-## 10. 交付包清潔原則
+## Results Manifest 契約（重要）
+
+- `GET /results/{task_id}` 只有在任務狀態為 `SUCCESS` 時才會回傳 `available_files`（可下載輸出清單）。
+- 若任務仍在 `PENDING/PROCESSING` 或已 `FAILURE/REVOKED`，manifest 會回傳空的 `available_files`，並用 `task_status` 表示當前狀態，避免用 uploads 目錄殘留檔案誤判為有效輸出。
+
+## 10. 交付包清潔原則 / Release Packaging
 
 - 交付包不包含：`.git/`、`frontend/node_modules/`、`frontend/dist/`、`tests/_tmp/`、`__pycache__/`、`backend/uploads/*` 等中間產物。
-- 建議使用乾淨工作樹打包（或用專案內的打包腳本）以避免權限/快取污染驗收。
+- 建議使用乾淨工作樹打包（或用專案內的 `make_release_zip.ps1`）以避免權限/快取污染驗收。
+- `make_release_zip.ps1` 會建立暫存 staging 目錄並輸出 zip（預設：`release_out/ai_subtitle_tool_release.zip`），不會在 repo 中留下第二份 source tree。
 
 ## 8. Warnings 顯示
 
