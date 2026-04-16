@@ -77,8 +77,8 @@ import EmptyState from "@/components/EmptyState.vue";
 import { useSubtitleStore } from "@/stores/subtitle";
 import type { SubtitleFormat } from "@/types/subtitle";
 import { useResultStore } from "@/stores/result";
-import { getPreferredLang, setPreferredLang } from "@/api/subtitles";
 import type { FileInfo } from "@/types/result";
+import { usePreferencesStore } from "@/stores/preferences";
 
 const props = defineProps<{ taskId: string }>();
 const taskId = computed(() => props.taskId);
@@ -86,8 +86,9 @@ const taskIdValue = computed(() => taskId.value);
 
 const sub = useSubtitleStore();
 const result = useResultStore();
+const prefs = usePreferencesStore();
 
-const langSelection = ref(sub.lang || getPreferredLang());
+const langSelection = ref(sub.lang || prefs.preferredLang);
 const formatSelection = ref<SubtitleFormat>(sub.format);
 
 const langOptions = computed(() => result.manifest?.available_files ?? []);
@@ -127,7 +128,7 @@ async function initForTask(nextTaskId: string) {
 
   const options = langOptions.value;
   if (manifestNotReady.value || options.length === 0) return;
-  const preferredLang = getPreferredLang();
+  const preferredLang = prefs.preferredLang;
   const initialLang = options.find((o) => o.lang === preferredLang)?.lang ?? options[0]?.lang ?? preferredLang;
   const file = options.find((o) => o.lang === initialLang);
   const initialFormat = pickInitialFormat(file, sub.format);
@@ -136,7 +137,7 @@ async function initForTask(nextTaskId: string) {
   formatSelection.value = initialFormat;
 
   await sub.fetchSubtitle(nextTaskId, initialLang, initialFormat);
-  setPreferredLang(initialLang);
+  prefs.setPreferredLang(initialLang);
 }
 
 function confirmDiscardIfDirty(): boolean {
@@ -177,7 +178,7 @@ async function onLanguageChange() {
     : pickInitialFormat(langOptions.value.find((x) => x.lang === next), sub.format);
 
   formatSelection.value = nextFormat;
-  setPreferredLang(next);
+  prefs.setPreferredLang(next);
   await sub.fetchSubtitle(taskId.value, next, nextFormat);
 }
 

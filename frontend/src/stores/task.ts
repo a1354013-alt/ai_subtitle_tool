@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import type { TaskStatusResponse } from "@/types/task";
 import { createUploadTask, getTaskStatus } from "@/api/tasks";
 import type { APIError } from "@/types/api";
-import { setPreferredLang } from "@/api/subtitles";
+import { usePreferencesStore } from "@/stores/preferences";
 
 type PollTimer = number | null;
 
@@ -36,7 +36,10 @@ export const useTaskStore = defineStore("task", {
       this.warnings = [];
       const rawLangs = String(formData.get("target_langs") ?? "").trim();
       const first = rawLangs.split(",").map((s) => s.trim()).filter(Boolean)[0];
-      if (first) setPreferredLang(first.replaceAll(" ", "_"));
+      if (first) {
+        const prefs = usePreferencesStore();
+        prefs.setPreferredLang(first.replaceAll(" ", "_"));
+      }
 
       const res = await createUploadTask(formData);
       this.applyStatus(res);

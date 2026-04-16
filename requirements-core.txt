@@ -1,18 +1,2 @@
-# Core Dependencies (Required)
-fastapi==0.109.0
-uvicorn==0.27.0
-python-multipart==0.0.6
-celery==5.3.6
-redis==5.0.1
-flower==2.0.1
-moviepy==1.0.3
-faster-whisper==0.10.0
-torch==2.1.2
-openai==1.12.0
-tenacity==8.2.3
-numpy==1.26.3
-websockets==12.0
-pydantic==2.6.0
-pydantic-settings==2.1.0
-python-dotenv==1.0.1
-psutil==5.9.7
+# Back-compat shim; single source of truth is `requirements.lock.txt`.
+-r requirements.lock.txt

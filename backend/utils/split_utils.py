@@ -2,12 +2,7 @@ import os
 import subprocess
 import re
 
-class SimpleSegment:
-    """簡單的字幕段落物件"""
-    def __init__(self, start, end, text):
-        self.start = start
-        self.end = end
-        self.text = text
+from ..models.segments import SimpleSegment
 
 def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
     """

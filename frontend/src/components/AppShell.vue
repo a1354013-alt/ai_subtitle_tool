@@ -12,6 +12,7 @@
 
         <nav class="nav">
           <RouterLink class="nav-link" to="/">Home</RouterLink>
+          <RouterLink class="nav-link" to="/tasks/recent">Recent</RouterLink>
         </nav>
       </div>
     </header>

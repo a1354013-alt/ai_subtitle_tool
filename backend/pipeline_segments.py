@@ -1,19 +1,13 @@
 import logging
 import os
-from dataclasses import dataclass
+
+from .models.segments import SimpleSegment
 
 logger = logging.getLogger(__name__)
 
 _REQUIRED_SEGMENT_RESULT_KEYS = ("start_offset", "end_offset", "overlap", "segment_idx", "segments")
 _REQUIRED_SEGMENT_KEYS = ("start", "end", "text")
 _REQUIRED_SEGMENT_DATA_KEYS = ("path", "start_offset", "end_offset", "overlap", "segment_idx")
-
-
-@dataclass(frozen=True)
-class SimpleSegment:
-    start: float
-    end: float
-    text: str
 
 
 def validate_segment_result_payload(res: dict) -> None:

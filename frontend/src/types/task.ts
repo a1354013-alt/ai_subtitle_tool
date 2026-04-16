@@ -11,3 +11,11 @@ export type TaskStatusResponse = {
 
 export type UploadTaskResponse = TaskStatusResponse;
 
+export type RecentTask = {
+  task_id: string;
+  filename: string;
+  status: string;
+  created_at: string;
+  duration_seconds?: number | null;
+};
+

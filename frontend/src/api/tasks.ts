@@ -1,5 +1,5 @@
 import { apiRequest } from "@/api/client";
-import type { TaskStatusResponse, UploadTaskResponse } from "@/types/task";
+import type { RecentTask, TaskStatusResponse, UploadTaskResponse } from "@/types/task";
 
 export async function createUploadTask(formData: FormData): Promise<UploadTaskResponse> {
   return apiRequest<UploadTaskResponse>("/upload", {
@@ -10,5 +10,9 @@ export async function createUploadTask(formData: FormData): Promise<UploadTaskRe
 
 export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse> {
   return apiRequest<TaskStatusResponse>(`/status/${encodeURIComponent(taskId)}`);
+}
+
+export async function getRecentTasks(): Promise<RecentTask[]> {
+  return apiRequest<RecentTask[]>("/tasks/recent");
 }
 

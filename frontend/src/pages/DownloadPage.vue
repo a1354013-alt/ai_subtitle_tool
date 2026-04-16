@@ -79,13 +79,14 @@ import EmptyState from "@/components/EmptyState.vue";
 import { useResultStore } from "@/stores/result";
 import type { DownloadItem } from "@/types/result";
 import { buildDownloadUrl } from "@/api/results";
-import { setPreferredLang, getPreferredLang } from "@/api/subtitles";
+import { usePreferencesStore } from "@/stores/preferences";
 
 const props = defineProps<{ taskId: string }>();
 const taskId = computed(() => props.taskId);
 
 const res = useResultStore();
-const selectedLang = ref(getPreferredLang());
+const prefs = usePreferencesStore();
+const selectedLang = ref(prefs.preferredLang);
 
 const manifest = computed(() => res.manifest);
 const files = computed(() => manifest.value?.available_files ?? []);
@@ -109,7 +110,7 @@ watch(
 );
 
 function persistLang() {
-  setPreferredLang(selectedLang.value);
+  prefs.setPreferredLang(selectedLang.value);
 }
 
 const downloadItems = computed<DownloadItem[]>(() => {
@@ -142,6 +143,14 @@ const downloadItems = computed<DownloadItem[]>(() => {
     url: hasSrt ? buildDownloadUrl(taskId.value, "srt", selectedLang.value) : undefined,
   });
 
+  items.push({
+    key: "vtt",
+    label: `Subtitle (VTT) - ${selectedLang.value}`,
+    description: "Generated on-the-fly from SRT.",
+    available: hasSrt,
+    url: hasSrt ? buildDownloadUrl(taskId.value, "vtt", selectedLang.value) : undefined,
+  });
+
   return items;
 });
 
@@ -150,7 +159,7 @@ watch(
   async (next) => {
     if (!next) return;
     // Reset UI selection to the current preference; manifest watcher will correct if unavailable.
-    selectedLang.value = getPreferredLang();
+    selectedLang.value = prefs.preferredLang;
     await res.fetchManifest(next);
   },
   { immediate: true }

@@ -1,4 +1,5 @@
 export type SubtitleFormat = "ass" | "srt";
+export type DownloadSubtitleFormat = SubtitleFormat | "vtt";
 
 export type SubtitleResponse = {
   content: string;

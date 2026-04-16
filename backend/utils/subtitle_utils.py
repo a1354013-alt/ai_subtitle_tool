@@ -30,6 +30,44 @@ def generate_srt(segments) -> str:
     return srt_content
 
 
+def srt_to_vtt(srt_text: str) -> str:
+    """
+    Convert SRT text to WebVTT.
+
+    Rules:
+    - Remove numeric cue indices
+    - Replace timestamp comma with dot
+    - Add WEBVTT header
+    """
+    blocks = []
+    cur: list[str] = []
+    for line in (srt_text or "").splitlines():
+        if line.strip() == "":
+            if cur:
+                blocks.append(cur)
+                cur = []
+            continue
+        cur.append(line.rstrip("\n"))
+    if cur:
+        blocks.append(cur)
+
+    out_lines = ["WEBVTT", ""]
+    for block in blocks:
+        if not block:
+            continue
+        i = 0
+        if block[0].strip().isdigit():
+            i = 1
+        if i >= len(block):
+            continue
+        ts = block[i].replace(",", ".")
+        out_lines.append(ts)
+        out_lines.extend(block[i + 1 :])
+        out_lines.append("")
+
+    return "\n".join(out_lines).rstrip() + "\n"
+
+
 def transcribe_video(video_path: str, output_srt_path: str, model_size=None):
     """
     Transcribe a video file into an SRT subtitle file.

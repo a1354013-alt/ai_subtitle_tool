@@ -1,0 +1,4 @@
+# Optional diarization dependencies (heavy; requires HF_TOKEN)
+pyannote.audio==3.1.1
+librosa==0.10.1
+

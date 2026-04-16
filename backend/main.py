@@ -12,7 +12,10 @@ from typing import Any, List, Optional
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
+
+from .storage.task_history import TaskHistoryStore, duration_seconds_since
 
 app = FastAPI(title="AI Video Subtitle Tool")
 logger = logging.getLogger(__name__)
@@ -46,6 +49,7 @@ configure_cors()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+TASK_HISTORY = TaskHistoryStore(Path(UPLOAD_DIR) / "task_history.sqlite3")
 
 
 def validate_task_id(task_id: str) -> str:
@@ -170,6 +174,50 @@ class TaskResultManifest(BaseModel):
     )
 
 
+class RecentTask(BaseModel):
+    task_id: str
+    filename: str
+    status: str
+    created_at: str
+    duration_seconds: Optional[float] = None
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readyz():
+    errors: list[str] = []
+
+    # Upload dir check
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        if not os.path.isdir(UPLOAD_DIR):
+            errors.append("UPLOAD_DIR is not a directory")
+        else:
+            test_path = os.path.join(UPLOAD_DIR, ".readyz_write_test")
+            with open(test_path, "w", encoding="utf-8") as f:
+                f.write("ok")
+            os.remove(test_path)
+    except Exception as e:
+        errors.append(f"UPLOAD_DIR not writable: {e}")
+
+    # Redis check
+    try:
+        import redis as _redis
+
+        r = _redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_connect_timeout=2)
+        r.ping()
+    except Exception as e:
+        errors.append(f"Redis not ready: {e}")
+
+    if errors:
+        return JSONResponse(status_code=503, content={"status": "error", "errors": errors})
+    return {"status": "ok"}
+
+
 @app.post("/upload", response_model=TaskStatus)
 async def upload_video(
     file: UploadFile = File(...),
@@ -274,6 +322,12 @@ async def upload_video(
             pass
         raise HTTPException(status_code=500, detail=f"Failed to enqueue task: {str(e)}")
 
+    # Store recent task history for product continuity.
+    try:
+        TASK_HISTORY.upsert_created(task_id=task_id, filename=file.filename, status="PENDING")
+    except Exception:
+        logger.warning("Failed to record task history (non-fatal)", exc_info=True)
+
     return TaskStatus(task_id=task_id, status="PENDING", progress=0)
 
 
@@ -310,6 +364,15 @@ async def get_status(task_id: str):
         message = "Waiting for worker..."
         status = "PENDING"
 
+    # Best-effort status tracking for "Recent Tasks"
+    try:
+        duration = None
+        if status in ("SUCCESS", "FAILURE", "REVOKED"):
+            duration = duration_seconds_since(TASK_HISTORY.get_created_at(task_id))
+        TASK_HISTORY.update_status(task_id=task_id, status=status, duration_seconds=duration)
+    except Exception:
+        logger.warning("Failed to update task history (non-fatal)", exc_info=True)
+
     return TaskStatus(
         task_id=task_id,
         status=status,
@@ -318,6 +381,16 @@ async def get_status(task_id: str):
         result_url=result_url,
         warnings=warnings,
     )
+
+
+@app.get("/tasks/recent", response_model=list[RecentTask])
+async def get_recent_tasks():
+    try:
+        entries = TASK_HISTORY.list_recent(limit=20)
+        return [RecentTask(**e.to_dict()) for e in entries]
+    except Exception:
+        logger.error("Failed to read task history", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to read task history")
 
 
 @app.get("/results/{task_id}", response_model=TaskResultManifest)
@@ -397,12 +470,14 @@ async def get_results_manifest(task_id: str):
 async def download_result(
     task_id: str,
     lang: Optional[str] = Query(None, description="Language for subtitle (e.g. Traditional_Chinese)"),
-    format: Optional[str] = Query(None, description="Subtitle format: 'ass' or 'srt'. Only used when lang is specified"),
+    format: Optional[str] = Query(
+        None, description="Subtitle format: 'ass', 'srt', or 'vtt'. Only used when lang is specified"
+    ),
 ):
     task_id = validate_task_id(task_id)
 
-    if format and format not in ("ass", "srt"):
-        raise HTTPException(status_code=400, detail="format must be 'ass' or 'srt'")
+    if format and format not in ("ass", "srt", "vtt"):
+        raise HTTPException(status_code=400, detail="format must be 'ass', 'srt', or 'vtt'")
 
     if not lang:
         final_video = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4"), UPLOAD_DIR)
@@ -411,6 +486,23 @@ async def download_result(
         raise HTTPException(status_code=404, detail="Final video not found. Task may still be processing.")
 
     lang_suffix = validate_lang(lang)
+
+    if format == "vtt":
+        srt_path = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.srt"), UPLOAD_DIR)
+        if not os.path.exists(srt_path):
+            raise HTTPException(status_code=404, detail=f"Subtitle 'srt' for language '{lang}' not found (required for vtt)")
+
+        from .utils.subtitle_utils import srt_to_vtt
+
+        with open(srt_path, "r", encoding="utf-8") as f:
+            vtt = srt_to_vtt(f.read())
+
+        filename = f"subtitle_{task_id}_{lang_suffix}.vtt"
+        return Response(
+            content=vtt,
+            media_type="text/vtt; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     formats_to_try = [format] if format else ["ass", "srt"]
     for ext in formats_to_try:
@@ -449,14 +541,26 @@ async def get_subtitle(
     lang: str = Query(..., description="Language for subtitle"),
     format: Optional[str] = Query(
         None,
-        description="Subtitle format: 'ass' or 'srt'. If not specified, tries ass first, then srt",
+        description="Subtitle format: 'ass', 'srt', or 'vtt'. If not specified, tries ass first, then srt",
     ),
 ):
     task_id = validate_task_id(task_id)
     lang_suffix = validate_lang(lang)
 
-    if format and format not in ("ass", "srt"):
-        raise HTTPException(status_code=400, detail="format must be 'ass' or 'srt'")
+    if format and format not in ("ass", "srt", "vtt"):
+        raise HTTPException(status_code=400, detail="format must be 'ass', 'srt', or 'vtt'")
+
+    if format == "vtt":
+        srt_path = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.srt"), UPLOAD_DIR)
+        if not os.path.exists(srt_path):
+            raise HTTPException(status_code=404, detail=f"Subtitle 'srt' for language '{lang}' not found (required for vtt)")
+
+        from .utils.subtitle_utils import srt_to_vtt
+
+        with open(srt_path, "r", encoding="utf-8") as f:
+            vtt = srt_to_vtt(f.read())
+        filename = f"{task_id}_{lang_suffix}.vtt"
+        return {"content": vtt, "format": "vtt", "filename": filename}
 
     formats_to_try = [format] if format else ["ass", "srt"]
     for ext in formats_to_try:

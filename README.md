@@ -11,6 +11,18 @@ Core workflow (must remain stable):
 5. View/edit subtitles (ASS/SRT)
 6. Download final video / subtitles
 
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+  U["User (Browser)"] -->|HTTP| F["Frontend (Vue SPA)"]
+  F -->|HTTP| B["Backend API (FastAPI)"]
+  B -->|enqueue| R["Redis (broker/backend)"]
+  W["Worker (Celery)"] -->|consume| R
+  W -->|read/write| FS["Uploads Dir (files)"]
+  B -->|read| FS
+```
+
 ## Tech Stack
 
 - Backend: FastAPI + Uvicorn
@@ -25,6 +37,17 @@ Core workflow (must remain stable):
 - `backend/`: FastAPI app + Celery tasks
 - `frontend/`: Vue 3 SPA
 - `tests/`: backend behavior tests (`pytest`)
+- `scripts/`: release helpers (cross-platform)
+
+## Processing Flow
+
+1. Upload (`POST /upload`)
+2. Split (optional; long video + parallel mode)
+3. Transcribe (faster-whisper)
+4. Translate (optional; OpenAI if configured)
+5. Generate subtitles (always generates bilingual SRT; optionally generates ASS too)
+6. Burn subtitles into final video (optional)
+7. Download (`GET /download/{task_id}`) or edit subtitles (`PUT /subtitle/{task_id}`)
 
 ## Delivery / Clean Package Rules
 
@@ -41,11 +64,17 @@ This repo includes `make_release_zip.ps1` which stages a clean tree and produces
 
 Important: the script does **not** keep a second copy of the source tree (no committed `release_pkg/`). The staging directory is temporary and removed after the zip is created.
 
+For cross-platform release packaging (CI uses this):
+
+```bash
+python scripts/make_release_zip.py --out release.zip --check
+```
+
 ## Backend Setup
 
 Requirements:
 
-- Python 3.10–3.12 (recommended)
+- Python 3.11 (recommended; aligns with Docker/CI)
 - `ffmpeg` and `ffprobe`
 - Redis
 
@@ -58,16 +87,22 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-Environment variables (example):
+Dependencies are locked in `requirements.lock.txt` (single source of truth).
+Optional diarization dependencies are in `requirements.optional-diarization.txt`.
+
+Environment variables:
+
+- Copy `backend/.env.example` to `backend/.env` (do not commit real keys).
+- The backend auto-loads `backend/.env` for local development (it will not override already-set env vars).
 
 ```ini
-OPENAI_API_KEY=...
 REDIS_URL=redis://localhost:6379/0
-UPLOAD_DIR=./backend/uploads
-HF_TOKEN=...                 # optional
-TRANSLATE_MODEL=gpt-4o-mini
-CORS_ALLOWED_ORIGINS=*
-CORS_ALLOW_CREDENTIALS=false
+UPLOAD_DIR=./uploads
+OPENAI_API_KEY=
+HF_TOKEN=
+TRANSLATE_MODEL=
+CORS_ALLOWED_ORIGINS=http://localhost:5173
+CORS_ALLOW_CREDENTIALS=true
 ```
 
 Run services:
@@ -80,10 +115,15 @@ celery -A backend.celery_app:celery_app beat --loglevel=info
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
+Health checks:
+
+- `GET /healthz` → `{"status":"ok"}`
+- `GET /readyz` → checks Redis + UPLOAD_DIR
+
 Backend tests:
 
 ```bash
-pytest
+pytest -q
 ```
 
 ## Frontend Setup
@@ -112,7 +152,69 @@ Important: `VITE_API_BASE_URL` affects BOTH:
 - API requests (`/upload`, `/status/...`, `/results/...`, `/subtitle/...`)
 - Download URLs (`/download/...`)
 
+## Docker Quick Start
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up --build
+```
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8000`
+
+## Deployment Steps
+
+### Local
+
+1. Copy env: `backend/.env.example` → `backend/.env`
+2. Start Redis + worker + API:
+
+```bash
+redis-server
+celery -A backend.celery_app:celery_app worker --loglevel=info
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+3. Start frontend:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+### Docker
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up --build
+```
+
+### Production (minimal guidance)
+
+- Put backend API behind a reverse proxy (TLS, timeouts, upload limits).
+- Ensure `REDIS_URL` points to a production Redis instance.
+- Persist `UPLOAD_DIR` to durable storage (volume or host mount).
+- Serve the built frontend (`frontend/dist`) from a static server (the Docker frontend image uses nginx).
+
+## Testing
+
+```bash
+pytest -q
+cd frontend && npm ci && npm test && npm run build
+```
+
+## Release
+
+```bash
+python scripts/make_release_zip.py --out release.zip --check
+```
+
+`release.zip` must NOT contain: `uploads/`, `segments/`, `.cache/`, `.env`.
+
 ## Notes
 
 - Subtitle editing updates only the subtitle file; it does NOT rebuild/burn the final video.
 - Task status response includes `warnings: string[]` (non-fatal); the frontend shows them separately from errors.
+- WebSocket status (`/ws/status/{task_id}`) exists but the frontend uses polling; consider it experimental for now.
+- Recent tasks: `GET /tasks/recent` and the frontend page `/tasks/recent`.
