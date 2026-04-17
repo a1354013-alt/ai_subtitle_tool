@@ -30,7 +30,7 @@ withDefaults(
 .desc {
   margin-top: 8px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--color-muted);
 }
 .actions {
   margin-top: 12px;

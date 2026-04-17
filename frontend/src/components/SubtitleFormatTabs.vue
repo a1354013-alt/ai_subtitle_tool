@@ -28,7 +28,7 @@ defineEmits<{ (e: "update:modelValue", v: SubtitleFormat): void }>();
 .tab {
   border: 1px solid transparent;
   background: transparent;
-  color: var(--muted);
+  color: var(--color-muted);
   padding: 8px 10px;
   border-radius: 12px;
   cursor: pointer;
@@ -36,7 +36,7 @@ defineEmits<{ (e: "update:modelValue", v: SubtitleFormat): void }>();
   font-size: 12px;
 }
 .tab.active {
-  color: var(--text);
+  color: var(--color-text);
   border-color: rgba(110, 168, 254, 0.45);
   background: rgba(110, 168, 254, 0.12);
 }
