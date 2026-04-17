@@ -1,21 +1,21 @@
 ```
 # Dependencies
-.venv/
-venv/
-__pycache__/
 node_modules/
+venv/
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
 
 # Build artifacts
 dist/
 build/
-*.pyc
-*.pyo
-*.pyd
+target/
 
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
 # Editors
 .vscode/
@@ -28,13 +28,11 @@ build/
 *.log
 
 # Coverage
-.coverage
 coverage/
 htmlcov/
+.coverage
 
-# Python specific
-*.py[cod]
-*$py.class
-*.so
-.Python
+# OS
+.DS_Store
+Thumbs.db
 ```

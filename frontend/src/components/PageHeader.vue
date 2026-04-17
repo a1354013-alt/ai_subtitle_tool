@@ -23,7 +23,7 @@ defineProps<{
 .h2 {
   margin-top: 8px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--color-muted);
   max-width: 72ch;
 }
 </style>

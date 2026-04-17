@@ -41,7 +41,7 @@ withDefaults(
 .d {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--color-muted);
 }
 @keyframes spin {
   to {

@@ -16,7 +16,13 @@ from pydantic import BaseModel, Field
 
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
 
-app = FastAPI(title="AI Video Subtitle Tool")
+app = FastAPI(
+    title="AI Video Subtitle Tool",
+    version="1.0.0",
+    description="Automated video subtitle generation with translation and editing capabilities.",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+)
 logger = logging.getLogger(__name__)
 
 

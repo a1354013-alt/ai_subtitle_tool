@@ -56,7 +56,7 @@ defineProps<{
 .msg {
   margin-top: 12px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--color-muted);
 }
 .warn {
   margin-top: 12px;

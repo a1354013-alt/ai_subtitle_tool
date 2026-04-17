@@ -3,6 +3,8 @@ import os
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception, after_log
 from openai import APIError, APIConnectionError, RateLimitError
 
+from .time_utils import format_timestamp, parse_timestamp
+
 logger = logging.getLogger(__name__)
 
 # B) 翻譯模型與版本 pin
@@ -25,15 +27,6 @@ def get_openai_client():
             )
         _openai_client = OpenAI(api_key=api_key)
     return _openai_client
-
-
-def format_timestamp(seconds: float):
-    """將秒數轉換為 SRT 時間格式 (00:00:00,000)"""
-    td_hours = int(seconds // 3600)
-    td_minutes = int((seconds % 3600) // 60)
-    td_seconds = int(seconds % 60)
-    td_milliseconds = int((seconds % 1) * 1000)
-    return f"{td_hours:02}:{td_minutes:02}:{td_seconds:02},{td_milliseconds:03}"
 
 
 def is_retriable_exception(exception: Exception) -> bool:
