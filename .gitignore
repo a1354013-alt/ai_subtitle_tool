@@ -1,40 +1,38 @@
 ```
-# Logs and temp files
-*.log
-*.tmp
-
-# Environment
-.env
-.env.local
-*.env.*
+# NPM cache
+frontend/.npm-cache/
 
 # Dependencies
 node_modules/
-.venv/
-venv/
-__pycache__/
-.mypy_cache/
-.pytest_cache/
+
+# Compiled and build artifacts
+*.o
+*.obj
 dist/
 build/
 target/
 
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+.env.*
+
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# OS
-.DS_Store
-Thumbs.db
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# Compressed files
+# Compression
 *.zip
 *.gz
 *.tar
@@ -57,4 +55,14 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# System
+.DS_Store
+Thumbs.db
+
 ```

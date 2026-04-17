@@ -1,28 +1,13 @@
 import logging
 import os
-from datetime import timedelta
 
 from moviepy.editor import VideoFileClip
 
 from .audio_utils import preprocess_audio
 from .model_loader import get_model, get_model_by_duration
+from .time_utils import format_timestamp, parse_timestamp
 
 logger = logging.getLogger(__name__)
-
-
-def format_timestamp(seconds: float) -> str:
-    """將秒數轉換為 SRT 時間格式 (00:00:00,000)。
-    
-    與 backend/utils/translate_utils.py 中的 format_timestamp 保持一致。
-    統一使用此模組的實作。
-    """
-    td = timedelta(seconds=seconds)
-    total_seconds = int(td.total_seconds())
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    secs = total_seconds % 60
-    millis = int(td.microseconds / 1000)
-    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
 def generate_srt(segments) -> str:
