@@ -1,7 +1,7 @@
-```
 # Logs and temp files
 *.log
 *.tmp
+*.temp
 
 # Environment
 .env
@@ -10,22 +10,32 @@
 
 # Dependencies
 node_modules/
+**/node_modules/
 .venv/
 venv/
-.venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
+
+# Package manager cache
+.npm-cache/
+frontend/.npm-cache/
+**/.npm-cache/
+.npm/
+.pnpm-store/
 
 # Build artifacts
 dist/
 build/
 target/
+**/dist/
+**/build/
 
-# Environment
-.env
-.env.local
-*.env.*
+# Coverage
+coverage/
+**/coverage/
+htmlcov/
+.coverage
 
 # Editors
 .vscode/
@@ -37,14 +47,6 @@ target/
 .DS_Store
 Thumbs.db
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# OS
-.DS_Store
-Thumbs.db
 # Compressed files
 *.zip
 *.gz
@@ -68,4 +70,3 @@ Thumbs.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
