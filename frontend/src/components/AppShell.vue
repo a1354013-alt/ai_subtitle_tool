@@ -65,7 +65,7 @@ import { RouterLink } from "vue-router";
 }
 .subtitle {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--color-muted);
   margin-top: 2px;
 }
 .nav {
@@ -78,10 +78,10 @@ import { RouterLink } from "vue-router";
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(255, 255, 255, 0.04);
   border-radius: 12px;
-  color: var(--muted);
+  color: var(--color-muted);
 }
 .nav-link.router-link-active {
-  color: var(--text);
+  color: var(--color-text);
   border-color: rgba(110, 168, 254, 0.45);
   background: rgba(110, 168, 254, 0.10);
 }

@@ -48,6 +48,6 @@ defineProps<{ items: DownloadItem[] }>();
 .desc {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--color-muted);
 }
 </style>
