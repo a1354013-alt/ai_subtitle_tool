@@ -1,116 +1,40 @@
-# Python
+```
+# Dependencies
+.venv/
+venv/
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+node_modules/
 
-# Virtual environments
-.venv
-venv/
+# Build artifacts
+dist/
+build/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
 .env
 .env.local
-.env.*.local
+.env.*
 
-# IDE
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-.DS_Store
-
-# Project specific
-backend/uploads/
-backend/uploads/*
-!backend/uploads/.gitkeep
-backend/uploads/*_segments/
-backend/uploads/*_segments/*
-backend/uploads/*_no_silence.*
-backend/uploads/*_temp.wav
-backend/uploads/*.lock
+*.tmp
 
 # Logs
 *.log
-logs/
-celery_beat.pid
 
-# Redis
-dump.rdb
-
-# Temporary files
-.tmp/
-tmp/
-temp/
-*.tmp
-tests/_tmp/
-tests/_tmp_mplconfig/
-tests/_tmp_file_inventory.txt
-data_tmp/
-
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-frontend/coverage/
-frontend/.npm-cache/
-release_pkg/
-.release_staging/
-release_out/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Testing
-.pytest_cache/
+# Coverage
 .coverage
+coverage/
 htmlcov/
 
-# Distribution / packaging
+# Python specific
+*.py[cod]
+*$py.class
+*.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Production artifacts
-*.tar.gz
-*.zip
-*.tar.bz2
-
-# IDE settings
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
+```

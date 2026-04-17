@@ -90,9 +90,18 @@ const parallel = ref(true);
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "(same origin)";
 
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
-  file.value = input.files?.[0] ?? null;
+  const selected = input.files?.[0] ?? null;
+  if (selected && selected.size > MAX_FILE_SIZE) {
+    window.alert(`File too large. Maximum size: 2GB`);
+    input.value = ""; // Reset
+    file.value = null;
+    return;
+  }
+  file.value = selected;
 }
 
 async function onSubmit() {

@@ -1,19 +1,26 @@
 :root {
   color-scheme: light;
-  --bg: #0b1020;
-  --panel: #101831;
-  --card: #121c3a;
-  --text: #e7ecff;
-  --muted: #9fb0e8;
-  --border: rgba(255, 255, 255, 0.12);
-  --brand: #6ea8fe;
-  --danger: #ff6b6b;
-  --ok: #2dd4bf;
-  --warn: #fbbf24;
+  /* Design Tokens - 標準化顏色變數 */
+  --color-bg: #0b1020;
+  --color-panel: #101831;
+  --color-card: #121c3a;
+  --color-text: #e7ecff;
+  --color-muted: #9fb0e8;
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-brand: #6ea8fe;
+  --color-danger: #ff6b6b;
+  --color-ok: #2dd4bf;
+  --color-warn: #fbbf24;
+  
+  /* Effects */
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   --radius: 14px;
   --radius-sm: 10px;
+  
+  /* Layout */
   --max: 1040px;
+  
+  /* Typography */
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans",
     sans-serif;
@@ -31,7 +38,7 @@ body {
 body {
   margin: 0;
   font-family: var(--sans);
-  color: var(--text);
+  color: var(--color-text);
   background: radial-gradient(1200px 800px at 20% 10%, rgba(110, 168, 254, 0.22), transparent 55%),
     radial-gradient(900px 700px at 80% 20%, rgba(45, 212, 191, 0.12), transparent 60%),
     linear-gradient(180deg, #050816, #050816 55%, #070c1a);
@@ -54,7 +61,7 @@ code {
 
 .card {
   background: rgba(18, 28, 58, 0.74);
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   backdrop-filter: blur(10px);
@@ -76,9 +83,9 @@ code {
 
 .btn {
   appearance: none;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
+  color: var(--color-text);
   padding: 10px 12px;
   border-radius: 12px;
   cursor: pointer;

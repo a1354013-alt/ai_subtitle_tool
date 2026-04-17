@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import re
@@ -9,7 +8,7 @@ import uuid as _uuid
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse, Response
@@ -515,24 +514,9 @@ async def download_result(
     raise HTTPException(status_code=404, detail=f"Subtitle for language '{lang}' not found")
 
 
-@app.websocket("/ws/status/{task_id}")
-async def websocket_status(websocket: WebSocket, task_id: str):
-    try:
-        task_id = validate_task_id(task_id)
-    except HTTPException:
-        await websocket.close(code=4000, reason="Invalid task_id")
-        return
-
-    await websocket.accept()
-    try:
-        while True:
-            res = await get_status(task_id)
-            await websocket.send_json(res.dict())
-            if res.status in ["SUCCESS", "FAILURE", "REVOKED"]:
-                break
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        pass
+# Note: WebSocket status endpoint was removed as it was experimental and unused.
+# The frontend uses polling for task status updates.
+# If you need real-time updates, consider implementing a proper WebSocket solution with tests.
 
 
 @app.get("/subtitle/{task_id}")

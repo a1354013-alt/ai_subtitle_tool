@@ -230,14 +230,16 @@ def process_video_task(self, video_path: str, options: dict = None):
 
         if parallel and duration > 60:
             if chord is None:
-                raise RuntimeError("Celery chord is unavailable; cannot run parallel pipeline")
+                logger.warning("Chord unavailable; falling back to non-parallel mode for task %s", business_id)
+                parallel = False  # Fallback to non-parallel mode
 
-            self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Splitting video..."})
-            video_segments = split_video(current_video)
-            segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
-            header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
-            callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir)
-            return self.replace(chord(header)(callback))
+            if parallel:
+                self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Splitting video..."})
+                video_segments = split_video(current_video)
+                segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
+                header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
+                callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir)
+                return self.replace(chord(header)(callback))
 
         self.update_state(state="PROGRESS", meta={"progress": 20, "status": "Transcribing..."})
         srt_path = f"{base_path}.srt"

@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 def format_timestamp(seconds: float) -> str:
+    """將秒數轉換為 SRT 時間格式 (00:00:00,000)。
+    
+    與 backend/utils/translate_utils.py 中的 format_timestamp 保持一致。
+    統一使用此模組的實作。
+    """
     td = timedelta(seconds=seconds)
     total_seconds = int(td.total_seconds())
     hours = total_seconds // 3600

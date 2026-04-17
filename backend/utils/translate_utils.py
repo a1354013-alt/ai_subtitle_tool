@@ -1,13 +1,16 @@
+import logging
 import os
-import json
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception, after_log
 from openai import APIError, APIConnectionError, RateLimitError
+
+logger = logging.getLogger(__name__)
 
 # B) 翻譯模型與版本 pin
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "gpt-4o-mini")
 
 # Lazy 初始化 OpenAI client
 _openai_client = None
+
 
 def get_openai_client():
     """Lazy 初始化 OpenAI client，避免在 import 時就連接"""
@@ -23,6 +26,7 @@ def get_openai_client():
         _openai_client = OpenAI(api_key=api_key)
     return _openai_client
 
+
 def format_timestamp(seconds: float):
     """將秒數轉換為 SRT 時間格式 (00:00:00,000)"""
     td_hours = int(seconds // 3600)
@@ -30,6 +34,7 @@ def format_timestamp(seconds: float):
     td_seconds = int(seconds % 60)
     td_milliseconds = int((seconds % 1) * 1000)
     return f"{td_hours:02}:{td_minutes:02}:{td_seconds:02},{td_milliseconds:03}"
+
 
 def is_retriable_exception(exception: Exception) -> bool:
     """
@@ -64,11 +69,13 @@ def is_retriable_exception(exception: Exception) -> bool:
     
     return False
 
+
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry=retry_if_exception(is_retriable_exception),
-    reraise=True
+    reraise=True,
+    after=after_log(logger, logging.INFO)
 )
 def translate_batch(texts, source_lang, target_lang):
     """

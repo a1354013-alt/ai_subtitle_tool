@@ -3,8 +3,14 @@ import type { APIError } from "@/types/api";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export function getApiBaseUrl(): string {
-  const raw = import.meta.env.VITE_API_BASE_URL ?? "";
-  return raw.endsWith("/") ? raw.slice(0, -1) : raw;
+  const raw = import.meta.env.VITE_API_BASE_URL;
+  if (!raw && import.meta.env.DEV) {
+    console.warn(
+      "VITE_API_BASE_URL not set; using same-origin. This may fail in cross-origin setups."
+    );
+  }
+  const baseUrl = (raw ?? "").replace(/\/$/, "");
+  return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
 
 export function buildApiUrl(path: string): string {
