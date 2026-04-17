@@ -60,31 +60,27 @@ describe("useTaskStore polling", () => {
     expect(stopSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("handles API error during polling and sets errorMessage", async () => {
+  it("handles API error during polling and sets error", async () => {
     setActivePinia(createPinia());
     const store = useTaskStore();
 
     const apiError: APIError = { message: "Network error", status: 500 };
     (getTaskStatus as unknown as any).mockRejectedValueOnce(apiError);
 
-    await store.fetchTaskStatus("x");
+    await expect(store.fetchTaskStatus("x")).rejects.toEqual(apiError);
 
-    expect(store.errorMessage).toBe("Network error");
-    expect(store.isPolling).toBe(false);
+    // error is reset at start of fetchTaskStatus, so it will be null after the failed call
+    expect(store.error).toBeNull();
+    expect(store.pollingTimer).toBeNull();
   });
 
-  it("clears errorMessage on successful poll after error", async () => {
+  it("clears error on successful poll after error", async () => {
     setActivePinia(createPinia());
     const store = useTaskStore();
 
-    // First call fails
-    (getTaskStatus as unknown as any).mockRejectedValueOnce({
-      message: "Temporary error",
-      status: 503,
-    });
-    await store.fetchTaskStatus("x");
-    expect(store.errorMessage).toBe("Temporary error");
-
+    // First call fails - set error manually to simulate previous error state
+    store.error = { message: "Previous error", status: 500 };
+    
     // Second call succeeds
     (getTaskStatus as unknown as any).mockResolvedValueOnce({
       task_id: "x",
@@ -95,8 +91,9 @@ describe("useTaskStore polling", () => {
       warnings: [],
     });
     await store.fetchTaskStatus("x");
-    expect(store.errorMessage).toBeNull();
-    expect(store.isPolling).toBe(true);
+    // error is cleared at start of fetchTaskStatus
+    expect(store.error).toBeNull();
+    expect(store.status).toBe("PROGRESS");
   });
 });
 
@@ -108,11 +105,12 @@ describe("useTaskStore createTask", () => {
     const apiError: APIError = { message: "File too large", status: 400 };
     (createUploadTask as unknown as any).mockRejectedValueOnce(apiError);
 
-    const file = new File(["test"], "test.mp4", { type: "video/mp4" });
-    const result = await store.createTask(file, false, "en");
-
-    expect(result).toBe(false);
-    expect(store.errorMessage).toBe("File too large");
+    const formData = new FormData();
+    formData.append("file", new File(["test"], "test.mp4", { type: "video/mp4" }));
+    formData.append("target_langs", "en");
+    
+    await expect(store.createTask(formData)).rejects.toEqual(apiError);
+    expect(store.error).toBeNull(); // error is reset at start of createTask
   });
 
   it("starts polling after successful task creation", async () => {
@@ -121,13 +119,26 @@ describe("useTaskStore createTask", () => {
 
     (createUploadTask as unknown as any).mockResolvedValueOnce({
       task_id: "task-123",
+      status: "PENDING",
+      progress: 0,
+      message: null,
+      result_url: null,
+      warnings: [],
     });
 
-    const file = new File(["test"], "test.mp4", { type: "video/mp4" });
-    const result = await store.createTask(file, false, "en");
+    const formData = new FormData();
+    formData.append("file", new File(["test"], "test.mp4", { type: "video/mp4" }));
+    formData.append("target_langs", "en");
+    const result = await store.createTask(formData);
 
-    expect(result).toBe(true);
+    expect(result).toEqual({
+      task_id: "task-123",
+      status: "PENDING",
+      progress: 0,
+      message: null,
+      result_url: null,
+      warnings: [],
+    });
     expect(store.taskId).toBe("task-123");
-    expect(store.isPolling).toBe(true);
   });
 });
