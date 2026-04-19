@@ -13,20 +13,42 @@
 
     <div v-else class="card">
       <div class="card-inner">
+        <!-- Filters -->
+        <div class="filters">
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="Search by Task ID or filename..."
+            class="search-input"
+          />
+          <select v-model="statusFilter" class="status-filter">
+            <option value="">All Statuses</option>
+            <option value="PENDING">PENDING</option>
+            <option value="PROCESSING">PROCESSING</option>
+            <option value="SUCCESS">SUCCESS</option>
+            <option value="FAILURE">FAILURE</option>
+            <option value="CANCELED">CANCELED</option>
+          </select>
+        </div>
+
         <table class="table">
           <thead>
             <tr>
+              <th>Task ID</th>
               <th>Filename</th>
               <th>Status</th>
               <th>Created</th>
+              <th>Duration</th>
               <th>Links</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="t in tasks" :key="t.task_id">
-              <td class="mono">{{ t.filename || t.task_id }}</td>
+            <tr v-for="t in filteredTasks" :key="t.task_id">
+              <td class="mono task-id">{{ t.task_id }}</td>
+              <td class="mono filename">{{ t.filename || "-" }}</td>
               <td><StatusBadge :status="t.status" /></td>
               <td class="mono">{{ formatTs(t.created_at) }}</td>
+              <td class="mono">{{ formatDuration(t.duration_seconds) }}</td>
               <td>
                 <RouterLink class="btn small" :to="{ name: 'task', params: { taskId: t.task_id } }">Status</RouterLink>
                 <RouterLink class="btn small" :to="{ name: 'subtitles', params: { taskId: t.task_id } }">Subtitles</RouterLink>
@@ -44,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import PageHeader from "@/components/PageHeader.vue";
 import LoadingBlock from "@/components/LoadingBlock.vue";
@@ -58,6 +80,8 @@ import type { RecentTask } from "@/types/task";
 const loading = ref(false);
 const error = ref<APIError | null>(null);
 const tasks = ref<RecentTask[]>([]);
+const searchQuery = ref("");
+const statusFilter = ref("");
 
 function formatTs(iso: string): string {
   try {
@@ -66,6 +90,34 @@ function formatTs(iso: string): string {
     return iso;
   }
 }
+
+function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || Number.isNaN(seconds)) return "-";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+}
+
+const filteredTasks = computed(() => {
+  const query = searchQuery.value.toLowerCase().trim();
+  const status = statusFilter.value.toUpperCase();
+
+  return tasks.value.filter((t) => {
+    // Status filter
+    if (status && String(t.status).toUpperCase() !== status) {
+      return false;
+    }
+    // Search filter (task_id or filename)
+    if (query) {
+      const taskIdMatch = t.task_id.toLowerCase().includes(query);
+      const filenameMatch = (t.filename || "").toLowerCase().includes(query);
+      if (!taskIdMatch && !filenameMatch) {
+        return false;
+      }
+    }
+    return true;
+  });
+});
 
 onMounted(async () => {
   loading.value = true;
@@ -96,6 +148,48 @@ onMounted(async () => {
   padding: 6px 8px;
   font-size: 12px;
   margin-right: 6px;
+}
+.filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 14px;
+}
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+.status-filter {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.task-id {
+  font-size: 11px;
+  opacity: 0.7;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filename {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
 
