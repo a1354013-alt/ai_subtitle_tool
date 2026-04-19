@@ -10,7 +10,7 @@ const props = defineProps<{ status: string }>();
 const tone = computed(() => {
   const s = props.status.toUpperCase();
   if (s === "SUCCESS") return "ok";
-  if (s === "FAILURE") return "bad";
+  if (s === "FAILURE" || s === "CANCELED") return "bad";
   if (s === "PROCESSING") return "warn";
   return "neutral";
 });

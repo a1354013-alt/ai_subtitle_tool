@@ -1,4 +1,4 @@
-export type TaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE";
+export type TaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE" | "CANCELED";
 
 export type TaskStatusResponse = {
   task_id: string;
