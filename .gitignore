@@ -1,68 +1,45 @@
-```
-# NPM cache
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ===== Node / Frontend =====
+frontend/node_modules/
 frontend/.npm-cache/
+frontend/dist/
+frontend/coverage/
 
-# Dependencies
-node_modules/
-
-# Compiled and build artifacts
-*.o
-*.obj
+# ===== Build / Artifacts =====
 dist/
 build/
 target/
 
-# Logs and temp files
+# ===== Logs / Temp =====
 *.log
 *.tmp
 *.swp
 
-# Environment
+# ===== Env (never commit secrets) =====
 .env
-.env.local
 .env.*
+*.env
+!.env.example
 
-# Editors
-.vscode/
-.idea/
+# ===== Release outputs / staging =====
+release.zip
+release_out/
+release_pkg/
+.release_staging/
+*.release_staging/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Compression
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# System
-.DS_Store
-Thumbs.db
-
-```

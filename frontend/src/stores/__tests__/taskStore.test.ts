@@ -31,7 +31,7 @@ describe("useTaskStore polling", () => {
     expect(stopSpy).toHaveBeenCalledOnce();
   });
 
-  it("stops polling on terminal status (FAILURE/REVOKED)", async () => {
+  it("stops polling on terminal status (FAILURE)", async () => {
     setActivePinia(createPinia());
     const store = useTaskStore();
 
@@ -47,17 +47,6 @@ describe("useTaskStore polling", () => {
     });
     await store.fetchTaskStatus("x");
     expect(stopSpy).toHaveBeenCalledTimes(1);
-
-    (getTaskStatus as unknown as any).mockResolvedValueOnce({
-      task_id: "x",
-      status: "REVOKED",
-      progress: 0,
-      message: null,
-      result_url: null,
-      warnings: [],
-    });
-    await store.fetchTaskStatus("x");
-    expect(stopSpy).toHaveBeenCalledTimes(2);
   });
 
   it("handles API error during polling and sets error", async () => {
@@ -84,7 +73,7 @@ describe("useTaskStore polling", () => {
     // Second call succeeds
     (getTaskStatus as unknown as any).mockResolvedValueOnce({
       task_id: "x",
-      status: "PROGRESS",
+      status: "PROCESSING",
       progress: 50,
       message: null,
       result_url: null,
@@ -93,7 +82,7 @@ describe("useTaskStore polling", () => {
     await store.fetchTaskStatus("x");
     // error is cleared at start of fetchTaskStatus
     expect(store.error).toBeNull();
-    expect(store.status).toBe("PROGRESS");
+    expect(store.status).toBe("PROCESSING");
   });
 });
 

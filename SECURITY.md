@@ -24,17 +24,21 @@ This document outlines the security measures implemented in the AI Video Subtitl
 All file operations use absolute path resolution with explicit containment checks:
 
 ```python
-# Example from main.py
-resolved = Path(upload_dir).resolve()
-if not str(resolved).startswith(str(BASE_UPLOAD_DIR)):
-    raise HTTPException(status_code=403, detail="Invalid path")
+# Example from backend/main.py (containment via Path.relative_to)
+resolved_path = Path(filepath).resolve()
+resolved_root = Path(allowed_root).resolve()
+try:
+    resolved_path.relative_to(resolved_root)
+except ValueError:
+    raise HTTPException(status_code=400, detail="Path traversal detected")
 ```
 
 ## CORS Configuration
 
 ### Default Policy
-- **Development**: Allow all origins (`*`) without credentials
-- **Production**: Explicit origin whitelist recommended
+- **Development (recommended)**: explicit origin (`http://localhost:5173`) with credentials enabled
+- **Alternative dev**: wildcard (`*`) only when credentials are disabled
+- **Production**: explicit origin whitelist required when using credentials
 
 ### Environment Variables
 ```bash

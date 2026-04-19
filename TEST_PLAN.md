@@ -1,79 +1,104 @@
-# AI 自動影片上字幕工具 - 測試計畫
+# Test Plan
 
-本文件描述「目前版本」可實際驗證的測試方式；未涵蓋的項目一律列在手動整合測試中，避免文件比程式更自信。
+This repo aims for a small but reliable test suite that validates:
 
-## 1. 自動化行為測試（建議）
+- backend HTTP contracts (upload/status/results/subtitle/download)
+- backend safety invariants (path traversal containment, atomic writes)
+- frontend routing + key UI states (happy path + common errors)
+- release packaging is clean and reproducible
 
-執行方式：
+---
+
+## Backend tests
+
+Run:
 
 ```bash
 pytest
 ```
 
-測試位置：`tests/test_behavior.py`
+Scope:
 
-### 自動化測試覆蓋範圍
+- FastAPI integration tests using `TestClient`
+- Contract coverage for core endpoints:
+  - `POST /upload`
+  - `GET /status/{task_id}`
+  - `GET /results/{task_id}`
+  - `GET /subtitle/{task_id}` and `PUT /subtitle/{task_id}`
+  - `GET /download/{task_id}`
+- Warning policy:
+  - Deprecation warnings from **our code** are treated as errors.
+  - Known third-party deprecation noise is filtered precisely (not a blanket ignore).
 
-- `finalize_pipeline()` / merge：segment payload 統一格式驗證與「單點」轉換（dict -> SimpleSegment 後才進入 merge）
-- 平行分段：`transcribe_segment_task()` 會回傳完整 metadata（`start_offset/end_offset/overlap/segment_idx`）且在成功後主動清理自己的 `temp_srt`
-- overlap 去重：`merge_segments_subtitles()` 在 overlap 區使用「時間接近 + 簡單 normalize」去重（空白/大小寫/前後標點）
-- 字幕編輯：`PUT /subtitle/{task_id}` 只更新指定格式、不污染其他格式；更新後會刪除 `{task_id}_final.mp4`（若存在）
-- 字幕/下載：`GET /subtitle/{task_id}` / `GET /download/{task_id}` 能回對應檔案；`final.mp4` 不存在時 `/download` 回 404
-- 上傳驗證：`POST /upload` MIME 僅做初篩（允許 `video/*`、空值、`application/octet-stream`），最終以 `ffprobe` 判定
-- 安全性：`validate_path_traversal()` 防止路徑逃逸；`/results/{task_id}` 的 manifest 檔名解析（語言後綴含 `.`）
+Notes:
 
-## 1.1 前端自動化測試（建議）
+- Integration tests stub Celery/ffprobe interactions so they are deterministic and do not require a running Redis/worker.
+- Full end-to-end video processing is intentionally excluded from unit/CI tests due to runtime cost; it is covered by manual smoke checks.
 
-前端測試使用 Vitest，並假設在乾淨環境中先安裝依賴（release package 不應包含 `node_modules/`）：
+---
+
+## Frontend tests
+
+Run:
 
 ```bash
 cd frontend
-rm -rf node_modules
-npm install
+npm ci
+npm run typecheck
+npm run lint
 npm test
-```
-
-前端建置驗證：
-
-```bash
 npm run build
 ```
 
-## 1.2 Release 打包驗證（建議）
+Scope:
 
-Release zip 需由單一 source tree 透過腳本產生（不可內嵌 `node_modules/` 或保留第二份 `release_pkg/` source 副本）。
+- Route smoke tests (Home / TaskStatus / Subtitle / Download / RecentTasks)
+- Component behavior tests for:
+  - error states (not found, failed task, missing subtitle)
+  - status polling UI states and warnings rendering
 
-```bash
-# from repo root
-powershell -ExecutionPolicy Bypass -File .\\make_release_zip.ps1
-```
+---
 
-預設輸出：`release_out/ai_subtitle_tool_release.zip`
+## Release package checks
 
-建議再做一次內容檢查（避免把 `.git/`、`node_modules/`、`dist/`、`__pycache__/`、測試快取等打進交付包）：
-
-```bash
-tar -tf release_out/ai_subtitle_tool_release.zip | rg "(^|/)(\\.git|node_modules|dist|__pycache__|_tmp|_tmp_mplconfig|\\.pytest_cache|htmlcov|\\.coverage)(/|$)"
-```
-
-（Windows 若無 `rg`，可用 PowerShell `Select-String` 替代；重點是檢查 forbidden paths 不存在。）
-
-## 1.3 API Smoke Test（建議）
-
-本專案的 API 行為 smoke test 已由 `pytest` 覆蓋（見 `tests/test_behavior.py`）。建議驗收時至少執行：
+Release zip must be built via script only:
 
 ```bash
-python -m pytest -q
+python scripts/make_release_zip.py --out release.zip --check
 ```
 
-## 2. 手動整合測試（需要 ffmpeg/redis/celery/模型環境）
+The check fails if the zip contains:
 
-以下項目需要實際環境與外部依賴（ffmpeg、redis、celery worker、whisper 模型、OpenAI API），不納入自動化行為測試：
+- `.git/`, `node_modules/`, `dist/`
+- runtime outputs (`uploads/`, `segments/`)
+- caches (`__pycache__/`, `.pytest_cache/`, `.coverage`, `htmlcov/`, etc.)
+- local env files (`.env`, `.env.*`, `*.env` except `.env.example`)
 
-- 長影片平行處理端到端（切片 -> chord -> 合併 -> 產出字幕）
-- `burn_subtitles=true` 的影片燒錄結果
-- `remove_silence=true` 的剪輯結果
-- 翻譯與重試策略（需要可控的網路/外部 API）
-- diarization（需要 HF_TOKEN 與額外依賴）
+---
 
-建議至少用 30 秒與 5 分鐘兩種影片各跑一次，並在 `/status/{task_id}` / WebSocket 觀察進度與結果檔案是否正確產出。
+## Manual smoke checks (recommended before tagging a release)
+
+Local (3 terminals):
+
+```bash
+redis-server
+celery -A backend.celery_app:celery_app worker --loglevel=info
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Then:
+
+- Upload a short MP4
+- Verify status progresses to `SUCCESS`
+- Verify results show subtitles + final video
+- Edit a subtitle line and verify the UI reflects updated content
+- Download final video and subtitle files
+

@@ -25,7 +25,8 @@ export const useResultStore = defineStore("result", {
         return res;
       } catch (e) {
         this.error = e as APIError;
-        throw e;
+        this.manifest = null;
+        return null;
       } finally {
         this.loading = false;
       }

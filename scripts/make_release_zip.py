@@ -24,6 +24,11 @@ EXCLUDED_DIR_NAMES = {
     "tmp",
     "temp",
     "data_tmp",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".coverage",
+    "htmlcov",
 }
 
 EXCLUDED_GLOBS = {
@@ -34,6 +39,8 @@ EXCLUDED_GLOBS = {
     "*.tar.gz",
     "*.tar.bz2",
     "*.log",
+    ".coverage",
+    "coverage.xml",
 }
 
 
@@ -91,15 +98,63 @@ def _assert_release_zip_clean(out_path: Path) -> None:
     with zipfile.ZipFile(out_path, "r") as zf:
         names = zf.namelist()
 
+    forbidden_dir_names = {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        "dist",
+        ".vite",
+        ".npm-cache",
+        ".cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "uploads",
+        "segments",
+        "release_out",
+        "release_pkg",
+        ".release_staging",
+        "htmlcov",
+    }
+    forbidden_file_names = {
+        ".env",
+        ".coverage",
+    }
+    forbidden_suffixes = {
+        ".pyc",
+        ".pyo",
+        ".pyd",
+        ".log",
+        ".zip",
+        ".tar.gz",
+        ".tar.bz2",
+        ".tmp",
+    }
+
     for name in names:
-        # Forbidden files
-        if name.endswith("/.env") or Path(name).name == ".env":
-            raise SystemExit(f"release zip contains forbidden file: {name}")
+        p = Path(name)
+        parts = [part for part in p.parts if part not in (".", "")]
+
+        if not parts:
+            continue
 
         # Forbidden directories (any depth)
-        parts = name.split("/")
-        if "uploads" in parts or "segments" in parts or ".cache" in parts:
+        if any(part in forbidden_dir_names for part in parts[:-1]):
             raise SystemExit(f"release zip contains forbidden path: {name}")
+
+        # Forbidden files (any depth)
+        if parts[-1] in forbidden_file_names:
+            raise SystemExit(f"release zip contains forbidden file: {name}")
+
+        # Env files (except .env.example)
+        if parts[-1] == ".env.example":
+            pass
+        elif parts[-1] == ".env" or parts[-1].startswith(".env.") or parts[-1].endswith(".env"):
+            raise SystemExit(f"release zip contains forbidden env file: {name}")
+
+        # Forbidden suffix patterns
+        if any(str(p).endswith(suf) for suf in forbidden_suffixes):
+            raise SystemExit(f"release zip contains forbidden file type: {name}")
 
 
 def main(argv: list[str]) -> int:

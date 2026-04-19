@@ -4,6 +4,14 @@ import { setActivePinia, createPinia } from "pinia";
 import DownloadPage from "@/pages/DownloadPage.vue";
 import { useResultStore } from "@/stores/result";
 
+vi.mock("vue-router", async () => {
+  const actual = await vi.importActual<any>("vue-router");
+  return {
+    ...actual,
+    useRouter: () => ({ push: vi.fn() }),
+  };
+});
+
 function flush() {
   return Promise.resolve();
 }
@@ -14,6 +22,7 @@ describe("DownloadPage", () => {
     const result = useResultStore();
     result.manifest = {
       task_id: "t",
+      task_status: "SUCCESS",
       has_video: false,
       subtitle_languages: [],
       available_files: [],

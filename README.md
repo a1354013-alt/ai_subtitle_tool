@@ -23,6 +23,42 @@ flowchart LR
   B -->|read| FS
 ```
 
+## Task Flow Diagram
+
+```mermaid
+sequenceDiagram
+  participant U as User (Browser)
+  participant F as Frontend (Vue)
+  participant B as Backend API (FastAPI)
+  participant R as Redis
+  participant W as Worker (Celery)
+  participant FS as Uploads Dir
+
+  U->>F: Select video + options
+  F->>B: POST /upload (multipart)
+  B->>FS: Save original file
+  B->>R: Enqueue Celery task (task_id)
+  B-->>F: {task_id, status:PENDING}
+  loop Poll until terminal
+    F->>B: GET /status/{task_id}
+    B-->>F: {status, progress, warnings}
+  end
+  F->>B: GET /results/{task_id}
+  B->>FS: Enumerate available files
+  B-->>F: manifest (available_files + has_video)
+  opt View/edit subtitle
+    F->>B: GET /subtitle/{task_id}?lang=...&format=...
+    F->>B: PUT /subtitle/{task_id}?lang=...
+    Note over B,FS: Writes subtitle + deletes final.mp4 (no auto rebuild)
+  end
+  opt Explicit rebuild after edits
+    F->>B: POST /tasks/{task_id}/rebuild-final
+    B->>R: Enqueue rebuild task
+  end
+  F->>B: GET /download/{task_id} (video) or ?lang&format (subs)
+  B-->>F: FileResponse / text payload
+```
+
 ## Tech Stack
 
 - Backend: FastAPI + Uvicorn
@@ -63,6 +99,8 @@ Do NOT include these in a release package:
 This repo includes `make_release_zip.ps1` which stages a clean tree and produces a zip release package (default output: `release_out/ai_subtitle_tool_release.zip`).
 
 Important: the script does **not** keep a second copy of the source tree (no committed `release_pkg/`). The staging directory is temporary and removed after the zip is created.
+
+Do **NOT** manually zip the repo (Explorer / Finder / `zip -r`). Manual zips routinely ship forbidden artifacts (e.g. `.git/`, `node_modules/`, caches) and are considered a broken release process for this project.
 
 For cross-platform release packaging (CI uses this):
 
@@ -117,8 +155,8 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 Health checks:
 
-- `GET /healthz` → `{"status":"ok"}`
-- `GET /readyz` → checks Redis + UPLOAD_DIR
+- `GET /healthz` returns `{"status":"ok"}`
+- `GET /readyz` checks Redis + `UPLOAD_DIR` write access
 
 Backend tests:
 
@@ -134,9 +172,11 @@ Always install in a clean environment:
 ```bash
 cd frontend
 rm -rf node_modules
-npm install
-npm run build
+npm ci
+npm run lint
+npm run typecheck
 npm test
+npm run build
 npm run dev
 ```
 
@@ -212,9 +252,16 @@ python scripts/make_release_zip.py --out release.zip --check
 
 `release.zip` must NOT contain: `uploads/`, `segments/`, `.cache/`, `.env`.
 
+## Design Decisions
+
+- Why polling: simpler deployment than WebSockets, resilient to refreshes, and easy to test via `GET /status/{task_id}`.
+- Why not auto-rebuild: editing subtitles should be fast and safe; rebuilding video is expensive and should be an explicit user action (`POST /tasks/{task_id}/rebuild-final`).
+- Why split subtitle text/video utils: downloading/converting subtitles (SRT/VTT) must stay lightweight and must not depend on video libraries; video burning stays in video-only modules.
+- Why Celery: isolates long-running CPU/IO work from the API process, provides progress reporting, and matches Docker/Redis deployment with clear responsibilities.
+
 ## Notes
 
 - Subtitle editing updates only the subtitle file; it does NOT rebuild/burn the final video.
 - Task status response includes `warnings: string[]` (non-fatal); the frontend shows them separately from errors.
-- WebSocket status (`/ws/status/{task_id}`) exists but the frontend uses polling; consider it experimental for now.
+- Task status updates are via polling (`GET /status/{task_id}`); there is no WebSocket status endpoint in this repo.
 - Recent tasks: `GET /tasks/recent` and the frontend page `/tasks/recent`.

@@ -14,7 +14,9 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from .models.status import TaskStatus as TaskStatusEnum
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
+from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 
 app = FastAPI(
     title="AI Video Subtitle Tool",
@@ -137,6 +139,16 @@ def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> 
     process_video_task.apply_async(args=[file_path, options], task_id=task_id)
 
 
+def _enqueue_rebuild_final_task(task_id: str, lang_suffix: str, subtitle_format: str) -> None:
+    try:
+        from .tasks import rebuild_final_video_task
+    except Exception:
+        logger.error("Task module unavailable; cannot enqueue rebuild_final_video_task", exc_info=True)
+        raise HTTPException(status_code=503, detail="Task worker unavailable")
+
+    rebuild_final_video_task.apply_async(args=[task_id, lang_suffix, subtitle_format], task_id=task_id)
+
+
 def _get_async_result(task_id: str):
     from celery.result import AsyncResult
 
@@ -145,9 +157,9 @@ def _get_async_result(task_id: str):
     return AsyncResult(task_id, app=celery_app)
 
 
-class TaskStatus(BaseModel):
+class TaskStatusResponse(BaseModel):
     task_id: str
-    status: str
+    status: TaskStatusEnum
     progress: int
     message: Optional[str] = None
     result_url: Optional[str] = None
@@ -168,7 +180,7 @@ class FileInfo(BaseModel):
 
 class TaskResultManifest(BaseModel):
     task_id: str
-    task_status: str = Field(..., description="Task status at the time of manifest generation")
+    task_status: TaskStatusEnum = Field(..., description="Task status at the time of manifest generation")
     has_video: bool
     subtitle_languages: List[str]
     available_files: List[FileInfo]
@@ -223,7 +235,7 @@ async def readyz():
     return {"status": "ok"}
 
 
-@app.post("/upload", response_model=TaskStatus)
+@app.post("/upload", response_model=TaskStatusResponse)
 async def upload_video(
     file: UploadFile = File(...),
     target_langs: str = Form("Traditional Chinese", description="Comma separated languages"),
@@ -329,16 +341,28 @@ async def upload_video(
 
     # Store recent task history for product continuity.
     try:
-        TASK_HISTORY.upsert_created(task_id=task_id, filename=file.filename, status="PENDING")
+        TASK_HISTORY.upsert_created(task_id=task_id, filename=file.filename, status=TaskStatusEnum.PENDING.value)
     except Exception:
         logger.warning("Failed to record task history (non-fatal)", exc_info=True)
 
-    return TaskStatus(task_id=task_id, status="PENDING", progress=0)
+    return TaskStatusResponse(task_id=task_id, status=TaskStatusEnum.PENDING, progress=0)
 
 
-@app.get("/status/{task_id}", response_model=TaskStatus)
+@app.get("/status/{task_id}", response_model=TaskStatusResponse)
 async def get_status(task_id: str):
     task_id = validate_task_id(task_id)
+
+    # Cancellation is an explicit user action; treat it as a terminal FAILURE from the API perspective.
+    if is_task_canceled(UPLOAD_DIR, task_id):
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.FAILURE,
+            progress=0,
+            message="Canceled",
+            result_url=None,
+            warnings=[],
+        )
+
     task_result = _get_async_result(task_id)
 
     status = task_result.status
@@ -354,31 +378,34 @@ async def get_status(task_id: str):
             message = str(info.get("status", "") or "")
             if "warnings" in info and isinstance(info["warnings"], list):
                 warnings.extend(info["warnings"])
-        status = "PROCESSING"
+        status = TaskStatusEnum.PROCESSING
     elif status == "SUCCESS":
         progress = 100
         message = "Completed"
         result_url = f"/results/{task_id}"
         if isinstance(task_result.result, dict):
             warnings.extend(task_result.result.get("warnings", []) or [])
-        status = "SUCCESS"
+        status = TaskStatusEnum.SUCCESS
     elif status == "FAILURE":
         message = str(task_result.result)
-        status = "FAILURE"
+        status = TaskStatusEnum.FAILURE
     elif status == "PENDING":
         message = "Waiting for worker..."
-        status = "PENDING"
+        status = TaskStatusEnum.PENDING
+    else:
+        # Any other Celery states are surfaced as PROCESSING for stability.
+        status = TaskStatusEnum.PROCESSING
 
     # Best-effort status tracking for "Recent Tasks"
     try:
         duration = None
-        if status in ("SUCCESS", "FAILURE", "REVOKED"):
+        if status in (TaskStatusEnum.SUCCESS, TaskStatusEnum.FAILURE):
             duration = duration_seconds_since(TASK_HISTORY.get_created_at(task_id))
-        TASK_HISTORY.update_status(task_id=task_id, status=status, duration_seconds=duration)
+        TASK_HISTORY.update_status(task_id=task_id, status=status.value, duration_seconds=duration)
     except Exception:
         logger.warning("Failed to update task history (non-fatal)", exc_info=True)
 
-    return TaskStatus(
+    return TaskStatusResponse(
         task_id=task_id,
         status=status,
         progress=progress,
@@ -386,6 +413,36 @@ async def get_status(task_id: str):
         result_url=result_url,
         warnings=warnings,
     )
+
+
+@app.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    task_id = validate_task_id(task_id)
+
+    # Mark as canceled first so any polling becomes deterministic immediately.
+    mark_task_canceled(UPLOAD_DIR, task_id)
+
+    # Best-effort revoke; may not terminate a running task depending on worker settings.
+    try:
+        task_result = _get_async_result(task_id)
+        task_result.revoke(terminate=False)
+    except Exception:
+        logger.warning("Failed to revoke task (non-fatal): %s", task_id, exc_info=True)
+
+    return {"status": "canceled", "task_id": task_id}
+
+
+@app.post("/tasks/{task_id}/rebuild-final")
+async def rebuild_final(task_id: str, lang: str = Query(..., description="Language for subtitle"), format: str = Query("ass")):
+    task_id = validate_task_id(task_id)
+    lang_suffix = validate_lang(lang)
+    subtitle_format = (format or "ass").lower()
+
+    if subtitle_format not in ("ass", "srt"):
+        raise HTTPException(status_code=400, detail="format must be 'ass' or 'srt'")
+
+    _enqueue_rebuild_final_task(task_id=task_id, lang_suffix=lang_suffix, subtitle_format=subtitle_format)
+    return {"status": "queued", "task_id": task_id}
 
 
 @app.get("/tasks/recent", response_model=list[RecentTask])
@@ -412,7 +469,10 @@ async def get_results_manifest(task_id: str):
             warnings = list(info.get("warnings") or [])
 
     status = task_result.status
-    task_status = "PROCESSING" if status == "PROGRESS" else status
+    if is_task_canceled(UPLOAD_DIR, task_id):
+        task_status = TaskStatusEnum.FAILURE
+    else:
+        task_status = TaskStatusEnum.PROCESSING if status == "PROGRESS" else TaskStatusEnum(status) if status in TaskStatusEnum._value2member_map_ else TaskStatusEnum.PROCESSING
 
     # Detect orphaned files without exposing them as valid outputs.
     orphaned_files_detected = False
@@ -424,7 +484,7 @@ async def get_results_manifest(task_id: str):
     except OSError:
         logger.warning("Failed to list upload dir for orphan detection", exc_info=True)
 
-    if task_status != "SUCCESS":
+    if task_status != TaskStatusEnum.SUCCESS:
         return TaskResultManifest(
             task_id=task_id,
             task_status=task_status,
@@ -497,7 +557,7 @@ async def download_result(
         if not os.path.exists(srt_path):
             raise HTTPException(status_code=404, detail=f"Subtitle 'srt' for language '{lang}' not found (required for vtt)")
 
-        from .utils.subtitle_utils import srt_to_vtt
+        from .utils.subtitle_text_utils import srt_to_vtt
 
         with open(srt_path, "r", encoding="utf-8") as f:
             vtt = srt_to_vtt(f.read())
@@ -545,7 +605,7 @@ async def get_subtitle(
         if not os.path.exists(srt_path):
             raise HTTPException(status_code=404, detail=f"Subtitle 'srt' for language '{lang}' not found (required for vtt)")
 
-        from .utils.subtitle_utils import srt_to_vtt
+        from .utils.subtitle_text_utils import srt_to_vtt
 
         with open(srt_path, "r", encoding="utf-8") as f:
             vtt = srt_to_vtt(f.read())

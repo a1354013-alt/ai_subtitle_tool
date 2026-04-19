@@ -3,13 +3,20 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     env_file:
-      - backend/.env
+      # Use the example file so `docker compose up` works out-of-the-box.
+      # For real secrets, set environment variables (recommended) or edit a copy locally.
+      - backend/.env.example
     environment:
       # Ensure Docker works even if backend/.env is configured for local (localhost) usage.
       REDIS_URL: redis://redis:6379/0
@@ -20,15 +27,22 @@ services:
       - ./backend/uploads:/app/uploads
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   worker:
     build:
       context: .
       dockerfile: backend/Dockerfile
     env_file:
-      - backend/.env
+      - backend/.env.example
     environment:
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/uploads
@@ -36,7 +50,8 @@ services:
       - ./backend/uploads:/app/uploads
     command: celery -A backend.celery_app:celery_app worker --loglevel=info
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
@@ -47,4 +62,5 @@ services:
     ports:
       - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy

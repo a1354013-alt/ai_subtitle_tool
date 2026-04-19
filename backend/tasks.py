@@ -41,7 +41,8 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
     from .utils.translate_utils import translate_segments, generate_bilingual_srt
     from .utils.ass_utils import generate_ass
     from .utils.split_utils import merge_segments_subtitles
-    from .utils.video_utils import burn_subtitles
+    from .utils.subtitle_video_utils import burn_subtitles
+    from .utils.task_control_utils import is_task_canceled
 
     business_id = options.get("business_id")
     target_langs = options.get("target_langs", ["Traditional Chinese"])
@@ -51,6 +52,9 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
     warnings = []
 
     try:
+        if business_id and is_task_canceled(os.path.dirname(os.path.abspath(video_path)), business_id):
+            raise RuntimeError("Task canceled")
+
         upload_dir = os.path.dirname(os.path.abspath(video_path))
         base_path = os.path.join(upload_dir, business_id)
 
@@ -116,6 +120,8 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
 
         translations = {}
         for lang in target_langs:
+            if is_task_canceled(upload_dir, business_id):
+                raise RuntimeError("Task canceled")
             try:
                 lang_trans, _ = translate_segments(segments, "Auto", [lang])
                 translations[lang] = lang_trans[lang]
@@ -152,6 +158,8 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                 update_state_func(state="PROGRESS", meta={"progress": 95, "status": "Burning subtitles..."})
             first_lang_file = list(result_files.values())[0]
             try:
+                if is_task_canceled(upload_dir, business_id):
+                    raise RuntimeError("Task canceled")
                 burn_subtitles(video_path, first_lang_file, final_video_path)
             except Exception as e:
                 warnings.append(f"Subtitle burning failed: {str(e)}. Copying original video.")
@@ -210,6 +218,7 @@ def process_video_task(self, video_path: str, options: dict = None):
         from .utils.split_utils import split_video
         from .utils.model_loader import get_model_by_duration
         from .utils.subtitle_utils import transcribe_video
+        from .utils.task_control_utils import is_task_canceled
         from moviepy.editor import VideoFileClip
 
         parallel = options.get("parallel", True)
@@ -218,6 +227,8 @@ def process_video_task(self, video_path: str, options: dict = None):
         base_path = os.path.join(upload_dir, business_id)
 
         current_video = video_path
+        if is_task_canceled(upload_dir, business_id):
+            raise RuntimeError("Task canceled")
         if do_remove_silence:
             self.update_state(state="PROGRESS", meta={"progress": 5, "status": "Removing silence..."})
             silence_removed_video = f"{base_path}_no_silence.mp4"
@@ -258,3 +269,42 @@ def process_video_task(self, video_path: str, options: dict = None):
 @celery_app.task
 def cleanup_old_files():
     return cleanup_old_files_impl()
+
+
+@celery_app.task(bind=True)
+def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_format: str = "ass"):
+    """
+    Rebuild (re-burn) the final video for an existing task.
+
+    This is intentionally explicit (user-triggered) and never runs automatically on subtitle edit.
+    """
+    from .utils.subtitle_video_utils import burn_subtitles
+    from .utils.task_control_utils import is_task_canceled
+
+    upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
+    base_path = os.path.join(upload_dir, task_id)
+
+    if is_task_canceled(upload_dir, task_id):
+        raise RuntimeError("Task canceled")
+
+    # Prefer the silence-removed intermediate if it exists.
+    candidate_videos = [
+        f"{base_path}_no_silence.mp4",
+        f"{base_path}.mp4",
+        f"{base_path}.mkv",
+        f"{base_path}.avi",
+        f"{base_path}.mov",
+    ]
+    video_path = next((p for p in candidate_videos if os.path.exists(p)), None)
+    if not video_path:
+        raise FileNotFoundError("Source video not found for rebuild")
+
+    subtitle_path = f"{base_path}_{lang_suffix}.{subtitle_format}"
+    if not os.path.exists(subtitle_path):
+        raise FileNotFoundError("Subtitle file not found for rebuild")
+
+    out_path = f"{base_path}_final.mp4"
+    self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Rebuilding final video..."})
+    burn_subtitles(video_path, subtitle_path, out_path)
+    self.update_state(state="PROGRESS", meta={"progress": 100, "status": "Completed"})
+    return {"warnings": []}

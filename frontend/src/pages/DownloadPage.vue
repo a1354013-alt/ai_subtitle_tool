@@ -2,7 +2,7 @@
   <div>
     <PageHeader
       title="Downloads"
-      subtitle="Download existing outputs. This page does not trigger rebuilds or background work."
+      subtitle="Download existing outputs. Rebuilding final.mp4 is explicit and only runs when you click the button."
     />
 
     <ErrorAlert v-if="res.error" :error="res.error" />
@@ -61,6 +61,14 @@
             <div style="margin-top: 6px">
               Editing subtitles only updates the subtitle file; it does not rebuild/burn the final video automatically.
             </div>
+            <div v-if="manifest && isSuccessManifest" style="margin-top: 10px">
+              <button class="btn primary" :disabled="rebuilding || !selectedLang" @click="onRebuildFinal">
+                {{ rebuilding ? "Rebuilding..." : "Rebuild final.mp4" }}
+              </button>
+              <div class="help" style="margin-top: 6px">
+                This enqueues a background rebuild using the selected language. Track progress on the status page.
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -70,7 +78,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRouter } from "vue-router";
 import PageHeader from "@/components/PageHeader.vue";
 import DownloadList from "@/components/DownloadList.vue";
 import LoadingBlock from "@/components/LoadingBlock.vue";
@@ -80,9 +88,11 @@ import { useResultStore } from "@/stores/result";
 import type { DownloadItem } from "@/types/result";
 import { buildDownloadUrl } from "@/api/results";
 import { usePreferencesStore } from "@/stores/preferences";
+import { rebuildFinalVideo } from "@/api/tasks";
 
 const props = defineProps<{ taskId: string }>();
 const taskId = computed(() => props.taskId);
+const router = useRouter();
 
 const res = useResultStore();
 const prefs = usePreferencesStore();
@@ -111,6 +121,21 @@ watch(
 
 function persistLang() {
   prefs.setPreferredLang(selectedLang.value);
+}
+
+const rebuilding = ref(false);
+
+async function onRebuildFinal() {
+  if (!selectedLang.value) return;
+  rebuilding.value = true;
+  try {
+    const langInfo = files.value.find((f) => f.lang === selectedLang.value);
+    const format = langInfo?.ass ? "ass" : "srt";
+    await rebuildFinalVideo(taskId.value, selectedLang.value, format);
+    await router.push({ name: "task", params: { taskId: taskId.value } });
+  } finally {
+    rebuilding.value = false;
+  }
 }
 
 const downloadItems = computed<DownloadItem[]>(() => {

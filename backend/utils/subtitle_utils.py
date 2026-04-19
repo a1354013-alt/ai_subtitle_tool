@@ -1,61 +1,9 @@
 import logging
 import os
 
-from moviepy.editor import VideoFileClip
-
-from .audio_utils import preprocess_audio
-from .model_loader import get_model, get_model_by_duration
-from .time_utils import format_timestamp, parse_timestamp
+from .subtitle_text_utils import generate_srt
 
 logger = logging.getLogger(__name__)
-
-
-def generate_srt(segments) -> str:
-    srt_content = ""
-    for i, segment in enumerate(segments):
-        start = format_timestamp(segment.start)
-        end = format_timestamp(segment.end)
-        text = segment.text.strip()
-        srt_content += f"{i + 1}\n{start} --> {end}\n{text}\n\n"
-    return srt_content
-
-
-def srt_to_vtt(srt_text: str) -> str:
-    """
-    Convert SRT text to WebVTT.
-
-    Rules:
-    - Remove numeric cue indices
-    - Replace timestamp comma with dot
-    - Add WEBVTT header
-    """
-    blocks = []
-    cur: list[str] = []
-    for line in (srt_text or "").splitlines():
-        if line.strip() == "":
-            if cur:
-                blocks.append(cur)
-                cur = []
-            continue
-        cur.append(line.rstrip("\n"))
-    if cur:
-        blocks.append(cur)
-
-    out_lines = ["WEBVTT", ""]
-    for block in blocks:
-        if not block:
-            continue
-        i = 0
-        if block[0].strip().isdigit():
-            i = 1
-        if i >= len(block):
-            continue
-        ts = block[i].replace(",", ".")
-        out_lines.append(ts)
-        out_lines.extend(block[i + 1 :])
-        out_lines.append("")
-
-    return "\n".join(out_lines).rstrip() + "\n"
 
 
 def transcribe_video(video_path: str, output_srt_path: str, model_size=None):
@@ -67,6 +15,11 @@ def transcribe_video(video_path: str, output_srt_path: str, model_size=None):
     audio_path = None
     try:
         # 1) Read duration for model selection
+        from moviepy.editor import VideoFileClip
+
+        from .audio_utils import preprocess_audio
+        from .model_loader import get_model, get_model_by_duration
+
         video = VideoFileClip(video_path)
         duration = video.duration
         video.close()

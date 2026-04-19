@@ -3,7 +3,7 @@ export type DownloadSubtitleFormat = SubtitleFormat | "vtt";
 
 export type SubtitleResponse = {
   content: string;
-  format: SubtitleFormat;
+  format: DownloadSubtitleFormat;
   filename: string;
 };
 
