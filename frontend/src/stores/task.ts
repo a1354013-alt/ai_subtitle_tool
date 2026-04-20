@@ -8,7 +8,7 @@ type PollTimer = number | null;
 
 function isTerminalStatus(status: string): boolean {
   const s = String(status).toUpperCase();
-  return s === "SUCCESS" || s === "FAILURE";
+  return s === "SUCCESS" || s === "FAILURE" || s === "CANCELED";
 }
 
 export const useTaskStore = defineStore("task", {
