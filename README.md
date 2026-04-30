@@ -127,6 +127,7 @@ pip install -r requirements.txt
 
 Dependencies are locked in `requirements.lock.txt` (single source of truth).
 Optional diarization dependencies are in `requirements.optional-diarization.txt`.
+For Docker/Linux reproducibility, the lock explicitly pins `faster-whisper==1.0.3` with `av==12.3.0` so PyAV is installed from a prebuilt `cp311` manylinux wheel instead of compiling against system FFmpeg headers during image build.
 
 Environment variables:
 
@@ -196,11 +197,14 @@ Important: `VITE_API_BASE_URL` affects BOTH:
 
 ```bash
 cp backend/.env.example backend/.env
-docker compose up --build
+docker compose build backend --no-cache --progress=plain
+docker compose build frontend --no-cache --progress=plain
+docker compose up
 ```
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8000`
+- Health: `http://localhost:8000/healthz`
 
 ## Deployment Steps
 
@@ -227,7 +231,9 @@ npm run dev
 
 ```bash
 cp backend/.env.example backend/.env
-docker compose up --build
+docker compose build backend --no-cache --progress=plain
+docker compose build frontend --no-cache --progress=plain
+docker compose up
 ```
 
 ### Production (minimal guidance)

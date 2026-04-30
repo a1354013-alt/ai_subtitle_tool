@@ -37,6 +37,11 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
+Locked media dependency note:
+
+- `requirements.lock.txt` pins `faster-whisper==1.0.3` and `av==12.3.0`.
+- This combination keeps Python 3.11 installs reproducible in Docker by using the published PyAV Linux wheel instead of compiling `av==11.0.0` from source against host FFmpeg headers.
+
 3) Start Redis + worker + API (in separate terminals):
 
 ```bash
@@ -77,13 +82,16 @@ If frontend and backend are different origins, set `VITE_API_BASE_URL` (see `fro
 2) Run:
 
 ```bash
-docker compose up --build
+docker compose build backend --no-cache --progress=plain
+docker compose build frontend --no-cache --progress=plain
+docker compose up
 ```
 
 Services:
 
 - Frontend (nginx): `http://localhost:5173`
 - Backend API: `http://localhost:8000`
+- Backend health check: `http://localhost:8000/healthz`
 - Redis: `localhost:6379` (host-mapped for convenience)
 
 Notes:
