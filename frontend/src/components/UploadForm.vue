@@ -4,13 +4,13 @@
       <form @submit.prevent="onSubmit">
         <div class="row">
           <div class="col">
-            <div class="label">Video file</div>
+            <div class="label">{{ $t('upload.selectVideo') }}</div>
             <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" @change="onFileChange" />
             <div class="help">Accepted: mp4 / mkv / avi / mov (final validation is done by ffprobe).</div>
           </div>
 
           <div class="col">
-            <div class="label">target_langs</div>
+            <div class="label">Target Languages</div>
             <input v-model="targetLangs" class="input" type="text" placeholder="Traditional Chinese" />
             <div class="help">Comma-separated languages, e.g. <code class="mono">Traditional Chinese, English</code>.</div>
           </div>
@@ -18,7 +18,7 @@
 
         <div class="row" style="margin-top: 12px">
           <div class="col">
-            <div class="label">subtitle_format</div>
+            <div class="label">Subtitle Format</div>
             <select v-model="subtitleFormat" class="select">
               <option value="ass">ass</option>
               <option value="srt">srt</option>
@@ -26,7 +26,7 @@
           </div>
 
           <div class="col">
-            <div class="label">burn_subtitles</div>
+            <div class="label">Burn Subtitles</div>
             <label class="check">
               <input v-model="burnSubtitles" type="checkbox" />
               <span>Burn subtitles into final.mp4</span>
@@ -34,7 +34,7 @@
           </div>
 
           <div class="col">
-            <div class="label">remove_silence</div>
+            <div class="label">Remove Silence</div>
             <label class="check">
               <input v-model="removeSilence" type="checkbox" />
               <span>Remove silent parts (may change timings)</span>
@@ -42,17 +42,12 @@
           </div>
 
           <div class="col">
-            <div class="label">parallel</div>
+            <div class="label">Parallel</div>
             <label class="check">
               <input v-model="parallel" type="checkbox" />
-              <span>Enable segment parallelism for long videos</span>
+              <span>Parallel segments (recommended for longer videos)</span>
             </label>
           </div>
-        </div>
-
-        <div class="help" style="margin-top: 10px">
-          Videos up to 60 seconds are processed as a single task. Longer videos are automatically split into segments
-          when parallel processing is enabled.
         </div>
 
         <div class="divider" />
@@ -63,7 +58,7 @@
             <code class="mono">{{ apiBaseUrl }}</code>
           </div>
           <button class="btn primary" type="submit" :disabled="props.submitting || !file">
-            {{ props.submitting ? "Uploading..." : "Create task" }}
+            {{ props.submitting ? 'Uploading...' : $t('upload.generate') }}
           </button>
         </div>
       </form>

@@ -78,15 +78,12 @@ sequenceDiagram
 ## Processing Flow
 
 1. Upload (`POST /upload`)
-2. Probe video duration with `ffprobe`
-3. Short video (`<= 60s` by default): process as a single Celery task
-4. Long video (`> 60s` by default, with `parallel=true`): split into segments, transcribe in parallel via Celery chord, then merge/finalize
-5. Translate (optional; OpenAI if configured)
-6. Generate subtitles (always generates bilingual SRT; optionally generates ASS too)
-7. Burn subtitles into final video (optional)
-8. Download (`GET /download/{task_id}`) or edit subtitles (`PUT /subtitle/{task_id}`)
-
-`AUTO_SEGMENT_THRESHOLD_SECONDS` controls the short/long video cutoff and defaults to `60`.
+2. Split (optional; long video + parallel mode)
+3. Transcribe (faster-whisper)
+4. Translate (optional; OpenAI if configured)
+5. Generate subtitles (always generates bilingual SRT; optionally generates ASS too)
+6. Burn subtitles into final video (optional)
+7. Download (`GET /download/{task_id}`) or edit subtitles (`PUT /subtitle/{task_id}`)
 
 ## Delivery / Clean Package Rules
 
@@ -143,9 +140,8 @@ UPLOAD_DIR=./uploads
 OPENAI_API_KEY=
 HF_TOKEN=
 TRANSLATE_MODEL=
-CORS_ALLOWED_ORIGINS=http://localhost:15174
+CORS_ALLOWED_ORIGINS=http://localhost:5173
 CORS_ALLOW_CREDENTIALS=true
-AUTO_SEGMENT_THRESHOLD_SECONDS=60
 ```
 
 Run services:
@@ -190,7 +186,7 @@ npm run dev
 Configure `VITE_API_BASE_URL` (see `frontend/.env.example`).
 
 - If frontend and backend are same-origin: you can omit it.
-- If different-origin: set it to the FastAPI origin (e.g. `http://localhost:18000` when using Docker Compose).
+- If different-origin: set it to the FastAPI origin (e.g. `http://localhost:8000`).
 
 Important: `VITE_API_BASE_URL` affects BOTH:
 
@@ -206,9 +202,9 @@ docker compose build frontend --no-cache --progress=plain
 docker compose up
 ```
 
-- Frontend: `http://localhost:15174`
-- Backend: `http://localhost:18000`
-- Health: `http://localhost:18000/healthz`
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8000`
+- Health: `http://localhost:8000/healthz`
 
 ## Deployment Steps
 
@@ -240,11 +236,6 @@ docker compose build frontend --no-cache --progress=plain
 docker compose up
 ```
 
-Docker Compose port mapping:
-
-- Frontend container port `80` is published as `15174`
-- Backend container port `8000` is published as `18000`
-
 ### Production (minimal guidance)
 
 - Put backend API behind a reverse proxy (TLS, timeouts, upload limits).
@@ -271,7 +262,6 @@ python scripts/make_release_zip.py --out release.zip --check
 
 - Why polling: simpler deployment than WebSockets, resilient to refreshes, and easy to test via `GET /status/{task_id}`.
 - Why not auto-rebuild: editing subtitles should be fast and safe; rebuilding video is expensive and should be an explicit user action (`POST /tasks/{task_id}/rebuild-final`).
-- Why auto-segment by duration: short videos avoid chord/segment overhead, while long videos still benefit from parallel transcription and a merge/finalize callback.
 - Why split subtitle text/video utils: downloading/converting subtitles (SRT/VTT) must stay lightweight and must not depend on video libraries; video burning stays in video-only modules.
 - Why Celery: isolates long-running CPU/IO work from the API process, provides progress reporting, and matches Docker/Redis deployment with clear responsibilities.
 
@@ -279,6 +269,5 @@ python scripts/make_release_zip.py --out release.zip --check
 
 - Subtitle editing updates only the subtitle file; it does NOT rebuild/burn the final video.
 - Task status response includes `warnings: string[]` (non-fatal); the frontend shows them separately from errors.
-- Status messages distinguish single-task processing from segment-based processing, for example `Processing single video task`, `Splitting video into segments`, and `Merging parallel results...`.
 - Task status updates are via polling (`GET /status/{task_id}`); there is no WebSocket status endpoint in this repo.
 - Recent tasks: `GET /tasks/recent` and the frontend page `/tasks/recent`.

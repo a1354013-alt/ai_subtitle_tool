@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from .models.status import TaskStatus as TaskStatusEnum
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
 from .utils.task_control_utils import is_task_canceled, mark_task_canceled
+from .utils.error_handler import handle_known_error, get_error_response
 
 app = FastAPI(
     title="AI Video Subtitle Tool",
@@ -204,31 +205,74 @@ async def healthz():
     return {"status": "ok"}
 
 
+def check_system_dependencies():
+    """Check critical dependencies on startup."""
+    from .utils.error_messages import ERROR_MESSAGES
+    
+    # 1. Check ffmpeg
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        logger.error("CRITICAL: %s. Suggestion: %s", 
+                     ERROR_MESSAGES["ffmpeg_not_found"]["message"], 
+                     ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"])
+
+    # 2. Check OpenAI API Key
+    if not os.getenv("OPENAI_API_KEY"):
+        logger.error("CRITICAL: %s. Suggestion: %s", 
+                     ERROR_MESSAGES["openai_api_key_missing"]["message"], 
+                     ERROR_MESSAGES["openai_api_key_missing"]["suggestion"])
+
+    # 3. Check Redis (best effort on startup)
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_connect_timeout=2)
+        r.ping()
+    except Exception:
+        logger.error("CRITICAL: %s. Suggestion: %s", 
+                     ERROR_MESSAGES["redis_not_running"]["message"], 
+                     ERROR_MESSAGES["redis_not_running"]["suggestion"])
+
+@app.on_event("startup")
+async def startup_event():
+    check_system_dependencies()
+
 @app.get("/readyz")
 async def readyz():
-    errors: list[str] = []
+    from .utils.error_messages import ERROR_MESSAGES
+    errors: list[dict] = []
 
     # Upload dir check
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-        if not os.path.isdir(UPLOAD_DIR):
-            errors.append("UPLOAD_DIR is not a directory")
-        else:
-            test_path = os.path.join(UPLOAD_DIR, ".readyz_write_test")
-            with open(test_path, "w", encoding="utf-8") as f:
-                f.write("ok")
-            os.remove(test_path)
+        test_path = os.path.join(UPLOAD_DIR, ".readyz_write_test")
+        with open(test_path, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(test_path)
     except Exception as e:
-        errors.append(f"UPLOAD_DIR not writable: {e}")
+        errors.append({"code": "upload_dir_error", "message": f"UPLOAD_DIR not writable: {e}"})
 
     # Redis check
     try:
         import redis as _redis
-
         r = _redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_connect_timeout=2)
         r.ping()
-    except Exception as e:
-        errors.append(f"Redis not ready: {e}")
+    except Exception:
+        errors.append({
+            "code": "redis_not_running",
+            "message": ERROR_MESSAGES["redis_not_running"]["message"],
+            "suggestion": ERROR_MESSAGES["redis_not_running"]["suggestion"]
+        })
+        
+    # ffmpeg check
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+    except Exception:
+        errors.append({
+            "code": "ffmpeg_not_found",
+            "message": ERROR_MESSAGES["ffmpeg_not_found"]["message"],
+            "suggestion": ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"]
+        })
 
     if errors:
         return JSONResponse(status_code=503, content={"status": "error", "errors": errors})
@@ -278,7 +322,18 @@ async def upload_video(
                 os.remove(file_path)
             except OSError:
                 logger.warning("Failed to remove partially uploaded file: %s", file_path, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        
+        error_code = handle_known_error(e)
+        error_info = get_error_response(error_code)
+        return JSONResponse(
+            status_code=500 if error_code == "unknown_error" else 400,
+            content={
+                "success": False,
+                "error_code": error_code,
+                "message": error_info["message"],
+                "suggestion": error_info["suggestion"]
+            }
+        )
     finally:
         file.file.close()
 
@@ -337,7 +392,18 @@ async def upload_video(
             os.remove(file_path)
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=f"Failed to enqueue task: {str(e)}")
+        
+        error_code = handle_known_error(e)
+        error_info = get_error_response(error_code)
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error_code": error_code,
+                "message": error_info["message"],
+                "suggestion": error_info["suggestion"]
+            }
+        )
 
     # Store recent task history for product continuity.
     try:
@@ -345,12 +411,7 @@ async def upload_video(
     except Exception:
         logger.warning("Failed to record task history (non-fatal)", exc_info=True)
 
-    return TaskStatusResponse(
-        task_id=task_id,
-        status=TaskStatusEnum.PENDING,
-        progress=0,
-        message="Upload received. Waiting for worker...",
-    )
+    return TaskStatusResponse(task_id=task_id, status=TaskStatusEnum.PENDING, progress=0)
 
 
 @app.get("/status/{task_id}", response_model=TaskStatusResponse)
@@ -392,8 +453,23 @@ async def get_status(task_id: str):
             warnings.extend(task_result.result.get("warnings", []) or [])
         status = TaskStatusEnum.SUCCESS
     elif status == "FAILURE":
-        message = str(task_result.result)
+        # Extract structured error info if available
+        result = task_result.result
+        error_code = "unknown_error"
+        suggestion = ""
+        if isinstance(result, dict) and "error_code" in result:
+            error_code = result["error_code"]
+            message = result.get("message", str(result))
+            suggestion = result.get("suggestion", "")
+        else:
+            error_code = handle_known_error(Exception(str(result)))
+            error_info = get_error_response(error_code)
+            message = error_info["message"]
+            suggestion = error_info["suggestion"]
+            
         status = TaskStatusEnum.FAILURE
+        # Add suggestion to warnings or a separate field if needed, 
+        # but for now we'll rely on the frontend to handle message/suggestion.
     elif status == "PENDING":
         message = "Waiting for worker..."
         status = TaskStatusEnum.PENDING

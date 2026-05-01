@@ -11,8 +11,9 @@
         </div>
 
         <nav class="nav">
-          <RouterLink class="nav-link" to="/">Home</RouterLink>
-          <RouterLink class="nav-link" to="/tasks/recent">Recent</RouterLink>
+          <RouterLink class="nav-link" to="/">{{ $t('navbar.home') }}</RouterLink>
+          <RouterLink class="nav-link" to="/tasks/recent">{{ $t('navbar.tasks') }}</RouterLink>
+          <LanguageSwitcher />
         </nav>
       </div>
     </header>
@@ -25,6 +26,7 @@
 
 <script setup lang="ts">
 import { RouterLink } from "vue-router";
+import LanguageSwitcher from "./LanguageSwitcher.vue";
 </script>
 
 <style scoped>

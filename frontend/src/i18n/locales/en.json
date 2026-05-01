@@ -1,0 +1,31 @@
+{
+  "navbar": {
+    "home": "Home",
+    "tasks": "Tasks",
+    "editor": "Editor",
+    "language": "Language"
+  },
+  "upload": {
+    "title": "Upload Video",
+    "selectVideo": "Select Video File",
+    "generate": "Generate Subtitles"
+  },
+  "task": {
+    "status": "Task Status",
+    "processing": "Processing",
+    "completed": "Completed",
+    "failed": "Failed"
+  },
+  "editor": {
+    "title": "Subtitle Editor",
+    "save": "Save",
+    "rebuild": "Rebuild",
+    "download": "Download Subtitles"
+  },
+  "common": {
+    "loading": "Loading...",
+    "success": "Success",
+    "error": "Error",
+    "suggestion": "Suggestion"
+  }
+}

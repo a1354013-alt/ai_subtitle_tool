@@ -1,8 +1,8 @@
 <template>
   <div>
     <PageHeader
-      title="Task Status"
-      subtitle="This page polls the backend for task progress. Short videos stay in one task; longer videos may split into segments and merge automatically."
+      :title="$t('task.status')"
+      subtitle="This page polls the backend for task progress. Polling is managed by the store and stops on terminal status."
     />
 
     <ErrorAlert v-if="task.error" :error="task.error" />
@@ -16,20 +16,20 @@
     />
 
     <div class="row actions">
-      <RouterLink class="btn" :to="{ name: 'home' }">Back</RouterLink>
+      <RouterLink class="btn" :to="{ name: 'home' }">{{ $t('navbar.home') }}</RouterLink>
       <RouterLink
         v-if="isSuccess"
         class="btn primary"
         :to="{ name: 'subtitles', params: { taskId } }"
       >
-        Subtitles
+        {{ $t('editor.title') }}
       </RouterLink>
       <RouterLink
         v-if="isSuccess"
         class="btn primary"
         :to="{ name: 'downloads', params: { taskId } }"
       >
-        Downloads
+        {{ $t('editor.download') }}
       </RouterLink>
     </div>
   </div>

@@ -19,6 +19,8 @@ export const useTaskStore = defineStore("task", {
     message: "" as string,
     warnings: [] as string[],
     error: null as APIError | null,
+    error_code: "" as string,
+    suggestion: "" as string,
     pollingTimer: null as PollTimer,
   }),
   actions: {
@@ -30,6 +32,8 @@ export const useTaskStore = defineStore("task", {
       this.message = "";
       this.warnings = [];
       this.error = null;
+      this.error_code = "";
+      this.suggestion = "";
     },
     async createTask(formData: FormData) {
       this.error = null;
@@ -60,6 +64,16 @@ export const useTaskStore = defineStore("task", {
       this.progress = res.progress;
       this.message = res.message ?? "";
       this.warnings = Array.isArray(res.warnings) ? res.warnings : [];
+      this.error_code = res.error_code ?? "";
+      this.suggestion = res.suggestion ?? "";
+      
+      if (res.error_code) {
+        this.error = {
+          message: res.message ?? "Unknown error",
+          error_code: res.error_code,
+          suggestion: res.suggestion
+        };
+      }
     },
     async startPolling(taskId: string) {
       this.stopPolling();
@@ -69,7 +83,10 @@ export const useTaskStore = defineStore("task", {
       try {
         await this.fetchTaskStatus(taskId);
       } catch (e) {
-        this.error = e as APIError;
+        const err = e as APIError;
+        this.error = err;
+        this.error_code = err.error_code ?? "";
+        this.suggestion = err.suggestion ?? "";
       }
 
       if (isTerminalStatus(this.status)) return;

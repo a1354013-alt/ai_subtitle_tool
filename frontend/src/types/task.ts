@@ -7,6 +7,8 @@ export type TaskStatusResponse = {
   message?: string | null;
   result_url?: string | null;
   warnings: string[];
+  error_code?: string;
+  suggestion?: string;
 };
 
 export type UploadTaskResponse = TaskStatusResponse;

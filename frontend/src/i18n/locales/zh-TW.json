@@ -1,0 +1,31 @@
+{
+  "navbar": {
+    "home": "首頁",
+    "tasks": "任務清單",
+    "editor": "編輯器",
+    "language": "語言"
+  },
+  "upload": {
+    "title": "上傳影片",
+    "selectVideo": "選擇影片檔案",
+    "generate": "開始生成字幕"
+  },
+  "task": {
+    "status": "任務狀態",
+    "processing": "處理中",
+    "completed": "已完成",
+    "failed": "失敗"
+  },
+  "editor": {
+    "title": "字幕編輯器",
+    "save": "儲存",
+    "rebuild": "重新構建",
+    "download": "下載字幕"
+  },
+  "common": {
+    "loading": "載入中...",
+    "success": "成功",
+    "error": "錯誤",
+    "suggestion": "建議"
+  }
+}

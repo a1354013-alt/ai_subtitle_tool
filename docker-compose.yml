@@ -2,24 +2,40 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "16379:6379"
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     env_file:
+      # Use the example file so `docker compose up` works out-of-the-box.
+      # For real secrets, set environment variables (recommended) or edit a copy locally.
       - backend/.env.example
     environment:
+      # Ensure Docker works even if backend/.env is configured for local (localhost) usage.
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/uploads
-      CORS_ALLOWED_ORIGINS: http://localhost:15174
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CORS_ALLOW_CREDENTIALS: "true"
     volumes:
       - ./backend/uploads:/app/uploads
     ports:
-      - "18000:8000"
+      - "8000:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   worker:
     build:
@@ -30,22 +46,23 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/uploads
-      CELERY_WORKER_CONCURRENCY: "1"
     volumes:
       - ./backend/uploads:/app/uploads
-    command: /bin/sh -c "celery -A backend.celery_app:celery_app worker --loglevel=info --concurrency=$${CELERY_WORKER_CONCURRENCY:-1}"
+    command: celery -A backend.celery_app:celery_app worker --loglevel=info
     healthcheck:
       disable: true
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://localhost:18000
+        VITE_API_BASE_URL: http://localhost:8000
     ports:
-      - "15174:80"
+      - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy

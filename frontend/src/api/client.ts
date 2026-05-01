@@ -43,12 +43,23 @@ export async function apiRequest<T>(
     if (!res.ok) {
       let detail: unknown = undefined;
       let message = `Request failed (${res.status})`;
+      let error_code: string | undefined = undefined;
+      let suggestion: string | undefined = undefined;
 
       try {
         if (isJson) {
           const body = (await res.json()) as any;
           detail = body;
-          message = body?.detail ?? body?.message ?? message;
+          
+          if (body?.error_code) {
+            error_code = body.error_code;
+            message = body?.message ?? message;
+            suggestion = body?.suggestion;
+          } else if (body?.detail) {
+            message = body.detail;
+          } else if (body?.message) {
+            message = body.message;
+          }
         } else {
           const text = await res.text();
           detail = text;
@@ -58,7 +69,7 @@ export async function apiRequest<T>(
         // ignore parsing errors
       }
 
-      const err: APIError = { message, status: res.status, detail };
+      const err: APIError = { message, status: res.status, detail, error_code, suggestion };
       throw err;
     }
 

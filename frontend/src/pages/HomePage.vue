@@ -2,7 +2,7 @@
   <div class="row">
     <div class="col">
       <PageHeader
-        title="Upload"
+        :title="$t('upload.title')"
         subtitle="Upload a video and create a processing task."
       />
 

@@ -3,7 +3,6 @@ import subprocess
 import re
 
 from ..models.segments import SimpleSegment
-from .video_utils import get_video_duration
 
 def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
     """
@@ -24,7 +23,10 @@ def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
     if segment_length <= overlap:
         raise ValueError(f"segment_length ({segment_length}s) must be > overlap ({overlap}s)")
     
-    duration = get_video_duration(video_path)
+    from moviepy.editor import VideoFileClip
+    video = VideoFileClip(video_path)
+    duration = video.duration
+    video.close()
     
     base_path = os.path.splitext(video_path)[0]
     output_dir = f"{base_path}_segments"

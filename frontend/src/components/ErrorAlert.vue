@@ -1,8 +1,11 @@
 <template>
   <div class="alert card">
     <div class="card-inner">
-      <div class="title">{{ titleText }}</div>
+      <div class="title">❌ {{ titleText }}</div>
       <div class="msg">{{ messageText }}</div>
+      <div v-if="suggestionText" class="suggestion">
+        <strong>{{ $t('common.suggestion') }}:</strong> {{ suggestionText }}
+      </div>
       <div v-if="detailText" class="detail mono">{{ detailText }}</div>
     </div>
   </div>
@@ -17,8 +20,9 @@ const props = defineProps<{
   error: APIError | null;
 }>();
 
-const titleText = computed(() => props.title ?? "Error");
+const titleText = computed(() => props.title ?? props.error?.error_code ?? "Error");
 const messageText = computed(() => props.error?.message ?? "Unknown error");
+const suggestionText = computed(() => props.error?.suggestion ?? "");
 const detailText = computed(() => (typeof props.error?.detail === "string" ? props.error?.detail : ""));
 </script>
 
@@ -32,6 +36,15 @@ const detailText = computed(() => (typeof props.error?.detail === "string" ? pro
 }
 .msg {
   color: #ffd0d0;
+}
+.suggestion {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 193, 7, 0.1);
+  border-left: 3px solid rgba(255, 193, 7, 0.5);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: #ffd700;
 }
 .detail {
   margin-top: 10px;

@@ -1,9 +1,9 @@
 <template>
   <div>
-    <PageHeader title="Recent Tasks" subtitle="Last 20 tasks recorded by the backend." />
+    <PageHeader :title="$t('navbar.tasks')" subtitle="Last 20 tasks recorded by the backend." />
 
     <ErrorAlert v-if="error" :error="error" />
-    <LoadingBlock v-if="loading" title="Loading tasks..." description="Fetching recent task history." />
+    <LoadingBlock v-if="loading" :title="$t('common.loading')" description="Fetching recent task history." />
 
     <EmptyState
       v-else-if="!error && tasks.length === 0"
@@ -22,7 +22,7 @@
             class="search-input"
           />
           <select v-model="statusFilter" class="status-filter">
-            <option value="">All Statuses</option>
+            <option value="">{{ $t('task.status') }}</option>
             <option value="PENDING">PENDING</option>
             <option value="PROCESSING">PROCESSING</option>
             <option value="SUCCESS">SUCCESS</option>
@@ -36,7 +36,7 @@
             <tr>
               <th>Task ID</th>
               <th>Filename</th>
-              <th>Status</th>
+              <th>{{ $t('task.status') }}</th>
               <th>Created</th>
               <th>Duration</th>
               <th>Links</th>
@@ -50,9 +50,9 @@
               <td class="mono">{{ formatTs(t.created_at) }}</td>
               <td class="mono">{{ formatDuration(t.duration_seconds) }}</td>
               <td>
-                <RouterLink class="btn small" :to="{ name: 'task', params: { taskId: t.task_id } }">Status</RouterLink>
-                <RouterLink class="btn small" :to="{ name: 'subtitles', params: { taskId: t.task_id } }">Subtitles</RouterLink>
-                <RouterLink class="btn small" :to="{ name: 'downloads', params: { taskId: t.task_id } }">Downloads</RouterLink>
+                <RouterLink class="btn small" :to="{ name: 'task', params: { taskId: t.task_id } }">{{ $t('task.status') }}</RouterLink>
+                <RouterLink class="btn small" :to="{ name: 'subtitles', params: { taskId: t.task_id } }">{{ $t('editor.title') }}</RouterLink>
+                <RouterLink class="btn small" :to="{ name: 'downloads', params: { taskId: t.task_id } }">{{ $t('editor.download') }}</RouterLink>
               </td>
             </tr>
           </tbody>

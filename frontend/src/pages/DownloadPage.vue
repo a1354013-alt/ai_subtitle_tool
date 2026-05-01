@@ -1,12 +1,12 @@
 <template>
   <div>
     <PageHeader
-      title="Downloads"
+      :title="$t('editor.download')"
       subtitle="Download existing outputs. Rebuilding final.mp4 is explicit and only runs when you click the button."
     />
 
     <ErrorAlert v-if="res.error" :error="res.error" />
-    <LoadingBlock v-if="res.loading" title="Loading manifest..." description="Fetching available files." />
+    <LoadingBlock v-if="res.loading" :title="$t('common.loading')" description="Fetching available files." />
 
     <template v-else>
       <div class="row" style="align-items: center; justify-content: space-between; margin-bottom: 12px">
@@ -14,7 +14,7 @@
           <span>Task</span>
           <code class="mono">{{ taskId }}</code>
         </div>
-        <RouterLink class="btn" :to="{ name: 'task', params: { taskId } }">Back to status</RouterLink>
+        <RouterLink class="btn" :to="{ name: 'task', params: { taskId } }">{{ $t('task.status') }}</RouterLink>
       </div>
 
       <div v-if="manifest && isSuccessManifest" class="row" style="margin-bottom: 12px">
@@ -63,7 +63,7 @@
             </div>
             <div v-if="manifest && isSuccessManifest" style="margin-top: 10px">
               <button class="btn primary" :disabled="rebuilding || !selectedLang" @click="onRebuildFinal">
-                {{ rebuilding ? "Rebuilding..." : "Rebuild final.mp4" }}
+                {{ rebuilding ? $t('common.loading') : $t('editor.rebuild') }}
               </button>
               <div class="help" style="margin-top: 6px">
                 This enqueues a background rebuild using the selected language. Track progress on the status page.

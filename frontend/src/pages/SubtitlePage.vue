@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader
-      title="Subtitles"
+      :title="$t('editor.title')"
       subtitle="Edit subtitle files (ASS/SRT). Editing only updates the subtitle file; it does not rebuild/burn the final video."
     />
 
@@ -48,11 +48,11 @@
 
         <SubtitleFormatTabs :model-value="formatSelection" @update:modelValue="onFormatChange" />
 
-        <RouterLink class="btn" :to="{ name: 'downloads', params: { taskId: taskIdValue } }">Downloads</RouterLink>
+        <RouterLink class="btn" :to="{ name: 'downloads', params: { taskId: taskIdValue } }">{{ $t('editor.download') }}</RouterLink>
       </div>
     </div>
 
-    <LoadingBlock v-if="loading" title="Loading subtitle..." description="Fetching subtitle content." />
+    <LoadingBlock v-if="loading" :title="$t('common.loading')" description="Fetching subtitle content." />
 
     <SubtitleEditor
       v-else-if="!manifestNotReady && !noSubtitles"
