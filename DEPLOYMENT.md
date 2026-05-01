@@ -7,6 +7,7 @@ This repo supports three modes:
 - **Release package** (a clean zip for delivery; no workspace artifacts)
 
 The frontend **polls** task status via `GET /status/{task_id}` (no WebSocket status endpoint).
+Short videos are processed as a single Celery task by default, while longer videos are automatically split into segments and merged after parallel transcription.
 
 ---
 
@@ -46,14 +47,24 @@ Locked media dependency note:
 
 ```bash
 redis-server
-celery -A backend.celery_app:celery_app worker --loglevel=info
+celery -A backend.celery_app:celery_app worker --loglevel=info --concurrency=1
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
+
+Optional processing tuning:
+
+- `AUTO_SEGMENT_THRESHOLD_SECONDS=60` controls when uploads switch from single-task mode to segmented parallel mode.
+- `CELERY_WORKER_CONCURRENCY=1` is the conservative default for local/Docker worker startup.
+- If duration probing fails, the worker safely falls back to single-task processing instead of failing the whole job.
+- Videos at or below the auto-segmentation threshold stay on the single-task path and do not use Celery `chord`.
+- Long videos can still consume significant CPU/RAM during transcription, translation, and subtitle burning, so validate with a short clip first.
 
 Health endpoints:
 
 - `GET /healthz` → `{"status":"ok"}`
 - `GET /readyz` → checks Redis + `UPLOAD_DIR` write access
+
+- The Celery worker does not provide an HTTP health endpoint; check `docker compose logs worker` or Celery task status instead.
 
 ### Frontend
 
@@ -65,7 +76,7 @@ npm run dev
 
 Default dev URLs:
 
-- Frontend: `http://localhost:5173`
+- Frontend: `http://localhost:15174` when using Docker, or Vite's local dev URL when running `npm run dev`
 - Backend: `http://localhost:8000`
 
 If frontend and backend are different origins, set `VITE_API_BASE_URL` (see `frontend/.env.example`).
@@ -89,15 +100,17 @@ docker compose up
 
 Services:
 
-- Frontend (nginx): `http://localhost:5173`
-- Backend API: `http://localhost:8000`
-- Backend health check: `http://localhost:8000/healthz`
+- Frontend (nginx): `http://localhost:15174`
+- Backend API: `http://localhost:18000`
+- Backend health check: `http://localhost:18000/healthz`
 - Redis: `localhost:6379` (host-mapped for convenience)
 
 Notes:
 
 - `UPLOAD_DIR` is mounted to `./backend/uploads` for durability across restarts.
-- CORS defaults in `docker-compose.yml` are set for local browser usage (`http://localhost:5173` + credentials enabled).
+- CORS defaults in `docker-compose.yml` are set for local browser usage (`http://localhost:15174` + credentials enabled).
+- The shared backend image includes an HTTP `/healthz` `HEALTHCHECK`, but the worker service disables it because Celery does not listen on port `8000`.
+- The worker defaults to `CELERY_WORKER_CONCURRENCY=1` to reduce `WorkerLostError` / OOM / SIGKILL risk on smaller hosts.
 
 ---
 

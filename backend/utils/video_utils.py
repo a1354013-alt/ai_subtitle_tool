@@ -1,6 +1,9 @@
 import os
 import subprocess
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 def has_audio(video_path):
     """檢查影片是否有音軌"""
@@ -9,9 +12,36 @@ def has_audio(video_path):
     return len(result.stdout.strip()) > 0
 
 def get_video_duration(video_path):
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return float(result.stdout.strip())
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        video_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        raise ValueError(result.stderr.strip() or "ffprobe failed to read video duration")
+
+    raw_duration = (result.stdout or "").strip()
+    if not raw_duration:
+        raise ValueError("ffprobe returned an empty duration")
+
+    duration = float(raw_duration)
+    if duration <= 0:
+        raise ValueError(f"invalid video duration: {duration}")
+    return duration
+
+
+def probe_video_duration(video_path):
+    try:
+        return get_video_duration(video_path)
+    except Exception as exc:
+        logger.warning("ffprobe duration probe failed for %s: %s", video_path, exc)
+        return None
 
 def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_duration=0.5):
     """

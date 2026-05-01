@@ -24,9 +24,22 @@ from .pipeline_segments import (
     transcribe_segment,
     build_full_video_payload,
 )
+from .settings import AUTO_SEGMENT_THRESHOLD_SECONDS
 from .utils.cleanup_utils import create_task_lock, remove_task_lock, cleanup_old_files as cleanup_old_files_impl
 
 logger = logging.getLogger(__name__)
+
+
+def _probe_duration_for_strategy(video_path: str):
+    from .utils.video_utils import probe_video_duration
+
+    duration = probe_video_duration(video_path)
+    if duration is None:
+        logger.warning(
+            "Falling back to single-task processing because duration probe failed: video_path=%s",
+            video_path,
+        )
+    return duration
 
 
 def finalize_pipeline(segment_results, video_path, options, update_state_func=None, segments_dir=None):
@@ -219,7 +232,6 @@ def process_video_task(self, video_path: str, options: dict = None):
         from .utils.model_loader import get_model_by_duration
         from .utils.subtitle_utils import transcribe_video
         from .utils.task_control_utils import is_task_canceled
-        from moviepy.editor import VideoFileClip
 
         parallel = options.get("parallel", True)
         do_remove_silence = options.get("remove_silence", False)
@@ -234,28 +246,42 @@ def process_video_task(self, video_path: str, options: dict = None):
             silence_removed_video = f"{base_path}_no_silence.mp4"
             current_video = remove_silence(video_path, silence_removed_video)
 
-        video = VideoFileClip(current_video)
-        duration = video.duration
-        video.close()
-        model_size = get_model_by_duration(duration)
+        duration = _probe_duration_for_strategy(current_video)
+        model_size = get_model_by_duration(duration or AUTO_SEGMENT_THRESHOLD_SECONDS)
+        should_segment = bool(parallel and duration is not None and duration > AUTO_SEGMENT_THRESHOLD_SECONDS)
 
-        if parallel and duration > 60:
+        if should_segment:
             if chord is None:
                 logger.warning("Chord unavailable; falling back to non-parallel mode for task %s", business_id)
-                parallel = False  # Fallback to non-parallel mode
+                should_segment = False
 
-            if parallel:
-                self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Splitting video..."})
-                video_segments = split_video(current_video)
-                segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
-                header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
-                callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir)
-                return self.replace(chord(header)(callback))
+        if should_segment:
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "progress": 10,
+                    "status": f"Splitting video into segments for parallel transcription ({duration:.1f}s)...",
+                },
+            )
+            video_segments = split_video(current_video)
+            segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
+            header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
+            callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir)
+            workflow = chord(header, callback)
+            return self.replace(workflow)
 
-        self.update_state(state="PROGRESS", meta={"progress": 20, "status": "Transcribing..."})
+        single_task_status = "Processing single video task"
+        if duration is None:
+            single_task_status += " (duration probe unavailable; using safe fallback)"
+        elif duration <= AUTO_SEGMENT_THRESHOLD_SECONDS:
+            single_task_status += f" ({duration:.1f}s video)"
+        else:
+            single_task_status += " (parallel processing unavailable)"
+
+        self.update_state(state="PROGRESS", meta={"progress": 20, "status": single_task_status})
         srt_path = f"{base_path}.srt"
         segments = transcribe_video(current_video, srt_path, model_size=model_size)
-        payload = build_full_video_payload(segments, duration)
+        payload = build_full_video_payload(segments, duration or 0)
         return finalize_pipeline([payload], current_video, options, update_state_func=self.update_state)
 
     except Exception:

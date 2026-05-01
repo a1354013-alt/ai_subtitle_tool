@@ -2,7 +2,7 @@
   <div>
     <PageHeader
       title="Task Status"
-      subtitle="This page polls the backend for task progress. Polling is managed by the store and stops on terminal status."
+      subtitle="This page polls the backend for task progress. Short videos stay in one task; longer videos may split into segments and merge automatically."
     />
 
     <ErrorAlert v-if="task.error" :error="task.error" />

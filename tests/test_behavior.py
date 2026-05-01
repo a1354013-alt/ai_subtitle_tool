@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import io
 import json
+import sys
 import time
 import os
 import shutil
@@ -11,6 +12,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import backend.tasks as task_module
 from backend.pipeline_segments import (
     SimpleSegment as PayloadSegment,
     build_full_video_payload,
@@ -110,6 +112,159 @@ class TestFinalizeAndMergePayloads(unittest.TestCase):
         self.assertEqual(set(payload.keys()), {"start_offset", "end_offset", "overlap", "segment_idx", "segments"})
         self.assertEqual(payload["end_offset"], 10.0)
         self.assertEqual(payload["overlap"], 0)
+
+
+class TestProcessVideoTaskStrategy(unittest.TestCase):
+    def _base_options(self):
+        return {
+            "business_id": str(uuid.uuid4()),
+            "target_langs": ["Traditional Chinese"],
+            "burn_subtitles": True,
+            "subtitle_format": "ass",
+            "remove_silence": False,
+            "parallel": True,
+        }
+
+    @staticmethod
+    def _make_fake_task(update_calls: list[dict], replace_result=None):
+        class _FakeTask:
+            replaced_workflow = None
+
+            def update_state(self, **kwargs):
+                update_calls.append(kwargs)
+
+            def replace(self, workflow):
+                self.replaced_workflow = workflow
+                return workflow if replace_result is None else replace_result
+
+        return _FakeTask()
+
+    def test_short_video_uses_single_task_without_chord(self):
+        options = self._base_options()
+        update_calls: list[dict] = []
+        fake_result = {"status": "COMPLETED"}
+        fake_task = self._make_fake_task(update_calls)
+        fake_video_utils = MagicMock(remove_silence=lambda src, dst: dst)
+        fake_split_utils = MagicMock(split_video=MagicMock())
+        fake_model_loader = MagicMock(get_model_by_duration=MagicMock(return_value="base"))
+        fake_subtitle_utils = MagicMock(
+            transcribe_video=MagicMock(return_value=[PayloadSegment(0.0, 1.0, "hello")])
+        )
+        fake_task_control = MagicMock(is_task_canceled=MagicMock(return_value=False))
+
+        with (
+            patch.object(task_module, "create_task_lock"),
+            patch.object(task_module, "remove_task_lock"),
+            patch.dict(
+                sys.modules,
+                {
+                    "backend.utils.video_utils": fake_video_utils,
+                    "backend.utils.split_utils": fake_split_utils,
+                    "backend.utils.model_loader": fake_model_loader,
+                    "backend.utils.subtitle_utils": fake_subtitle_utils,
+                    "backend.utils.task_control_utils": fake_task_control,
+                },
+            ),
+            patch.object(task_module, "_probe_duration_for_strategy", return_value=45.0),
+            patch.object(task_module, "finalize_pipeline", return_value=fake_result) as finalize_mock,
+            patch.object(task_module, "chord") as chord_mock,
+        ):
+            result = task_module.process_video_task(fake_task, "demo.mp4", options)
+
+        self.assertEqual(result, fake_result)
+        chord_mock.assert_not_called()
+        fake_subtitle_utils.transcribe_video.assert_called_once()
+        finalize_mock.assert_called_once()
+        self.assertTrue(any("Processing single video task" in c["meta"]["status"] for c in update_calls))
+
+    def test_long_video_uses_chord_signature_and_replace(self):
+        options = self._base_options()
+        segments = [
+            {"path": "seg0.mp4", "start_offset": 0, "end_offset": 30, "overlap": 2, "segment_idx": 0},
+            {"path": "seg1.mp4", "start_offset": 28, "end_offset": 70, "overlap": 2, "segment_idx": 1},
+        ]
+        workflow = {"workflow": "chord"}
+        fake_task = self._make_fake_task([], replace_result=workflow)
+        fake_video_utils = MagicMock(remove_silence=lambda src, dst: dst)
+        fake_split_utils = MagicMock(split_video=MagicMock(return_value=segments))
+        fake_model_loader = MagicMock(get_model_by_duration=MagicMock(return_value="small"))
+        fake_subtitle_utils = MagicMock(transcribe_video=MagicMock())
+        fake_task_control = MagicMock(is_task_canceled=MagicMock(return_value=False))
+        fake_transcribe_task = MagicMock()
+        fake_transcribe_task.s.side_effect = lambda seg, model: {"seg": seg, "model": model}
+        fake_merge_task = MagicMock()
+        fake_merge_task.s.return_value = "callback"
+
+        with (
+            patch.object(task_module, "create_task_lock"),
+            patch.object(task_module, "remove_task_lock"),
+            patch.dict(
+                sys.modules,
+                {
+                    "backend.utils.video_utils": fake_video_utils,
+                    "backend.utils.split_utils": fake_split_utils,
+                    "backend.utils.model_loader": fake_model_loader,
+                    "backend.utils.subtitle_utils": fake_subtitle_utils,
+                    "backend.utils.task_control_utils": fake_task_control,
+                },
+            ),
+            patch.object(task_module, "_probe_duration_for_strategy", return_value=120.0),
+            patch.object(task_module, "transcribe_segment_task", fake_transcribe_task),
+            patch.object(task_module, "merge_and_finalize_task", fake_merge_task),
+            patch.object(task_module, "chord", side_effect=lambda header, callback: {"header": header, "callback": callback}) as chord_mock,
+        ):
+            result = task_module.process_video_task(fake_task, "demo.mp4", options)
+
+        self.assertEqual(result, workflow)
+        self.assertEqual(fake_transcribe_task.s.call_count, 2)
+        fake_merge_task.s.assert_called_once()
+        chord_mock.assert_called_once()
+        self.assertEqual(
+            fake_task.replaced_workflow,
+            {
+                "header": [
+                    {"seg": segments[0], "model": "small"},
+                    {"seg": segments[1], "model": "small"},
+                ],
+                "callback": "callback",
+            },
+        )
+
+    def test_duration_probe_failure_falls_back_to_single_task(self):
+        options = self._base_options()
+        update_calls: list[dict] = []
+        fake_task = self._make_fake_task(update_calls)
+        fake_video_utils = MagicMock(remove_silence=lambda src, dst: dst)
+        fake_split_utils = MagicMock(split_video=MagicMock())
+        fake_model_loader = MagicMock(get_model_by_duration=MagicMock(return_value="small"))
+        fake_subtitle_utils = MagicMock(
+            transcribe_video=MagicMock(return_value=[PayloadSegment(0.0, 1.0, "hello")])
+        )
+        fake_task_control = MagicMock(is_task_canceled=MagicMock(return_value=False))
+
+        with (
+            patch.object(task_module, "create_task_lock"),
+            patch.object(task_module, "remove_task_lock"),
+            patch.dict(
+                sys.modules,
+                {
+                    "backend.utils.video_utils": fake_video_utils,
+                    "backend.utils.split_utils": fake_split_utils,
+                    "backend.utils.model_loader": fake_model_loader,
+                    "backend.utils.subtitle_utils": fake_subtitle_utils,
+                    "backend.utils.task_control_utils": fake_task_control,
+                },
+            ),
+            patch.object(task_module, "_probe_duration_for_strategy", return_value=None),
+            patch.object(task_module, "finalize_pipeline", return_value={"status": "COMPLETED"}) as finalize_mock,
+            patch.object(task_module, "chord") as chord_mock,
+        ):
+            result = task_module.process_video_task(fake_task, "demo.mp4", options)
+
+        self.assertEqual(result, {"status": "COMPLETED"})
+        chord_mock.assert_not_called()
+        finalize_mock.assert_called_once()
+        self.assertTrue(any("safe fallback" in c["meta"]["status"] for c in update_calls))
 
 
 class TestMergeSegmentsDedupNormalize(unittest.TestCase):

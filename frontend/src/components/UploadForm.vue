@@ -45,9 +45,14 @@
             <div class="label">parallel</div>
             <label class="check">
               <input v-model="parallel" type="checkbox" />
-              <span>Parallel segments (recommended for longer videos)</span>
+              <span>Enable segment parallelism for long videos</span>
             </label>
           </div>
+        </div>
+
+        <div class="help" style="margin-top: 10px">
+          Videos up to 60 seconds are processed as a single task. Longer videos are automatically split into segments
+          when parallel processing is enabled.
         </div>
 
         <div class="divider" />

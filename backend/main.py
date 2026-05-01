@@ -345,7 +345,12 @@ async def upload_video(
     except Exception:
         logger.warning("Failed to record task history (non-fatal)", exc_info=True)
 
-    return TaskStatusResponse(task_id=task_id, status=TaskStatusEnum.PENDING, progress=0)
+    return TaskStatusResponse(
+        task_id=task_id,
+        status=TaskStatusEnum.PENDING,
+        progress=0,
+        message="Upload received. Waiting for worker...",
+    )
 
 
 @app.get("/status/{task_id}", response_model=TaskStatusResponse)
