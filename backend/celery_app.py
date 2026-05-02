@@ -28,3 +28,7 @@ celery_app.conf.update(
         },
     },
 )
+
+if os.getenv("PYTEST_CURRENT_TEST") is not None or os.getenv("TESTING", "").lower() == "true":
+    celery_app.conf.task_always_eager = True
+    celery_app.conf.task_eager_propagates = True

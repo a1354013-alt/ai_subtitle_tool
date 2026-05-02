@@ -49,6 +49,7 @@ class BatchManager:
 
     def _save_batch(self, metadata: BatchMetadata):
         path = self._get_batch_path(metadata.batch_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             # Use model_dump_json for Pydantic V2, fallback to json() for V1 if needed
             if hasattr(metadata, "model_dump_json"):
