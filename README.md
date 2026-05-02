@@ -165,6 +165,11 @@ Backend tests:
 pytest -q
 ```
 
+Codecov in GitHub Actions:
+
+- Add `CODECOV_TOKEN` at `GitHub Repo Settings > Secrets and variables > Actions` if you want to enable Codecov uploads in CI.
+- If `CODECOV_TOKEN` is not configured, the workflow skips the Codecov upload step and the overall CI result is unaffected.
+
 ## Frontend Setup
 
 The release package must NOT ship with `frontend/node_modules/`.
