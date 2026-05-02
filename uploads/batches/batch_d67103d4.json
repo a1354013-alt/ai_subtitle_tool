@@ -1,0 +1,18 @@
+{
+  "batch_id": "batch_d67103d4",
+  "created_at": "2026-05-02T16:53:03.610898+00:00",
+  "tasks": [
+    {
+      "task_id": "task1",
+      "filename": "v1.mp4",
+      "status": "queued",
+      "error": null
+    },
+    {
+      "task_id": "task2",
+      "filename": "v2.mp4",
+      "status": "queued",
+      "error": null
+    }
+  ]
+}
