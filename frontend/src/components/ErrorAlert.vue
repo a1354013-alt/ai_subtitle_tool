@@ -1,7 +1,7 @@
 <template>
   <div class="alert card">
     <div class="card-inner">
-      <div class="title">{{ titleText }}</div>
+      <div class="title">❌ {{ titleText }}</div>
       <div class="msg">{{ messageText }}</div>
       <div v-if="suggestionText" class="suggestion">
         <strong>{{ $t('common.suggestion') }}:</strong> {{ suggestionText }}
@@ -13,7 +13,6 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { useI18n } from "vue-i18n";
 import type { APIError } from "@/types/api";
 
 const props = defineProps<{
@@ -21,10 +20,8 @@ const props = defineProps<{
   error: APIError | null;
 }>();
 
-const { t } = useI18n();
-
-const titleText = computed(() => props.title ?? props.error?.error_code ?? t("common.error"));
-const messageText = computed(() => props.error?.message ?? t("common.unknownError"));
+const titleText = computed(() => props.title ?? props.error?.error_code ?? "Error");
+const messageText = computed(() => props.error?.message ?? "Unknown error");
 const suggestionText = computed(() => props.error?.suggestion ?? "");
 const detailText = computed(() => (typeof props.error?.detail === "string" ? props.error?.detail : ""));
 </script>

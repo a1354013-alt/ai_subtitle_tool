@@ -1,6 +1,9 @@
 <template>
   <div>
-    <PageHeader :title="$t('task.status')" :subtitle="$t('task.subtitle')" />
+    <PageHeader
+      :title="$t('task.status')"
+      subtitle="This page polls the backend for task progress. Polling is managed by the store and stops on terminal status."
+    />
 
     <ErrorAlert v-if="task.error" :error="task.error" />
 
@@ -14,10 +17,18 @@
 
     <div class="row actions">
       <RouterLink class="btn" :to="{ name: 'home' }">{{ $t('navbar.home') }}</RouterLink>
-      <RouterLink v-if="isSuccess" class="btn primary" :to="{ name: 'subtitles', params: { taskId } }">
+      <RouterLink
+        v-if="isSuccess"
+        class="btn primary"
+        :to="{ name: 'subtitles', params: { taskId } }"
+      >
         {{ $t('editor.title') }}
       </RouterLink>
-      <RouterLink v-if="isSuccess" class="btn primary" :to="{ name: 'downloads', params: { taskId } }">
+      <RouterLink
+        v-if="isSuccess"
+        class="btn primary"
+        :to="{ name: 'downloads', params: { taskId } }"
+      >
         {{ $t('editor.download') }}
       </RouterLink>
     </div>

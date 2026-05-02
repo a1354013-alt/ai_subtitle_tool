@@ -186,7 +186,7 @@ npm run dev
 Configure `VITE_API_BASE_URL` (see `frontend/.env.example`).
 
 - If frontend and backend are same-origin: you can omit it.
-- If different-origin: set it to the FastAPI origin (e.g. `http://localhost:8080`).
+- If different-origin: set it to the FastAPI origin (e.g. `http://localhost:8000`).
 
 Important: `VITE_API_BASE_URL` affects BOTH:
 
@@ -203,8 +203,8 @@ docker compose up
 ```
 
 - Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8080`
-- Health: `http://localhost:8080/healthz`
+- Backend: `http://localhost:8000`
+- Health: `http://localhost:8000/healthz`
 
 ## Deployment Steps
 
@@ -271,3 +271,29 @@ python scripts/make_release_zip.py --out release.zip --check
 - Task status response includes `warnings: string[]` (non-fatal); the frontend shows them separately from errors.
 - Task status updates are via polling (`GET /status/{task_id}`); there is no WebSocket status endpoint in this repo.
 - Recent tasks: `GET /tasks/recent` and the frontend page `/tasks/recent`.
+
+## Batch Processing
+
+The tool supports batch processing of multiple videos. Users can upload multiple files at once, and the system will create independent tasks for each video.
+
+### Batch APIs
+
+- `POST /batch/upload`: Upload multiple video files. Returns `batch_id` and a list of `tasks`.
+- `GET /batch/{batch_id}/status`: Get the overall status of a batch and individual task progress.
+- `GET /batch/{batch_id}/download`: Download a ZIP file containing results (SRT, ASS, final.mp4) for all successful tasks in the batch.
+
+### Batch Processing Flow
+
+1. User selects multiple files in the "Batch Processing" tab.
+2. System uploads files and initializes a batch metadata file in `backend/storage/batches/{batch_id}.json`.
+3. Each video is enqueued as an independent Celery task.
+4. User monitors progress on the batch status page.
+5. Once processing is complete, user can download individual results or the entire batch as a ZIP.
+6. The ZIP includes a `failed_tasks.json` if any videos failed to process, detailing the reasons for failure.
+
+### Batch ZIP Content
+
+- `{filename}_{task_id}.srt`: Subtitle file in SRT format.
+- `{filename}_{task_id}.ass`: Subtitle file in ASS format.
+- `{filename}_final.mp4`: Final video with burned-in subtitles (if enabled).
+- `failed_tasks.json`: (Optional) Log of failed tasks in the batch.

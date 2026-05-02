@@ -1,23 +1,23 @@
 <template>
   <div class="language-switcher">
-    <select v-model="currentLang" @change="changeLanguage" class="lang-select" :aria-label="$t('navbar.language')">
-      <option value="zh-TW">{{ $t('languages.zh-TW') }}</option>
-      <option value="en">{{ $t('languages.en') }}</option>
-      <option value="ja">{{ $t('languages.ja') }}</option>
+    <select v-model="currentLang" @change="changeLanguage" class="lang-select">
+      <option value="zh-TW">繁體中文</option>
+      <option value="en">English</option>
+      <option value="ja">日本語</option>
     </select>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
-import { useI18n } from "vue-i18n";
+import { ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const { locale } = useI18n();
 const currentLang = ref(locale.value);
 
 const changeLanguage = () => {
   locale.value = currentLang.value;
-  localStorage.setItem("lang", currentLang.value);
+  localStorage.setItem('lang', currentLang.value);
 };
 </script>
 

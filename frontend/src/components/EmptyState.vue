@@ -1,8 +1,8 @@
 <template>
   <div class="card">
     <div class="card-inner">
-      <div class="title">{{ titleText }}</div>
-      <div class="desc">{{ descriptionText }}</div>
+      <div class="title">{{ title }}</div>
+      <div class="desc">{{ description }}</div>
       <div v-if="$slots.default" class="actions">
         <slot />
       </div>
@@ -11,16 +11,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
-import { useI18n } from "vue-i18n";
-
-const { t } = useI18n();
-const props = defineProps<{
-  title?: string;
-  description?: string;
-}>();
-const titleText = computed(() => props.title ?? t("common.noData"));
-const descriptionText = computed(() => props.description ?? t("common.nothingToShowYet"));
+withDefaults(
+  defineProps<{
+    title?: string;
+    description?: string;
+  }>(),
+  {
+    title: "No data",
+    description: "Nothing to show yet.",
+  }
+);
 </script>
 
 <style scoped>

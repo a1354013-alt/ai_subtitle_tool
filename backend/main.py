@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import uuid
 import uuid as _uuid
-from contextlib import asynccontextmanager
+import json
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -19,8 +19,8 @@ from .models.status import TaskStatus as TaskStatusEnum
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
 from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 from .utils.error_handler import handle_known_error, get_error_response
-
-logger = logging.getLogger(__name__)
+from .batch_manager import BatchManager, BatchTask, BatchMetadata
+import zipfile
 
 app = FastAPI(
     title="AI Video Subtitle Tool",
@@ -29,6 +29,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
+logger = logging.getLogger(__name__)
 
 
 def configure_cors() -> None:
@@ -54,10 +55,13 @@ def configure_cors() -> None:
     )
 
 
+configure_cors()
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 TASK_HISTORY = TaskHistoryStore(Path(UPLOAD_DIR) / "task_history.sqlite3")
+BATCH_MANAGER = BatchManager(UPLOAD_DIR)
 
 
 def validate_task_id(task_id: str) -> str:
@@ -233,14 +237,14 @@ def check_system_dependencies():
                      ERROR_MESSAGES["redis_not_running"]["message"], 
                      ERROR_MESSAGES["redis_not_running"]["suggestion"])
 
+from contextlib import asynccontextmanager
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(app: FastAPI):
     check_system_dependencies()
     yield
 
 app.router.lifespan_context = lifespan
-configure_cors()
 
 @app.get("/readyz")
 async def readyz():
@@ -541,6 +545,169 @@ async def get_recent_tasks():
         raise HTTPException(status_code=500, detail="Failed to read task history")
 
 
+class BatchUploadResponse(BaseModel):
+    batch_id: str
+    tasks: List[dict]
+
+@app.post("/batch/upload", response_model=BatchUploadResponse)
+async def batch_upload_videos(
+    files: List[UploadFile] = File(...),
+    target_langs: str = Form("Traditional Chinese", description="Comma separated languages"),
+    burn_subtitles: bool = Form(True, description="Whether to burn subtitles into video"),
+    subtitle_format: str = Form("ass", description="Subtitle format: ass or srt"),
+    remove_silence: bool = Form(False, description="Remove silence from video"),
+    parallel: bool = Form(True, description="Use parallel processing for long videos"),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+
+    tasks_info = []
+    langs = normalize_target_langs(target_langs)
+    
+    for file in files:
+        task_id = str(uuid.uuid4())
+        file_extension = os.path.splitext(file.filename)[1]
+        file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
+        
+        # Basic validation similar to single upload
+        if not file.filename.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
+            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "failed", "error": "Unsupported format"})
+            continue
+
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            
+            options = {
+                "business_id": task_id,
+                "target_langs": langs,
+                "burn_subtitles": burn_subtitles,
+                "subtitle_format": subtitle_format,
+                "remove_silence": remove_silence,
+                "parallel": parallel,
+                "hf_token": os.getenv("HF_TOKEN"),
+            }
+            
+            _enqueue_process_video_task(file_path, options, task_id)
+            TASK_HISTORY.upsert_created(task_id=task_id, filename=file.filename, status=TaskStatusEnum.PENDING.value)
+            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "queued"})
+        except Exception as e:
+            logger.error(f"Failed to process batch file {file.filename}: {e}")
+            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "failed", "error": str(e)})
+        finally:
+            file.file.close()
+
+    batch_id = BATCH_MANAGER.create_batch(tasks_info)
+    return BatchUploadResponse(batch_id=batch_id, tasks=tasks_info)
+
+class BatchStatusResponse(BaseModel):
+    batch_id: str
+    total: int
+    completed: int
+    failed: int
+    processing: int
+    tasks: List[dict]
+
+@app.get("/batch/{batch_id}/status", response_model=BatchStatusResponse)
+async def get_batch_status(batch_id: str):
+    batch = BATCH_MANAGER.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    
+    tasks_details = []
+    completed = 0
+    failed = 0
+    processing = 0
+    
+    for task in batch.tasks:
+        # Reuse existing get_status logic conceptually but more efficiently
+        try:
+            status_resp = await get_status(task.task_id)
+            task_info = {
+                "task_id": task.task_id,
+                "filename": task.filename,
+                "status": status_resp.status,
+                "progress": status_resp.progress,
+                "message": status_resp.message,
+                "error": status_resp.message if status_resp.status == TaskStatusEnum.FAILURE else None,
+                "download_urls": {
+                    "srt": f"/results/{task.task_id}/download?format=srt",
+                    "ass": f"/results/{task.task_id}/download?format=ass",
+                    "video": f"/results/{task.task_id}/download?format=video"
+                } if status_resp.status == TaskStatusEnum.SUCCESS else None
+            }
+            
+            if status_resp.status == TaskStatusEnum.SUCCESS:
+                completed += 1
+            elif status_resp.status == TaskStatusEnum.FAILURE:
+                failed += 1
+            else:
+                processing += 1
+                
+            tasks_details.append(task_info)
+        except Exception:
+            tasks_details.append({
+                "task_id": task.task_id,
+                "filename": task.filename,
+                "status": "error",
+                "progress": 0
+            })
+            failed += 1
+
+    return BatchStatusResponse(
+        batch_id=batch_id,
+        total=len(batch.tasks),
+        completed=completed,
+        failed=failed,
+        processing=processing,
+        tasks=tasks_details
+    )
+
+@app.get("/batch/{batch_id}/download")
+async def download_batch_zip(batch_id: str):
+    batch = BATCH_MANAGER.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    
+    zip_filename = f"subtitle_batch_{batch_id}.zip"
+    zip_path = os.path.join(UPLOAD_DIR, zip_filename)
+    
+    failed_tasks = []
+    
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for task in batch.tasks:
+            try:
+                status_resp = await get_status(task.task_id)
+            except Exception as e:
+                failed_tasks.append({"task_id": task.task_id, "filename": task.filename, "error": str(e)})
+                continue
+
+            if status_resp.status == TaskStatusEnum.SUCCESS:
+                # Add SRT, ASS, and final video
+                for ext in ["srt", "ass"]:
+                    # We need to find the actual file on disk. 
+                    # Usually it's {task_id}_{lang}.{ext} or {task_id}.{ext}
+                    # For simplicity, we'll look for any file starting with task_id and ending with ext
+                    for f in os.listdir(UPLOAD_DIR):
+                        if f.startswith(task.task_id) and f.endswith(f".{ext}"):
+                            zipf.write(os.path.join(UPLOAD_DIR, f), arcname=f"{task.filename}_{f}")
+                
+                video_file = f"{task.task_id}_final.mp4"
+                video_path = os.path.join(UPLOAD_DIR, video_file)
+                if os.path.exists(video_path):
+                    zipf.write(video_path, arcname=f"{task.filename}_final.mp4")
+            elif status_resp.status == TaskStatusEnum.FAILURE:
+                failed_tasks.append({
+                    "task_id": task.task_id,
+                    "filename": task.filename,
+                    "error": status_resp.message
+                })
+        
+        if failed_tasks:
+            zipf.writestr("failed_tasks.json", json.dumps(failed_tasks, indent=2))
+            
+    return FileResponse(zip_path, media_type="application/zip", filename=zip_filename)
+
 @app.get("/results/{task_id}", response_model=TaskResultManifest)
 async def get_results_manifest(task_id: str):
     task_id = validate_task_id(task_id)
@@ -758,3 +925,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

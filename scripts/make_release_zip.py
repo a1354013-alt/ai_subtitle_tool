@@ -39,12 +39,6 @@ EXCLUDED_GLOBS = {
     "*.tar.gz",
     "*.tar.bz2",
     "*.log",
-    "*.mp4",
-    "*.srt",
-    "*.ass",
-    "*.vtt",
-    "*.sqlite3",
-    "*.db",
     ".coverage",
     "coverage.xml",
 }
@@ -135,12 +129,6 @@ def _assert_release_zip_clean(out_path: Path) -> None:
         ".tar.gz",
         ".tar.bz2",
         ".tmp",
-        ".mp4",
-        ".srt",
-        ".ass",
-        ".vtt",
-        ".sqlite3",
-        ".db",
     }
 
     for name in names:
