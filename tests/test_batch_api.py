@@ -1,5 +1,6 @@
 import importlib
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,8 +55,8 @@ def test_batch_upload_basic(batch_app, monkeypatch: pytest.MonkeyPatch):
 def test_batch_status(batch_app):
     client, main = batch_app
     tasks = [
-        {"task_id": "task1", "filename": "v1.mp4", "status": "queued"},
-        {"task_id": "task2", "filename": "v2.mp4", "status": "queued"},
+        {"task_id": str(uuid4()), "filename": "v1.mp4", "status": "queued"},
+        {"task_id": str(uuid4()), "filename": "v2.mp4", "status": "queued"},
     ]
     batch_id = main.BATCH_MANAGER.create_batch(tasks)
 
@@ -67,10 +68,20 @@ def test_batch_status(batch_app):
     assert len(data["tasks"]) == 2
 
 
-def test_batch_download_zip(batch_app):
+def test_batch_download_zip(batch_app, monkeypatch: pytest.MonkeyPatch):
     client, main = batch_app
-    tasks = [{"task_id": "fake_task", "filename": "fake.mp4", "status": "queued"}]
+    task_id = str(uuid4())
+    tasks = [{"task_id": task_id, "filename": "fake.mp4", "status": "queued"}]
     batch_id = main.BATCH_MANAGER.create_batch(tasks)
+
+    subtitle_path = Path(main.UPLOAD_DIR) / f"{task_id}_English.srt"
+    subtitle_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _task_id: main._TestingAsyncResult(status="SUCCESS", result={"warnings": []}),
+    )
 
     response = client.get(f"/batch/{batch_id}/download")
     assert response.status_code == 200
