@@ -47,7 +47,7 @@ The frontend uses a single base URL source for BOTH API requests and download UR
 Example:
 
 ```ini
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:8080
 ```
 
 ## Business Rules (UI)

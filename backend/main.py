@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import uuid
 import uuid as _uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -19,6 +20,8 @@ from .storage.task_history import TaskHistoryStore, duration_seconds_since
 from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 from .utils.error_handler import handle_known_error, get_error_response
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="AI Video Subtitle Tool",
     version="1.0.0",
@@ -26,7 +29,6 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
-logger = logging.getLogger(__name__)
 
 
 def configure_cors() -> None:
@@ -51,8 +53,6 @@ def configure_cors() -> None:
         allow_headers=["*"],
     )
 
-
-configure_cors()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
@@ -233,9 +233,14 @@ def check_system_dependencies():
                      ERROR_MESSAGES["redis_not_running"]["message"], 
                      ERROR_MESSAGES["redis_not_running"]["suggestion"])
 
-@app.on_event("startup")
-async def startup_event():
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     check_system_dependencies()
+    yield
+
+app.router.lifespan_context = lifespan
+configure_cors()
 
 @app.get("/readyz")
 async def readyz():
@@ -753,4 +758,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

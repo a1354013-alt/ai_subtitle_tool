@@ -1,17 +1,14 @@
 <template>
   <div>
-    <PageHeader
-      :title="$t('editor.download')"
-      subtitle="Download existing outputs. Rebuilding final.mp4 is explicit and only runs when you click the button."
-    />
+    <PageHeader :title="$t('downloads.title')" :subtitle="$t('downloads.subtitle')" />
 
     <ErrorAlert v-if="res.error" :error="res.error" />
-    <LoadingBlock v-if="res.loading" :title="$t('common.loading')" description="Fetching available files." />
+    <LoadingBlock v-if="res.loading" :title="$t('common.loading')" :description="$t('downloads.fetching')" />
 
     <template v-else>
       <div class="row" style="align-items: center; justify-content: space-between; margin-bottom: 12px">
         <div class="pill">
-          <span>Task</span>
+          <span>{{ $t('editor.taskLabel') }}</span>
           <code class="mono">{{ taskId }}</code>
         </div>
         <RouterLink class="btn" :to="{ name: 'task', params: { taskId } }">{{ $t('task.status') }}</RouterLink>
@@ -20,53 +17,46 @@
       <div v-if="manifest && isSuccessManifest" class="row" style="margin-bottom: 12px">
         <div class="col card">
           <div class="card-inner">
-            <div class="label">Language</div>
+            <div class="label">{{ $t('downloads.languageLabel') }}</div>
             <select class="select" v-model="selectedLang" @change="persistLang">
               <option v-for="f in files" :key="f.lang" :value="f.lang">{{ f.display_name }}</option>
             </select>
-            <div class="help">
-              Subtitle downloads require an explicit <code class="mono">lang</code> + <code class="mono">format</code>.
-              The selector above controls which language is used.
-            </div>
+            <div class="help">{{ $t('downloads.languageHelp') }}</div>
           </div>
         </div>
       </div>
 
-      <EmptyState
-        v-if="!manifest"
-        title="No manifest"
-        description="The results manifest is not available yet. Check task status first."
-      >
-        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">Go to status</RouterLink>
+      <EmptyState v-if="!manifest" :title="$t('downloads.noManifestTitle')" :description="$t('downloads.noManifestDescription')">
+        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">{{ $t('common.goToStatus') }}</RouterLink>
       </EmptyState>
 
       <EmptyState
         v-else-if="!isSuccessManifest"
-        title="Results not ready"
-        description="The task has not completed yet, so downloads are not available. Go back to the status page and wait for SUCCESS."
+        :title="$t('downloads.notReadyTitle')"
+        :description="$t('downloads.notReadyDescription')"
       >
-        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">Go to status</RouterLink>
+        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">{{ $t('common.goToStatus') }}</RouterLink>
       </EmptyState>
 
       <DownloadList v-else :items="downloadItems" />
 
       <div v-if="manifest && !manifest.has_video" class="card" style="margin-top: 12px">
         <div class="card-inner">
-          <div class="label">Note</div>
+          <div class="label">{{ $t('downloads.noteTitle') }}</div>
           <div class="help">
             <div>
-              <strong>final.mp4 is missing.</strong> This can happen if the task did not generate a final video, or if a subtitle was edited
-              and the backend deleted final.mp4 to avoid serving an outdated video.
+              <strong>{{ $t('downloads.finalVideoMissingTitle') }}</strong>
+              {{ $t('downloads.finalVideoMissingBody') }}
             </div>
             <div style="margin-top: 6px">
-              Editing subtitles only updates the subtitle file; it does not rebuild/burn the final video automatically.
+              {{ $t('downloads.noAutoRebuild') }}
             </div>
             <div v-if="manifest && isSuccessManifest" style="margin-top: 10px">
               <button class="btn primary" :disabled="rebuilding || !selectedLang" @click="onRebuildFinal">
                 {{ rebuilding ? $t('common.loading') : $t('editor.rebuild') }}
               </button>
               <div class="help" style="margin-top: 6px">
-                This enqueues a background rebuild using the selected language. Track progress on the status page.
+                {{ $t('downloads.rebuildHelp') }}
               </div>
             </div>
           </div>
@@ -79,6 +69,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { RouterLink, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import PageHeader from "@/components/PageHeader.vue";
 import DownloadList from "@/components/DownloadList.vue";
 import LoadingBlock from "@/components/LoadingBlock.vue";
@@ -91,6 +82,7 @@ import { usePreferencesStore } from "@/stores/preferences";
 import { rebuildFinalVideo } from "@/api/tasks";
 
 const props = defineProps<{ taskId: string }>();
+const { t } = useI18n();
 const taskId = computed(() => props.taskId);
 const router = useRouter();
 
@@ -102,7 +94,7 @@ const manifest = computed(() => res.manifest);
 const files = computed(() => manifest.value?.available_files ?? []);
 const isSuccessManifest = computed(() => {
   const s = manifest.value?.task_status;
-  if (!s) return true; // backwards-compat for older manifests
+  if (!s) return true;
   return String(s).toUpperCase() === "SUCCESS";
 });
 
@@ -144,8 +136,8 @@ const downloadItems = computed<DownloadItem[]>(() => {
 
   items.push({
     key: "video",
-    label: "Final Video (final.mp4)",
-    description: "Download the final video if it exists.",
+    label: t("downloads.finalVideoLabel"),
+    description: t("downloads.finalVideoDescription"),
     available: manifest.value.has_video,
     url: manifest.value.has_video ? buildDownloadUrl(taskId.value) : undefined,
   });
@@ -156,22 +148,22 @@ const downloadItems = computed<DownloadItem[]>(() => {
 
   items.push({
     key: "ass",
-    label: `Subtitle (ASS) - ${selectedLang.value}`,
+    label: t("downloads.subtitleAssLabel", { lang: selectedLang.value }),
     available: hasAss,
     url: hasAss ? buildDownloadUrl(taskId.value, "ass", selectedLang.value) : undefined,
   });
 
   items.push({
     key: "srt",
-    label: `Subtitle (SRT) - ${selectedLang.value}`,
+    label: t("downloads.subtitleSrtLabel", { lang: selectedLang.value }),
     available: hasSrt,
     url: hasSrt ? buildDownloadUrl(taskId.value, "srt", selectedLang.value) : undefined,
   });
 
   items.push({
     key: "vtt",
-    label: `Subtitle (VTT) - ${selectedLang.value}`,
-    description: "Generated on-the-fly from SRT.",
+    label: t("downloads.subtitleVttLabel", { lang: selectedLang.value }),
+    description: t("downloads.subtitleVttDescription"),
     available: hasSrt,
     url: hasSrt ? buildDownloadUrl(taskId.value, "vtt", selectedLang.value) : undefined,
   });
@@ -183,7 +175,6 @@ watch(
   taskId,
   async (next) => {
     if (!next) return;
-    // Reset UI selection to the current preference; manifest watcher will correct if unavailable.
     selectedLang.value = prefs.preferredLang;
     await res.fetchManifest(next);
   },

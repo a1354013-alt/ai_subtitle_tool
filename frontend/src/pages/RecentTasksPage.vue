@@ -1,45 +1,44 @@
 <template>
   <div>
-    <PageHeader :title="$t('navbar.tasks')" subtitle="Last 20 tasks recorded by the backend." />
+    <PageHeader :title="$t('navbar.tasks')" :subtitle="$t('task.recentSubtitle')" />
 
     <ErrorAlert v-if="error" :error="error" />
-    <LoadingBlock v-if="loading" :title="$t('common.loading')" description="Fetching recent task history." />
+    <LoadingBlock v-if="loading" :title="$t('common.loading')" :description="$t('task.fetchingRecent')" />
 
     <EmptyState
       v-else-if="!error && tasks.length === 0"
-      title="No recent tasks"
-      description="No tasks have been recorded yet. Upload a video to create a task."
+      :title="$t('task.noRecentTitle')"
+      :description="$t('task.noRecentDescription')"
     />
 
     <div v-else class="card">
       <div class="card-inner">
-        <!-- Filters -->
         <div class="filters">
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Search by Task ID or filename..."
+            :placeholder="$t('task.searchPlaceholder')"
             class="search-input"
           />
           <select v-model="statusFilter" class="status-filter">
-            <option value="">{{ $t('task.status') }}</option>
-            <option value="PENDING">PENDING</option>
-            <option value="PROCESSING">PROCESSING</option>
-            <option value="SUCCESS">SUCCESS</option>
-            <option value="FAILURE">FAILURE</option>
-            <option value="CANCELED">CANCELED</option>
+            <option value="">{{ $t('task.statusFilter') }}</option>
+            <option value="PENDING">{{ $t('task.pending') }}</option>
+            <option value="PROCESSING">{{ $t('task.processing') }}</option>
+            <option value="SUCCESS">{{ $t('task.success') }}</option>
+            <option value="FAILURE">{{ $t('task.failure') }}</option>
+            <option value="CANCELED">{{ $t('task.canceled') }}</option>
           </select>
         </div>
 
         <table class="table">
           <thead>
             <tr>
-              <th>Task ID</th>
-              <th>Filename</th>
+              <th>{{ $t('task.taskId') }}</th>
+              <th>{{ $t('common.filename') }}</th>
               <th>{{ $t('task.status') }}</th>
-              <th>Created</th>
-              <th>Duration</th>
-              <th>Links</th>
+              <th>{{ $t('task.created') }}</th>
+              <th>{{ $t('task.duration') }}</th>
+              <th>{{ $t('task.links') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -58,7 +57,7 @@
           </tbody>
         </table>
         <div class="help" style="margin-top: 10px">
-          Notes: filenames are recorded at upload time. If this backend was upgraded, older tasks may show only task id.
+          {{ $t('task.notes') }}
         </div>
       </div>
     </div>
@@ -103,11 +102,9 @@ const filteredTasks = computed(() => {
   const status = statusFilter.value.toUpperCase();
 
   return tasks.value.filter((t) => {
-    // Status filter
     if (status && String(t.status).toUpperCase() !== status) {
       return false;
     }
-    // Search filter (task_id or filename)
     if (query) {
       const taskIdMatch = t.task_id.toLowerCase().includes(query);
       const filenameMatch = (t.filename || "").toLowerCase().includes(query);
@@ -192,4 +189,3 @@ onMounted(async () => {
   white-space: nowrap;
 }
 </style>
-

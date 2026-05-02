@@ -1,10 +1,7 @@
 <template>
   <div class="row">
     <div class="col">
-      <PageHeader
-        :title="$t('upload.title')"
-        subtitle="Upload a video and create a processing task."
-      />
+      <PageHeader :title="$t('upload.title')" :subtitle="$t('upload.subtitle')" />
 
       <ErrorAlert v-if="task.error" :error="task.error" />
       <UploadForm :submitting="submitting" @submit="handleSubmit" />

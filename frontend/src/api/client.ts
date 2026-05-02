@@ -1,4 +1,5 @@
 import type { APIError } from "@/types/api";
+import i18n from "@/i18n";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -42,7 +43,7 @@ export async function apiRequest<T>(
 
     if (!res.ok) {
       let detail: unknown = undefined;
-      let message = `Request failed (${res.status})`;
+      let message = i18n.global.t("common.requestFailed", { status: res.status });
       let error_code: string | undefined = undefined;
       let suggestion: string | undefined = undefined;
 
@@ -80,7 +81,7 @@ export async function apiRequest<T>(
     return (await res.text()) as unknown as T;
   } catch (e: any) {
     if (e?.name === "AbortError") {
-      const err: APIError = { message: "Request timeout", status: 408 };
+      const err: APIError = { message: i18n.global.t("common.requestTimeout"), status: 408 };
       throw err;
     }
     throw e;

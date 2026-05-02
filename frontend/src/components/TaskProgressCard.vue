@@ -3,7 +3,7 @@
     <div class="card-inner">
       <div class="row top">
         <div>
-          <div class="label">Task ID</div>
+          <div class="label">{{ $t('task.taskId') }}</div>
           <div class="mono id">{{ taskId }}</div>
         </div>
         <StatusBadge :status="status" />
@@ -12,7 +12,7 @@
       <div class="divider" />
 
       <div class="row" style="align-items: center; justify-content: space-between">
-        <div class="label">Progress</div>
+        <div class="label">{{ $t('task.progress') }}</div>
         <div class="mono">{{ progress }}%</div>
       </div>
       <div style="margin-top: 10px">
@@ -22,7 +22,7 @@
       <div v-if="message" class="msg">{{ message }}</div>
 
       <div v-if="warnings.length" class="warn">
-        <div class="warn-title">Non-fatal warnings</div>
+        <div class="warn-title">{{ $t('task.warningsTitle') }}</div>
         <ul class="warn-list">
           <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
         </ul>

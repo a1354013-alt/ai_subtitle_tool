@@ -6,6 +6,7 @@ import time
 import os
 import shutil
 import tempfile
+import types
 import unittest
 import uuid
 from pathlib import Path
@@ -110,6 +111,57 @@ class TestFinalizeAndMergePayloads(unittest.TestCase):
         self.assertEqual(set(payload.keys()), {"start_offset", "end_offset", "overlap", "segment_idx", "segments"})
         self.assertEqual(payload["end_offset"], 10.0)
         self.assertEqual(payload["overlap"], 0)
+
+    def test_parallel_workflow_uses_chord_signature_object(self):
+        import backend.tasks as tasks
+
+        fake_self = MagicMock()
+        fake_self.replace.return_value = "replaced"
+        fake_self.update_state = MagicMock()
+
+        fake_video = MagicMock()
+        fake_video.duration = 120
+
+        fake_workflow = object()
+        fake_header = [object(), object()]
+        fake_callback = object()
+        fake_video_utils = types.SimpleNamespace(remove_silence=lambda src, _dst: src)
+        fake_split_utils = types.SimpleNamespace(split_video=lambda _path: [{"path": "seg1"}, {"path": "seg2"}])
+        fake_model_loader = types.SimpleNamespace(get_model_by_duration=lambda _duration: "tiny")
+        fake_subtitle_utils = types.SimpleNamespace(transcribe_video=MagicMock())
+        fake_task_control_utils = types.SimpleNamespace(is_task_canceled=lambda *_args, **_kwargs: False)
+        fake_moviepy_editor = types.SimpleNamespace(VideoFileClip=MagicMock(return_value=fake_video))
+
+        with (
+            patch("backend.tasks.create_task_lock"),
+            patch("backend.tasks.remove_task_lock"),
+            patch("backend.tasks.chord", return_value=fake_workflow) as chord_mock,
+            patch("backend.tasks.transcribe_segment_task") as transcribe_task_mock,
+            patch("backend.tasks.merge_and_finalize_task") as merge_task_mock,
+            patch.dict(
+                "sys.modules",
+                {
+                    "backend.utils.video_utils": fake_video_utils,
+                    "backend.utils.split_utils": fake_split_utils,
+                    "backend.utils.model_loader": fake_model_loader,
+                    "backend.utils.subtitle_utils": fake_subtitle_utils,
+                    "backend.utils.task_control_utils": fake_task_control_utils,
+                    "moviepy.editor": fake_moviepy_editor,
+                },
+            ),
+        ):
+            transcribe_task_mock.s.side_effect = fake_header
+            merge_task_mock.s.return_value = fake_callback
+
+            result = tasks.process_video_task(
+                fake_self,
+                "C:\\tmp\\demo.mp4",
+                {"business_id": "biz", "parallel": True, "remove_silence": False},
+            )
+
+        self.assertEqual(result, "replaced")
+        chord_mock.assert_called_once_with(fake_header, fake_callback)
+        fake_self.replace.assert_called_once_with(fake_workflow)
 
 
 class TestMergeSegmentsDedupNormalize(unittest.TestCase):

@@ -1,8 +1,8 @@
 <template>
   <div class="card">
     <div class="card-inner">
-      <div class="label">Downloads</div>
-      <div v-if="items.length === 0" class="help">No downloadable items.</div>
+      <div class="label">{{ $t('downloads.title') }}</div>
+      <div v-if="items.length === 0" class="help">{{ $t('downloads.noItems') }}</div>
 
       <div class="list">
         <div v-for="it in items" :key="it.key" class="item">
@@ -11,8 +11,8 @@
             <div v-if="it.description" class="desc">{{ it.description }}</div>
           </div>
           <div>
-            <a v-if="it.available && it.url" class="btn primary" :href="it.url">Download</a>
-            <button v-else class="btn" disabled>Not available</button>
+            <a v-if="it.available && it.url" class="btn primary" :href="it.url">{{ $t('common.download') }}</a>
+            <button v-else class="btn" disabled>{{ $t('common.notAvailable') }}</button>
           </div>
         </div>
       </div>

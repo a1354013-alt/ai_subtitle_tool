@@ -1,1 +1,0 @@
-import{x as t}from"./index-DPCc2glh.js";const r="ai_subtitle_tool_preferred_lang";function a(){try{return localStorage.getItem(r)||"Traditional_Chinese"}catch{return"Traditional_Chinese"}}function n(e){try{localStorage.setItem(r,e)}catch{}}const i=t("preferences",{state:()=>({preferredLang:a()}),actions:{setPreferredLang(e){this.preferredLang=e,n(e)}}});export{i as u};

@@ -6,19 +6,26 @@
           <div class="col">
             <div class="label">{{ $t('upload.selectVideo') }}</div>
             <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" @change="onFileChange" />
-            <div class="help">Accepted: mp4 / mkv / avi / mov (final validation is done by ffprobe).</div>
+            <div class="help">{{ $t('upload.acceptedFormats') }}</div>
           </div>
 
           <div class="col">
-            <div class="label">Target Languages</div>
-            <input v-model="targetLangs" class="input" type="text" placeholder="Traditional Chinese" />
-            <div class="help">Comma-separated languages, e.g. <code class="mono">Traditional Chinese, English</code>.</div>
+            <div class="label">{{ $t('upload.targetLanguages') }}</div>
+            <input
+              v-model="targetLangs"
+              class="input"
+              type="text"
+              :placeholder="$t('upload.targetLanguagesPlaceholder')"
+            />
+            <div class="help">
+              {{ $t('upload.targetLanguagesHelp', { example: 'Traditional Chinese, English' }) }}
+            </div>
           </div>
         </div>
 
         <div class="row" style="margin-top: 12px">
           <div class="col">
-            <div class="label">Subtitle Format</div>
+            <div class="label">{{ $t('upload.subtitleFormat') }}</div>
             <select v-model="subtitleFormat" class="select">
               <option value="ass">ass</option>
               <option value="srt">srt</option>
@@ -26,26 +33,26 @@
           </div>
 
           <div class="col">
-            <div class="label">Burn Subtitles</div>
+            <div class="label">{{ $t('upload.burnSubtitles') }}</div>
             <label class="check">
               <input v-model="burnSubtitles" type="checkbox" />
-              <span>Burn subtitles into final.mp4</span>
+              <span>{{ $t('upload.burnSubtitlesHelp') }}</span>
             </label>
           </div>
 
           <div class="col">
-            <div class="label">Remove Silence</div>
+            <div class="label">{{ $t('upload.removeSilence') }}</div>
             <label class="check">
               <input v-model="removeSilence" type="checkbox" />
-              <span>Remove silent parts (may change timings)</span>
+              <span>{{ $t('upload.removeSilenceHelp') }}</span>
             </label>
           </div>
 
           <div class="col">
-            <div class="label">Parallel</div>
+            <div class="label">{{ $t('upload.parallel') }}</div>
             <label class="check">
               <input v-model="parallel" type="checkbox" />
-              <span>Parallel segments (recommended for longer videos)</span>
+              <span>{{ $t('upload.parallelHelp') }}</span>
             </label>
           </div>
         </div>
@@ -54,11 +61,11 @@
 
         <div class="row" style="align-items: center; justify-content: space-between">
           <div class="pill">
-            <span>API Base URL</span>
+            <span>{{ $t('upload.apiBaseUrl') }}</span>
             <code class="mono">{{ apiBaseUrl }}</code>
           </div>
           <button class="btn primary" type="submit" :disabled="props.submitting || !file">
-            {{ props.submitting ? 'Uploading...' : $t('upload.generate') }}
+            {{ props.submitting ? $t('upload.uploading') : $t('upload.generate') }}
           </button>
         </div>
       </form>
@@ -68,12 +75,14 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import type { SubtitleFormat } from "@/types/subtitle";
 
 const emit = defineEmits<{
   (e: "submit", payload: FormData): void;
 }>();
 
+const { t } = useI18n();
 const file = ref<File | null>(null);
 const props = withDefaults(
   defineProps<{
@@ -88,16 +97,16 @@ const burnSubtitles = ref(true);
 const removeSilence = ref(false);
 const parallel = ref(true);
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "(same origin)";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? t("upload.sameOrigin");
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
 
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
   const selected = input.files?.[0] ?? null;
   if (selected && selected.size > MAX_FILE_SIZE) {
-    window.alert(`File too large. Maximum size: 2GB`);
-    input.value = ""; // Reset
+    window.alert(t("upload.fileTooLarge"));
+    input.value = "";
     file.value = null;
     return;
   }

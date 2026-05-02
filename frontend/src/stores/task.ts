@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import type { TaskStatusResponse } from "@/types/task";
 import { createUploadTask, getTaskStatus } from "@/api/tasks";
 import type { APIError } from "@/types/api";
+import i18n from "@/i18n";
 import { usePreferencesStore } from "@/stores/preferences";
 
 type PollTimer = number | null;
@@ -69,7 +70,7 @@ export const useTaskStore = defineStore("task", {
       
       if (res.error_code) {
         this.error = {
-          message: res.message ?? "Unknown error",
+          message: res.message ?? i18n.global.t("common.unknownError"),
           error_code: res.error_code,
           suggestion: res.suggestion
         };

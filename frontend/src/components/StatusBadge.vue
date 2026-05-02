@@ -4,8 +4,10 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 
 const props = defineProps<{ status: string }>();
+const { t } = useI18n();
 
 const tone = computed(() => {
   const s = props.status.toUpperCase();
@@ -15,7 +17,14 @@ const tone = computed(() => {
   return "neutral";
 });
 
-const label = computed(() => props.status.toUpperCase());
+const label = computed(() => {
+  const s = props.status.toUpperCase();
+  if (s === "SUCCESS") return t("task.success");
+  if (s === "FAILURE") return t("task.failure");
+  if (s === "CANCELED") return t("task.canceled");
+  if (s === "PROCESSING") return t("task.processing");
+  return t("task.pending");
+});
 </script>
 
 <style scoped>
@@ -45,4 +54,3 @@ const label = computed(() => props.status.toUpperCase());
   color: #ffd0d0;
 }
 </style>
-

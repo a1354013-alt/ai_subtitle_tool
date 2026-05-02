@@ -4,8 +4,8 @@
       <div class="row">
         <div class="spinner" />
         <div>
-          <div class="t">{{ title }}</div>
-          <div class="d">{{ description }}</div>
+          <div class="t">{{ titleText }}</div>
+          <div class="d">{{ descriptionText }}</div>
         </div>
       </div>
     </div>
@@ -13,16 +13,16 @@
 </template>
 
 <script setup lang="ts">
-withDefaults(
-  defineProps<{
-    title?: string;
-    description?: string;
-  }>(),
-  {
-    title: "Loading...",
-    description: "Please wait.",
-  }
-);
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
+const props = defineProps<{
+  title?: string;
+  description?: string;
+}>();
+const titleText = computed(() => props.title ?? t("common.loading"));
+const descriptionText = computed(() => props.description ?? t("common.pleaseWait"));
 </script>
 
 <style scoped>
