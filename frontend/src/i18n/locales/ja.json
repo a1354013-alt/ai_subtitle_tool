@@ -3,24 +3,38 @@
     "home": "ホーム",
     "tasks": "タスク一覧",
     "editor": "エディタ",
-    "language": "言語"
+    "language": "言語",
+    "workflow": "アップロード → 処理 → 字幕編集 → ダウンロード"
   },
   "upload": {
     "title": "動画をアップロード",
     "selectVideo": "動画ファイルを選択",
-    "generate": "字幕を生成"
+    "generate": "字幕を生成",
+    "targetLanguages": "対象言語",
+    "subtitleFormat": "字幕形式",
+    "burnSubtitles": "字幕を焼き付ける",
+    "removeSilence": "無音部分を削除",
+    "parallel": "並列処理"
+  },
+  "batch": {
+    "downloadZip": "一括ZIPをダウンロード"
   },
   "task": {
     "status": "タスクステータス",
     "processing": "処理中",
     "completed": "完了",
-    "failed": "失敗"
+    "failed": "失敗",
+    "progress": "進捗"
   },
   "editor": {
     "title": "字幕エディタ",
     "save": "保存",
-    "rebuild": "再構築",
+    "rebuild": "動画を再生成",
     "download": "字幕をダウンロード"
+  },
+  "download": {
+    "title": "ダウンロード",
+    "button": "ダウンロード"
   },
   "common": {
     "loading": "読み込み中...",

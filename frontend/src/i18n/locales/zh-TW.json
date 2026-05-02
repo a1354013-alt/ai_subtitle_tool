@@ -3,24 +3,38 @@
     "home": "首頁",
     "tasks": "任務清單",
     "editor": "編輯器",
-    "language": "語言"
+    "language": "語言",
+    "workflow": "上傳 → 處理 → 編輯字幕 → 下載"
   },
   "upload": {
     "title": "上傳影片",
     "selectVideo": "選擇影片檔案",
-    "generate": "開始生成字幕"
+    "generate": "開始生成字幕",
+    "targetLanguages": "目標語言",
+    "subtitleFormat": "字幕格式",
+    "burnSubtitles": "內嵌字幕",
+    "removeSilence": "移除靜音",
+    "parallel": "平行處理"
+  },
+  "batch": {
+    "downloadZip": "下載批次壓縮檔 (ZIP)"
   },
   "task": {
     "status": "任務狀態",
     "processing": "處理中",
     "completed": "已完成",
-    "failed": "失敗"
+    "failed": "失敗",
+    "progress": "進度"
   },
   "editor": {
     "title": "字幕編輯器",
     "save": "儲存",
-    "rebuild": "重新構建",
+    "rebuild": "重新生成影片",
     "download": "下載字幕"
+  },
+  "download": {
+    "title": "下載",
+    "button": "下載"
   },
   "common": {
     "loading": "載入中...",

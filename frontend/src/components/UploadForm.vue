@@ -10,7 +10,7 @@
           </div>
 
           <div class="col">
-            <div class="label">Target Languages</div>
+            <div class="label">{{ $t('upload.targetLanguages') }}</div>
             <input v-model="targetLangs" class="input" type="text" placeholder="Traditional Chinese" />
             <div class="help">Comma-separated languages, e.g. <code class="mono">Traditional Chinese, English</code>.</div>
           </div>
@@ -18,7 +18,7 @@
 
         <div class="row" style="margin-top: 12px">
           <div class="col">
-            <div class="label">Subtitle Format</div>
+            <div class="label">{{ $t('upload.subtitleFormat') }}</div>
             <select v-model="subtitleFormat" class="select">
               <option value="ass">ass</option>
               <option value="srt">srt</option>
@@ -26,7 +26,7 @@
           </div>
 
           <div class="col">
-            <div class="label">Burn Subtitles</div>
+            <div class="label">{{ $t('upload.burnSubtitles') }}</div>
             <label class="check">
               <input v-model="burnSubtitles" type="checkbox" />
               <span>Burn subtitles into final.mp4</span>
@@ -34,7 +34,7 @@
           </div>
 
           <div class="col">
-            <div class="label">Remove Silence</div>
+            <div class="label">{{ $t('upload.removeSilence') }}</div>
             <label class="check">
               <input v-model="removeSilence" type="checkbox" />
               <span>Remove silent parts (may change timings)</span>
@@ -42,7 +42,7 @@
           </div>
 
           <div class="col">
-            <div class="label">Parallel</div>
+            <div class="label">{{ $t('upload.parallel') }}</div>
             <label class="check">
               <input v-model="parallel" type="checkbox" />
               <span>Parallel segments (recommended for longer videos)</span>

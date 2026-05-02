@@ -26,7 +26,7 @@ services:
     volumes:
       - ./backend/uploads:/app/uploads
     ports:
-      - "8000:8001"
+      - "9091:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).read()"]
       interval: 10s
@@ -60,7 +60,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://localhost:8000
+        VITE_API_BASE_URL: http://localhost:9091
     ports:
       - "5173:80"
     depends_on:

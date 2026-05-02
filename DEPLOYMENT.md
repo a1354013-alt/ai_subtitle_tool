@@ -66,7 +66,7 @@ npm run dev
 Default dev URLs:
 
 - Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8000`
+- Backend: `http://localhost:9091`
 
 If frontend and backend are different origins, set `VITE_API_BASE_URL` (see `frontend/.env.example`).
 
@@ -90,8 +90,8 @@ docker compose up
 Services:
 
 - Frontend (nginx): `http://localhost:5173`
-- Backend API: `http://localhost:8000`
-- Backend health check: `http://localhost:8000/healthz`
+- Backend API: `http://localhost:9091`
+- Backend health check: `http://localhost:9091/healthz`
 - Redis: `localhost:6379` (host-mapped for convenience)
 
 Notes:

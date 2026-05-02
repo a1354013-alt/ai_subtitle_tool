@@ -60,7 +60,7 @@
             <span>Processing: {{ batchStatus?.processing || 0 }}</span>
           </div>
           <button v-if="batchStatus?.completed > 0" class="btn primary btn-sm" @click="downloadZip">
-            Download Batch ZIP
+            {{ $t('batch.downloadZip') }}
           </button>
         </div>
 

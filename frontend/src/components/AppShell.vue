@@ -6,7 +6,7 @@
           <div class="logo">AI</div>
           <div>
             <div class="title">AI Subtitle Tool</div>
-            <div class="subtitle">Upload → Process → Edit subtitles → Download</div>
+            <div class="subtitle">{{ $t('navbar.workflow') }}</div>
           </div>
         </div>
 

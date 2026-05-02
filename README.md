@@ -186,7 +186,7 @@ npm run dev
 Configure `VITE_API_BASE_URL` (see `frontend/.env.example`).
 
 - If frontend and backend are same-origin: you can omit it.
-- If different-origin: set it to the FastAPI origin (e.g. `http://localhost:8000`).
+- If different-origin: set it to the FastAPI origin (e.g. `http://localhost:9091`).
 
 Important: `VITE_API_BASE_URL` affects BOTH:
 
@@ -203,8 +203,8 @@ docker compose up
 ```
 
 - Frontend: `http://localhost:5173`
-- Backend: `http://localhost:8000`
-- Health: `http://localhost:8000/healthz`
+- Backend: `http://localhost:9091`
+- Health: `http://localhost:9091/healthz`
 
 ## Deployment Steps
 

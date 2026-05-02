@@ -251,7 +251,8 @@ def process_video_task(self, video_path: str, options: dict = None):
                 segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
                 header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
                 callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir)
-                return self.replace(chord(header)(callback))
+                workflow = chord(header, callback)
+                return self.replace(workflow)
 
         self.update_state(state="PROGRESS", meta={"progress": 20, "status": "Transcribing..."})
         srt_path = f"{base_path}.srt"

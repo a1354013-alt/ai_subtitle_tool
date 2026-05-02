@@ -12,7 +12,7 @@
       <div class="divider" />
 
       <div class="row" style="align-items: center; justify-content: space-between">
-        <div class="label">Progress</div>
+        <div class="label">{{ $t('task.progress') }}</div>
         <div class="mono">{{ progress }}%</div>
       </div>
       <div style="margin-top: 10px">
