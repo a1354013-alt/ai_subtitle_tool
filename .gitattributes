@@ -13,6 +13,8 @@ __pycache__ export-ignore
 htmlcov export-ignore
 .env export-ignore
 .env.* export-ignore
+!backend/.env.example -export-ignore
+!frontend/.env.example -export-ignore
 *.mp4 export-ignore
 *.mov export-ignore
 *.avi export-ignore
