@@ -105,7 +105,7 @@ Do **NOT** manually zip the repo (Explorer / Finder / `zip -r`). Manual zips rou
 For cross-platform release packaging (CI uses this):
 
 ```bash
-python scripts/make_release_zip.py --out release.zip --check
+python scripts/verify_delivery.py
 ```
 
 ## Backend Setup
@@ -181,7 +181,7 @@ rm -rf node_modules
 npm ci
 npm run lint
 npm run typecheck
-npm test
+npm run test:ci
 npm run build
 npm run dev
 ```
@@ -252,16 +252,22 @@ docker compose up
 
 ```bash
 pytest -q
-cd frontend && npm ci && npm test && npm run build
+cd frontend && npm ci && npm run typecheck && npm run lint && npm run test:ci && npm run build
 ```
 
 ## Release
 
 ```bash
-python scripts/make_release_zip.py --out release.zip --check
+python scripts/verify_delivery.py
 ```
 
 `release.zip` must NOT contain: `uploads/`, `segments/`, `.cache/`, `.env`.
+
+Delivery verification:
+
+```bash
+python scripts/verify_delivery.py
+```
 
 ## Design Decisions
 

@@ -108,7 +108,7 @@ Do not manually zip the repo. Always use the release script so the output is rep
 Cross-platform (CI uses this):
 
 ```bash
-python scripts/make_release_zip.py --out release.zip --check
+python scripts/verify_delivery.py
 ```
 
 Windows PowerShell convenience wrapper:

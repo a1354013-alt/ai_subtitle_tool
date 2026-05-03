@@ -2,6 +2,8 @@ import { apiRequest, buildApiUrl, buildQuery } from "@/api/client";
 import type { ResultsManifestResponse } from "@/types/result";
 import type { DownloadSubtitleFormat } from "@/types/subtitle";
 
+const DOWNLOAD_FORMATS = new Set<DownloadSubtitleFormat>(["ass", "srt", "vtt"]);
+
 export async function getResultsManifest(taskId: string): Promise<ResultsManifestResponse> {
   return apiRequest<ResultsManifestResponse>(`/results/${encodeURIComponent(taskId)}`);
 }
@@ -13,6 +15,9 @@ export function buildDownloadUrl(taskId: string, format?: DownloadSubtitleFormat
   const basePath = `/download/${encodeURIComponent(taskId)}`;
   if (!format) return buildApiUrl(basePath);
 
+  if (!DOWNLOAD_FORMATS.has(format)) {
+    throw new Error(`Unsupported subtitle format: ${format}`);
+  }
   if (!lang) {
     throw new Error("buildDownloadUrl(taskId, format, lang): lang is required when downloading subtitles");
   }

@@ -67,6 +67,25 @@ project.egg-info/
 .mypy_cache/
 .hypothesis/
 
+# Delivery/runtime artifacts
+frontend/node_modules/
+frontend/.npm-cache/
+frontend/dist/
+uploads/*
+!uploads/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.srt
+*.vtt
+*.ass
+*.zip
+*.tar.gz
+
 # Node.js
 node_modules/
 npm-debug.log*

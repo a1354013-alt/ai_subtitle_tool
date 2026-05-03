@@ -46,7 +46,7 @@ cd frontend
 npm ci
 npm run typecheck
 npm run lint
-npm test
+npm run test:ci
 npm run build
 ```
 
@@ -64,7 +64,7 @@ Scope:
 Release zip must be built via script only:
 
 ```bash
-python scripts/make_release_zip.py --out release.zip --check
+python scripts/verify_delivery.py
 ```
 
 The check fails if the zip contains:
@@ -101,4 +101,3 @@ Then:
 - Verify results show subtitles + final video
 - Edit a subtitle line and verify the UI reflects updated content
 - Download final video and subtitle files
-
