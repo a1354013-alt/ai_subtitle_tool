@@ -8,6 +8,7 @@ import uuid as _uuid
 import json
 from pathlib import Path
 from typing import Any, List, Optional
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -120,6 +121,155 @@ def normalize_target_langs(raw: str) -> List[str]:
         seen.add(k)
         out.append(p)
     return out
+
+
+ALLOWED_VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov")
+ALLOWED_VIDEO_CONTENT_TYPES = ("video/", "application/octet-stream")
+ALLOWED_SUBTITLE_FORMATS = ("ass", "srt")
+MAX_UPLOAD_FILE_SIZE = 2 * 1024 * 1024 * 1024
+FAILED_BATCH_STATUSES = {"FAILURE", "FAILED", "ERROR"}
+PROCESSING_BATCH_STATUSES = {"PROCESSING", "PENDING", "STARTED", "QUEUED", "PROGRESS"}
+
+
+def validate_video_content_type(content_type: Optional[str]) -> str:
+    normalized = (content_type or "").lower()
+    if normalized and not any(
+        normalized.startswith(prefix) if prefix.endswith("/") else normalized == prefix
+        for prefix in ALLOWED_VIDEO_CONTENT_TYPES
+    ):
+        raise HTTPException(status_code=400, detail=f"Invalid content type: {content_type}. Expected video/*")
+    return normalized
+
+
+def validate_video_extension(filename: str) -> str:
+    extension = os.path.splitext(filename or "")[1].lower()
+    if extension not in ALLOWED_VIDEO_EXTENSIONS:
+        supported = ", ".join(ext.lstrip(".") for ext in ALLOWED_VIDEO_EXTENSIONS)
+        raise HTTPException(status_code=400, detail=f"Unsupported file format. Supported: {supported}")
+    return extension
+
+
+def validate_subtitle_format(subtitle_format: str) -> str:
+    normalized = (subtitle_format or "").lower()
+    if normalized not in ALLOWED_SUBTITLE_FORMATS:
+        raise HTTPException(status_code=400, detail="subtitle_format must be 'ass' or 'srt'")
+    return normalized
+
+
+def validate_target_langs(raw: str) -> List[str]:
+    langs = normalize_target_langs(raw)
+    if not langs:
+        raise HTTPException(status_code=400, detail="target_langs must contain at least one non-empty language")
+    return langs
+
+
+def validate_upload_file(file: UploadFile) -> None:
+    validate_video_content_type(file.content_type)
+    validate_video_extension(file.filename)
+
+
+def _get_upload_file_size(file: UploadFile) -> int:
+    file.file.seek(0, os.SEEK_END)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    return file_size
+
+
+def save_upload_file(file: UploadFile, task_id: str) -> str:
+    file_extension = validate_video_extension(file.filename)
+    file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
+    file_path = validate_path_traversal(file_path, UPLOAD_DIR)
+
+    file_size = _get_upload_file_size(file)
+    if file_size > MAX_UPLOAD_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size: 2GB")
+
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except HTTPException:
+        raise
+    except Exception as e:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                logger.warning("Failed to remove partially uploaded file: %s", file_path, exc_info=True)
+
+        error_code = handle_known_error(e)
+        error_info = get_error_response(error_code)
+        raise HTTPException(
+            status_code=500 if error_code == "unknown_error" else 400,
+            detail=f"{error_info['message']} Suggestion: {error_info['suggestion']}",
+        ) from e
+
+    return file_path
+
+
+def validate_video_with_ffprobe(file_path: str) -> None:
+    try:
+        ffprobe_result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_type",
+                "-of",
+                "csv=p=0",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
+            stderr = (ffprobe_result.stderr or "").strip()
+            raise ValueError(stderr or "ffprobe could not detect a playable video stream")
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            os.remove(file_path)
+        except OSError:
+            logger.warning("Failed to remove invalid uploaded file: %s", file_path, exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Invalid video file: {str(e)}") from e
+
+
+def build_task_options(
+    task_id: str,
+    target_langs: List[str],
+    burn_subtitles: bool,
+    subtitle_format: str,
+    remove_silence: bool,
+    parallel: bool,
+) -> dict[str, Any]:
+    return {
+        "business_id": task_id,
+        "target_langs": target_langs,
+        "burn_subtitles": burn_subtitles,
+        "subtitle_format": subtitle_format,
+        "remove_silence": remove_silence,
+        "parallel": parallel,
+        "hf_token": os.getenv("HF_TOKEN"),
+    }
+
+
+def build_task_download_urls(task_id: str, primary_language: Optional[str]) -> Optional[dict[str, str]]:
+    if not primary_language:
+        return None
+
+    return {
+        "srt": f"/download/{task_id}?{urlencode({'lang': primary_language, 'format': 'srt'})}",
+        "ass": f"/download/{task_id}?{urlencode({'lang': primary_language, 'format': 'ass'})}",
+        "video": f"/download/{task_id}?{urlencode({'format': 'video'})}",
+    }
+
+
+def normalize_batch_status(status: Any) -> str:
+    return str(status or "").upper()
 
 
 def validate_path_traversal(filepath: str, allowed_root: str) -> str:
@@ -332,96 +482,17 @@ async def upload_video(
     remove_silence: bool = Form(False, description="Remove silence from video"),
     parallel: bool = Form(True, description="Use parallel processing for long videos"),
 ):
-    content_type = (file.content_type or "").lower()
-    if content_type and (not content_type.startswith("video/")) and content_type != "application/octet-stream":
-        raise HTTPException(status_code=400, detail=f"Invalid content type: {file.content_type}. Expected video/*")
-
-    if not file.filename.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
-        raise HTTPException(status_code=400, detail="Unsupported file format. Supported: mp4, mkv, avi, mov")
-
-    if subtitle_format not in ("ass", "srt"):
-        raise HTTPException(status_code=400, detail="subtitle_format must be 'ass' or 'srt'")
-
+    validate_upload_file(file)
+    subtitle_format = validate_subtitle_format(subtitle_format)
+    langs = validate_target_langs(target_langs)
     task_id = str(uuid.uuid4())
-    file_extension = os.path.splitext(file.filename)[1]
-    file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
-    file_path = validate_path_traversal(file_path, UPLOAD_DIR)
-
-    # size check (2GB)
-    file.file.seek(0, 2)
-    file_size = file.file.tell()
-    file.file.seek(0)
-    max_file_size = 2 * 1024 * 1024 * 1024
-    if file_size > max_file_size:
-        raise HTTPException(status_code=413, detail="File too large. Maximum size: 2GB")
-
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except HTTPException:
-        raise
-    except Exception as e:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except OSError:
-                logger.warning("Failed to remove partially uploaded file: %s", file_path, exc_info=True)
-        
-        error_code = handle_known_error(e)
-        error_info = get_error_response(error_code)
-        return JSONResponse(
-            status_code=500 if error_code == "unknown_error" else 400,
-            content={
-                "success": False,
-                "error_code": error_code,
-                "message": error_info["message"],
-                "suggestion": error_info["suggestion"]
-            }
-        )
+        file_path = save_upload_file(file, task_id)
     finally:
         file.file.close()
 
-    # ffprobe final validation
-    try:
-        ffprobe_result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=codec_type",
-                "-of",
-                "csv=p=0",
-                file_path,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
-            raise ValueError("Not a valid video file")
-    except Exception as e:
-        try:
-            os.remove(file_path)
-        except OSError:
-            logger.warning("Failed to remove invalid uploaded file: %s", file_path, exc_info=True)
-        raise HTTPException(status_code=400, detail=f"Invalid video file: {str(e)}")
-
-    langs = normalize_target_langs(target_langs)
-    if not langs:
-        raise HTTPException(status_code=400, detail="target_langs must contain at least one non-empty language")
-
-    options = {
-        "business_id": task_id,
-        "target_langs": langs,
-        "burn_subtitles": burn_subtitles,
-        "subtitle_format": subtitle_format,
-        "remove_silence": remove_silence,
-        "parallel": parallel,
-        "hf_token": os.getenv("HF_TOKEN"),
-    }
+    validate_video_with_ffprobe(file_path)
+    options = build_task_options(task_id, langs, burn_subtitles, subtitle_format, remove_silence, parallel)
 
     try:
         _enqueue_process_video_task(file_path, options, task_id)
@@ -596,33 +667,19 @@ async def batch_upload_videos(
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
 
+    subtitle_format = validate_subtitle_format(subtitle_format)
+    langs = validate_target_langs(target_langs)
     tasks_info = []
     enqueue_jobs: List[dict[str, Any]] = []
-    langs = normalize_target_langs(target_langs)
-    
+
     for file in files:
         task_id = str(uuid.uuid4())
-        file_extension = os.path.splitext(file.filename)[1]
-        file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
-        
-        # Basic validation similar to single upload
-        if not file.filename.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
-            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "failed", "error": "Unsupported format"})
-            continue
 
         try:
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            
-            options = {
-                "business_id": task_id,
-                "target_langs": langs,
-                "burn_subtitles": burn_subtitles,
-                "subtitle_format": subtitle_format,
-                "remove_silence": remove_silence,
-                "parallel": parallel,
-                "hf_token": os.getenv("HF_TOKEN"),
-            }
+            validate_upload_file(file)
+            file_path = save_upload_file(file, task_id)
+            validate_video_with_ffprobe(file_path)
+            options = build_task_options(task_id, langs, burn_subtitles, subtitle_format, remove_silence, parallel)
 
             enqueue_jobs.append(
                 {
@@ -632,10 +689,40 @@ async def batch_upload_videos(
                     "options": options,
                 }
             )
-            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "queued"})
+            tasks_info.append(
+                {
+                    "task_id": task_id,
+                    "filename": file.filename,
+                    "status": TaskStatusEnum.PENDING.value,
+                    "error": None,
+                    "download_urls": None,
+                    "target_langs": langs,
+                }
+            )
+        except HTTPException as e:
+            logger.warning("Rejected batch file %s: %s", file.filename, e.detail)
+            tasks_info.append(
+                {
+                    "task_id": task_id,
+                    "filename": file.filename,
+                    "status": TaskStatusEnum.FAILURE.value,
+                    "error": str(e.detail),
+                    "download_urls": None,
+                    "target_langs": langs,
+                }
+            )
         except Exception as e:
             logger.error(f"Failed to process batch file {file.filename}: {e}")
-            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "failed", "error": str(e)})
+            tasks_info.append(
+                {
+                    "task_id": task_id,
+                    "filename": file.filename,
+                    "status": TaskStatusEnum.FAILURE.value,
+                    "error": str(e),
+                    "download_urls": None,
+                    "target_langs": langs,
+                }
+            )
         finally:
             file.file.close()
 
@@ -653,10 +740,10 @@ async def batch_upload_videos(
             logger.error("Failed to enqueue batch file %s: %s", job["filename"], e)
             for task in tasks_info:
                 if task["task_id"] == job["task_id"]:
-                    task["status"] = "failed"
+                    task["status"] = TaskStatusEnum.FAILURE.value
                     task["error"] = str(e)
                     break
-            BATCH_MANAGER.update_task_status(batch_id, job["task_id"], "failed", str(e))
+            BATCH_MANAGER.update_task_status(batch_id, job["task_id"], TaskStatusEnum.FAILURE.value, str(e))
 
     return BatchUploadResponse(batch_id=batch_id, tasks=tasks_info)
 
@@ -680,21 +767,44 @@ async def get_batch_status(batch_id: str):
     processing = 0
     
     for task in batch.tasks:
-        # Reuse existing get_status logic conceptually but more efficiently
+        stored_status = normalize_batch_status(task.status)
+        stored_error = task.error
+        stored_download_urls = task.download_urls
+
+        if stored_status in FAILED_BATCH_STATUSES:
+            tasks_details.append(
+                {
+                    "task_id": task.task_id,
+                    "filename": task.filename,
+                    "status": TaskStatusEnum.FAILURE.value,
+                    "progress": 0,
+                    "message": stored_error or "Task failed",
+                    "error": stored_error or "Task failed",
+                    "download_urls": stored_download_urls,
+                }
+            )
+            failed += 1
+            continue
+
         try:
             status_resp = await get_status(task.task_id)
+            primary_language = task.target_langs[0] if task.target_langs else None
+            download_urls = build_task_download_urls(task.task_id, primary_language) if status_resp.status == TaskStatusEnum.SUCCESS else None
+            BATCH_MANAGER.update_task_status(
+                batch_id=batch_id,
+                task_id=task.task_id,
+                status=status_resp.status.value,
+                error=status_resp.message if status_resp.status == TaskStatusEnum.FAILURE else None,
+                download_urls=download_urls,
+            )
             task_info = {
                 "task_id": task.task_id,
                 "filename": task.filename,
-                "status": status_resp.status,
+                "status": status_resp.status.value,
                 "progress": status_resp.progress,
                 "message": status_resp.message,
                 "error": status_resp.message if status_resp.status == TaskStatusEnum.FAILURE else None,
-                "download_urls": {
-                    "srt": f"/results/{task.task_id}/download?format=srt",
-                    "ass": f"/results/{task.task_id}/download?format=ass",
-                    "video": f"/results/{task.task_id}/download?format=video"
-                } if status_resp.status == TaskStatusEnum.SUCCESS else None
+                "download_urls": download_urls,
             }
             
             if status_resp.status == TaskStatusEnum.SUCCESS:
@@ -709,8 +819,11 @@ async def get_batch_status(batch_id: str):
             tasks_details.append({
                 "task_id": task.task_id,
                 "filename": task.filename,
-                "status": "error",
-                "progress": 0
+                "status": TaskStatusEnum.FAILURE.value,
+                "progress": 0,
+                "message": "Unable to load task status",
+                "error": "Unable to load task status",
+                "download_urls": stored_download_urls,
             })
             failed += 1
 
@@ -736,6 +849,15 @@ async def download_batch_zip(batch_id: str):
     
     with zipfile.ZipFile(zip_path, 'w') as zipf:
         for task in batch.tasks:
+            stored_status = normalize_batch_status(task.status)
+            if stored_status in FAILED_BATCH_STATUSES:
+                failed_tasks.append({
+                    "task_id": task.task_id,
+                    "filename": task.filename,
+                    "error": task.error or "Task failed before processing started",
+                })
+                continue
+
             try:
                 status_resp = await get_status(task.task_id)
             except Exception as e:
@@ -849,15 +971,17 @@ async def download_result(
     task_id: str,
     lang: Optional[str] = Query(None, description="Language for subtitle (e.g. Traditional_Chinese)"),
     format: Optional[str] = Query(
-        None, description="Subtitle format: 'ass', 'srt', or 'vtt'. Only used when lang is specified"
+        None, description="Format: 'video' for final video, or 'ass'/'srt'/'vtt' when lang is specified"
     ),
 ):
     task_id = validate_task_id(task_id)
 
-    if format and format not in ("ass", "srt", "vtt"):
-        raise HTTPException(status_code=400, detail="format must be 'ass', 'srt', or 'vtt'")
+    if format and format not in ("video", "ass", "srt", "vtt"):
+        raise HTTPException(status_code=400, detail="format must be 'video', 'ass', 'srt', or 'vtt'")
 
     if not lang:
+        if format and format != "video":
+            raise HTTPException(status_code=400, detail="lang is required when downloading subtitle files")
         final_video = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4"), UPLOAD_DIR)
         if os.path.exists(final_video):
             return FileResponse(final_video, filename=f"video_{task_id}.mp4")

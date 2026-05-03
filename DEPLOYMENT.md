@@ -1,34 +1,29 @@
-# Deployment Guide (Local / Docker / Release)
+# Deployment Guide
 
-This repo supports three modes:
+This project supports local development, Docker demo deployment, and release zip verification.
 
-- **Local development** (fast iteration; run Redis/worker/API locally, Vite dev server for UI)
-- **Docker deployment** (single `docker compose up` for demo/staging environments)
-- **Release package** (a clean zip for delivery; no workspace artifacts)
+## Runtime URLs
 
-The frontend **polls** task status via `GET /status/{task_id}` (no WebSocket status endpoint).
+- Local backend: `http://localhost:8000`
+- Docker backend: `http://localhost:9091`
+- Frontend: `http://localhost:5173`
 
----
+## Prerequisites
 
-## 0) Prerequisites
+- Python 3.11
+- Node.js 20
+- Redis
+- `ffmpeg` and `ffprobe`
 
-- **Python**: 3.11 (this is the version used by CI and Docker)
-- **Node.js**: 20 (CI uses Node 20)
-- **System deps**: `ffmpeg` + `ffprobe`
-- **Redis**: required for Celery broker/backend
+## Local Development
 
----
+1. Copy backend env:
 
-## 1) Local development (recommended)
+```bash
+cp backend/.env.example backend/.env
+```
 
-### Backend + worker
-
-1) Create env file:
-
-- Copy `backend/.env.example` to `backend/.env`
-- Fill in optional keys (e.g. `OPENAI_API_KEY`) if you want translation
-
-2) Install Python deps:
+2. Install Python dependencies:
 
 ```bash
 python -m venv venv
@@ -37,12 +32,7 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-Locked media dependency note:
-
-- `requirements.lock.txt` pins `faster-whisper==1.0.3` and `av==12.3.0`.
-- This combination keeps Python 3.11 installs reproducible in Docker by using the published PyAV Linux wheel instead of compiling `av==11.0.0` from source against host FFmpeg headers.
-
-3) Start Redis + worker + API (in separate terminals):
+3. Start services in separate terminals:
 
 ```bash
 redis-server
@@ -50,12 +40,7 @@ celery -A backend.celery_app:celery_app worker --loglevel=info
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-Health endpoints:
-
-- `GET /healthz` → `{"status":"ok"}`
-- `GET /readyz` → checks Redis + `UPLOAD_DIR` write access
-
-### Frontend
+4. Start frontend:
 
 ```bash
 cd frontend
@@ -63,61 +48,48 @@ npm ci
 npm run dev
 ```
 
-Default dev URLs:
+5. If the frontend is cross-origin, set `VITE_API_BASE_URL=http://localhost:8000`.
 
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:9091`
+## Docker Demo Deployment
 
-If frontend and backend are different origins, set `VITE_API_BASE_URL` (see `frontend/.env.example`).
-
----
-
-## 2) Docker deployment
-
-1) (Optional) Create env file:
-
-- `docker-compose.yml` uses `backend/.env.example` by default so `docker compose up` works out-of-the-box.
-- If you want to set real secrets (e.g. `OPENAI_API_KEY`), set them as environment variables or edit a local copy.
-
-2) Run:
+`docker-compose.yml` already references `backend/.env.example`, so this works without copying env files:
 
 ```bash
-docker compose build backend --no-cache --progress=plain
-docker compose build frontend --no-cache --progress=plain
-docker compose up
+docker compose up --build
 ```
 
 Services:
 
-- Frontend (nginx): `http://localhost:5173`
+- Frontend: `http://localhost:5173`
 - Backend API: `http://localhost:9091`
-- Backend health check: `http://localhost:9091/healthz`
-- Redis: `localhost:6379` (host-mapped for convenience)
+- Backend health: `http://localhost:9091/healthz`
 
-Notes:
+If you want custom secrets, override environment variables or edit a local copy before starting containers.
 
-- `UPLOAD_DIR` is mounted to `./backend/uploads` for durability across restarts.
-- CORS defaults in `docker-compose.yml` are set for local browser usage (`http://localhost:5173` + credentials enabled).
+## Batch Metadata Paths
 
----
+- Local workspace path: `backend/uploads/batches/{batch_id}.json`
+- Docker container path: `/app/uploads/batches/{batch_id}.json`
 
-## 3) Release package (zip)
+## Verification
 
-Do not manually zip the repo. Always use the release script so the output is reproducible and clean.
-
-Cross-platform (CI uses this):
+Fast delivery check:
 
 ```bash
-python scripts/verify_delivery.py
+python scripts/verify_delivery.py --zip-only
 ```
 
-Windows PowerShell convenience wrapper:
+Full reproducibility check:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\\make_release_zip.ps1
+```bash
+python scripts/verify_delivery.py --full
 ```
 
-Release requirements:
+`--full` runs:
 
-- The zip must **not** contain `.git/`, `node_modules/`, `dist/`, `__pycache__/`, test caches, runtime outputs (`uploads/`, `segments/`), or local `.env` files.
-- The scripts perform a **fail-fast check** on zip contents; CI verifies this too.
+- `python -m pytest -q`
+- `cd frontend && npm ci`
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run lint`
+- `cd frontend && npm run test:ci`
+- `cd frontend && npm run build`
