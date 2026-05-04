@@ -54,8 +54,30 @@ OPENAI_API_KEY=
 WHISPER_MODEL=small
 AUTO_SEGMENT_THRESHOLD_SECONDS=1800
 HF_TOKEN=
-TRANSLATE_MODEL=
+TRANSLATE_MODEL=gpt-4o-mini
+TRANSLATE_PROVIDER=openai
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
 ```
+
+### Translation Providers
+
+The tool supports three translation modes, configurable via `TRANSLATE_PROVIDER`:
+
+1.  **OpenAI** (`openai`): Requires `OPENAI_API_KEY`. Uses the model specified in `TRANSLATE_MODEL`.
+2.  **Ollama** (`ollama`): Uses a local Ollama instance. Requires `OLLAMA_BASE_URL` and `OLLAMA_MODEL`.
+3.  **None** (`none`): Disables translation. Subtitles will remain in the original language.
+
+#### Setting up Ollama
+
+1.  Install Ollama from [ollama.com](https://ollama.com).
+2.  Pull your desired model: `ollama pull llama3`.
+3.  Ensure Ollama is running and accessible at the configured `OLLAMA_BASE_URL`.
+4.  Set `TRANSLATE_PROVIDER=ollama` and `OLLAMA_MODEL=llama3` in your `.env` file.
+
+#### Fallback Behavior
+
+If the selected provider fails (e.g., API error, network timeout, or Ollama not running), the system will automatically fallback to the original transcribed text to ensure the task completes successfully. Errors will be logged in the backend.
 
 ### Frontend
 

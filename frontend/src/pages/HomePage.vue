@@ -28,6 +28,19 @@
       <div v-if="mode === 'single'">
         <UploadForm :submitting="submitting" @submit="handleSubmit" />
       </div>
+
+      <div v-if="config" class="config-info">
+        <span class="label">Translation Provider:</span>
+        <span class="value" :class="config.translate_provider">
+          {{ config.translate_provider }}
+          <template v-if="config.translate_provider === 'ollama'">
+            ({{ config.ollama_model }})
+          </template>
+          <template v-else-if="config.translate_provider === 'openai'">
+            ({{ config.translate_model }})
+          </template>
+        </span>
+      </div>
       <div v-else>
         <BatchUploadPanel />
       </div>
@@ -55,6 +68,38 @@
   color: white;
   border-color: var(--color-primary);
 }
+
+.config-info {
+  margin-top: 20px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.config-info .label {
+  color: var(--color-muted);
+}
+
+.config-info .value {
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.config-info .value.openai {
+  color: #10a37f;
+}
+
+.config-info .value.ollama {
+  color: #f15a24;
+}
+
+.config-info .value.none {
+  color: var(--color-muted);
+}
 </style>
 
 <script setup lang="ts">
@@ -65,8 +110,19 @@ import UploadForm from "@/components/UploadForm.vue";
 import BatchUploadPanel from "@/components/BatchUploadPanel.vue";
 import ErrorAlert from "@/components/ErrorAlert.vue";
 import { useTaskStore } from "@/stores/task";
+import { getAppConfig, type AppConfig } from "@/api/config";
+import { onMounted } from "vue";
 
 const router = useRouter();
+const config = ref<AppConfig | null>(null);
+
+onMounted(async () => {
+  try {
+    config.value = await getAppConfig();
+  } catch (e) {
+    console.error("Failed to fetch config", e);
+  }
+});
 const mode = ref<"single" | "batch">("single");
 const task = useTaskStore();
 const submitting = ref(false);

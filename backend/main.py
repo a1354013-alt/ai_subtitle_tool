@@ -1022,6 +1022,16 @@ async def download_result(
 # If you need real-time updates, consider implementing a proper WebSocket solution with tests.
 
 
+@app.get("/api/config")
+async def get_config():
+    from . import settings
+    return {
+        "translate_provider": settings.TRANSLATE_PROVIDER,
+        "ollama_model": settings.OLLAMA_MODEL,
+        "translate_model": settings.TRANSLATE_MODEL
+    }
+
+
 @app.get("/subtitle/{task_id}")
 async def get_subtitle(
     task_id: str,

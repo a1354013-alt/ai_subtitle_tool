@@ -1,62 +1,40 @@
 import logging
 import os
+import json
+import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception, after_log
 from openai import APIError, APIConnectionError, RateLimitError
 
-from .time_utils import format_timestamp, parse_timestamp
+from .time_utils import format_timestamp
+from .. import settings
 
 logger = logging.getLogger(__name__)
-
-# B) 翻譯模型與版本 pin
-TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "gpt-4o-mini")
 
 # Lazy 初始化 OpenAI client
 _openai_client = None
 
 
 def get_openai_client():
-    """Lazy 初始化 OpenAI client，避免在 import 時就連接"""
+    """Lazy 初始化 OpenAI client"""
     global _openai_client
     if _openai_client is None:
         from openai import OpenAI
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "OPENAI_API_KEY environment variable not set. "
-                "Translation feature requires OpenAI API key."
-            )
-        _openai_client = OpenAI(api_key=api_key)
+        if not settings.OPENAI_API_KEY:
+            logger.error("OPENAI_API_KEY not set, but openai provider selected.")
+            return None
+        _openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
     return _openai_client
 
 
 def is_retriable_exception(exception: Exception) -> bool:
-    """
-    P1.4 統一重試策略：單一判斷函式。
-    判斷異常是否應該重試。
-    
-    可重試的情況：
-    - 網路連接錯誤 (APIConnectionError)
-    - API 速率限制 (RateLimitError)
-    - 伺服器暫時故障 (429, 500, 502, 503)
-    - JSON 解析錯誤 (ValueError) - 可能是臨時格式問題
-    
-    不可重試的情況：
-    - 授權失敗
-    - 模型不存在
-    - 其他明確的客戶端編程錯誤
-    """
-    # 網路錯誤、連接錯誤、速率限制應該重試
-    if isinstance(exception, (APIConnectionError, RateLimitError)):
+    """判斷異常是否應該重試"""
+    if isinstance(exception, (APIConnectionError, RateLimitError, requests.exceptions.RequestException)):
         return True
     
-    # 一般 APIError（包括伺服器錯誤和 timeout）
     if isinstance(exception, APIError):
-        # 檢查 HTTP 狀態碼（429, 500, 502, 503 都是臨時故障）
         if hasattr(exception, 'status_code') and exception.status_code in (429, 500, 502, 503):
             return True
-        # 其他 APIError（例如 4xx 客戶端錯誤）不重試
     
-    # JSON 解析失敗可能是臨時問題，應該重試
     if isinstance(exception, ValueError):
         return True
     
@@ -64,63 +42,97 @@ def is_retriable_exception(exception: Exception) -> bool:
 
 
 @retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception(is_retriable_exception),
     reraise=True,
     after=after_log(logger, logging.INFO)
 )
-def translate_batch(texts, source_lang, target_lang):
-    """
-    批次翻譯：將多段文字合併為一個 JSON 物件發送。
-    支持重試 (最多 5 次)：網路錯誤、timeout、rate limit、JSON parse error
-    """
-    if not texts:
-        return []
-        
-    client = get_openai_client()  # Lazy 初始化
-    
+def _translate_openai(texts, source_lang, target_lang):
+    """使用 OpenAI 進行翻譯"""
+    client = get_openai_client()
+    if not client:
+        raise ValueError("OpenAI client not initialized")
+
     prompt = f"""Translate the following strings from {source_lang} to {target_lang}.
 Return a JSON object with a key "translations" containing the array of translated strings in the same order.
 
 Input: {json.dumps(texts, ensure_ascii=False)}"""
 
-    try:
-        response = client.chat.completions.create(
-            model=TRANSLATE_MODEL,
-            messages=[
-                {"role": "system", "content": "You are a professional translator. Always output a JSON object with a 'translations' key."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"},
-            timeout=30.0  # 30 秒超時
-        )
-    except (APIConnectionError, RateLimitError, APIError, TimeoutError) as e:
-        # 這些異常會由 retry_if_exception(is_retriable_exception) 判斷是否重試
-        raise
+    response = client.chat.completions.create(
+        model=settings.TRANSLATE_MODEL,
+        messages=[
+            {"role": "system", "content": "You are a professional translator. Always output a JSON object with a 'translations' key."},
+            {"role": "user", "content": prompt}
+        ],
+        response_format={"type": "json_object"},
+        timeout=30.0
+    )
     
     content = response.choices[0].message.content
+    result = json.loads(content)
+    return result["translations"]
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception(is_retriable_exception),
+    reraise=True,
+    after=after_log(logger, logging.INFO)
+)
+def _translate_ollama(texts, source_lang, target_lang):
+    """使用 Ollama 進行翻譯"""
+    url = f"{settings.OLLAMA_BASE_URL}/api/generate"
+    
+    # 為了確保 Ollama 回傳正確格式，我們要求它回傳 JSON
+    prompt = f"""Translate the following strings from {source_lang} to {target_lang}.
+Return a JSON object with a key "translations" containing the array of translated strings in the same order.
+Do not include any other text in your response.
+
+Input: {json.dumps(texts, ensure_ascii=False)}"""
+
+    payload = {
+        "model": settings.OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json"
+    }
+    
+    response = requests.post(url, json=payload, timeout=60.0)
+    response.raise_for_status()
+    
+    data = response.json()
+    content = data.get("response", "")
+    result = json.loads(content)
+    return result["translations"]
+
+
+def translate(texts, source_lang, target_lang):
+    """
+    統一翻譯入口
+    """
+    if not texts:
+        return []
+
+    provider = settings.TRANSLATE_PROVIDER
+    
     try:
-        result = json.loads(content)
-        if not isinstance(result, dict) or "translations" not in result:
-            raise ValueError("Missing 'translations' key in response")
-        
-        translations = result["translations"]
-        if not isinstance(translations, list):
-            raise ValueError("'translations' is not a list")
-        
-        if len(translations) != len(texts):
-            raise ValueError(f"Length mismatch: expected {len(texts)}, got {len(translations)}")
-            
-        return translations
-    except (json.JSONDecodeError, ValueError) as e:
-        # JSON 解析失敗會由 is_retriable_exception 判斷是否重試
-        raise ValueError(f"Translation parsing failed: {str(e)}")
+        if provider == "openai":
+            return _translate_openai(texts, source_lang, target_lang)
+        elif provider == "ollama":
+            return _translate_ollama(texts, source_lang, target_lang)
+        else:
+            # fallback to original text
+            return texts
+    except Exception as e:
+        logger.error(f"Translation failed with provider {provider}: {e}. Falling back to original text.")
+        return texts
+
 
 def translate_segments(segments, source_lang, target_langs, batch_size=30):
     """
     對所有字幕段落進行多語種批次翻譯。
-    注意：此處不捕捉異常，讓它向上拋出給 tasks.py 處理語言級別的 fallback。
     """
     texts = [s.text for s in segments]
     all_translations = {}
@@ -129,12 +141,18 @@ def translate_segments(segments, source_lang, target_langs, batch_size=30):
         translated_texts = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            # 這裡會拋出異常如果 5 次重試都失敗
-            translated_batch = translate_batch(batch, source_lang, lang)
+            translated_batch = translate(batch, source_lang, lang)
+            
+            # 確保長度一致，如果不一致則補齊原文
+            if len(translated_batch) != len(batch):
+                logger.warning(f"Translation length mismatch for {lang}. Expected {len(batch)}, got {len(translated_batch)}")
+                translated_batch = translated_batch[:len(batch)] + batch[len(translated_batch):]
+                
             translated_texts.extend(translated_batch)
         all_translations[lang] = translated_texts
         
     return all_translations, []
+
 
 def generate_bilingual_srt(segments, translated_texts, output_path):
     """
