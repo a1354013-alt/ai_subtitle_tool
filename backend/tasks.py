@@ -25,6 +25,7 @@ from .pipeline_segments import (
     build_full_video_payload,
 )
 from .utils.cleanup_utils import create_task_lock, remove_task_lock, cleanup_old_files as cleanup_old_files_impl
+from .utils.storage_utils import get_storage_backend
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,19 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         if update_state_func:
             update_state_func(state="PROGRESS", meta={"progress": 100, "status": "Completed"})
 
+        # Upload to object storage if configured
+        storage = get_storage_backend()
+        try:
+            # Upload final video
+            storage.upload_file(final_video_path, f"{business_id}_final.mp4")
+            # Upload subtitles
+            for lang, path in result_files.items():
+                lang_suffix = lang.replace(" ", "_")
+                ext = os.path.splitext(path)[1]
+                storage.upload_file(path, f"{business_id}_{lang_suffix}{ext}")
+        except Exception as e:
+            logger.warning("Failed to upload results to object storage: %s", e, exc_info=True)
+
         return {
             "status": "COMPLETED",
             "business_id": business_id,
@@ -249,8 +263,10 @@ def process_video_task(self, video_path: str, options: dict = None):
                 self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Splitting video..."})
                 video_segments = split_video(current_video)
                 segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
-                header = [transcribe_segment_task.s(seg, model_size) for seg in video_segments]
-                callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir)
+                # Inherit the current task's queue for sub-tasks
+                current_queue = self.request.delivery_info.get("routing_key", "default")
+                header = [transcribe_segment_task.s(seg, model_size).set(queue=current_queue) for seg in video_segments]
+                callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir).set(queue=current_queue)
                 workflow = chord(header, callback)
                 return self.replace(workflow)
 

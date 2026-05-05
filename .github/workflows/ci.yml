@@ -100,7 +100,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm run test:ci
+      - run: npm test
 
   release-package-check:
     name: Release Package Check
@@ -113,7 +113,7 @@ jobs:
       - name: Build release.zip
         run: bash ./make_release_zip
       - name: Verify zip content
-        run: python scripts/verify_delivery.py
+        run: python scripts/make_release_zip.py --out release.zip --check
       - name: Release smoke (extract + scan)
         run: |
           rm -rf .release_smoke

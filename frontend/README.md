@@ -19,7 +19,8 @@ Important: do NOT ship `node_modules/` in a release package.
 
 ```bash
 cd frontend
-npm ci
+rm -rf node_modules
+npm install
 npm run dev
 ```
 
@@ -33,7 +34,7 @@ npm run preview
 Test:
 
 ```bash
-npm run test:ci
+npm test
 ```
 
 ## API Base URL (`VITE_API_BASE_URL`)

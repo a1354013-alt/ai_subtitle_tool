@@ -44,7 +44,7 @@
 
           <div class="row" style="align-items: center; justify-content: flex-end">
             <button class="btn primary" type="submit" :disabled="submitting || files.length === 0">
-              {{ submitting ? "Uploading..." : "Start Batch Process" }}
+              {{ submitting ? 'Uploading...' : 'Start Batch Process' }}
             </button>
           </div>
         </form>
@@ -59,8 +59,8 @@
             <span class="text-danger">Failed: {{ batchStatus?.failed || 0 }}</span> |
             <span>Processing: {{ batchStatus?.processing || 0 }}</span>
           </div>
-          <button v-if="(batchStatus?.completed ?? 0) > 0" class="btn primary btn-sm" @click="downloadZip">
-            {{ $t("batch.downloadZip") }}
+          <button v-if="batchStatus?.completed > 0" class="btn primary btn-sm" @click="downloadZip">
+            {{ $t('batch.downloadZip') }}
           </button>
         </div>
 
@@ -69,15 +69,15 @@
             <div class="task-info">
               <div class="task-filename">{{ task.filename }}</div>
               <div class="task-status">
-                <span :class="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
+                <span :class="statusClass(task.status)">{{ task.status }}</span>
                 <span v-if="task.progress > 0"> - {{ task.progress }}%</span>
               </div>
             </div>
             <div v-if="task.error" class="task-error text-danger">{{ task.error }}</div>
-            <div v-if="isSuccessStatus(task.status) && task.download_urls" class="task-actions">
-              <a :href="toAbsoluteUrl(task.download_urls.srt)" class="btn-link" target="_blank" rel="noopener">SRT</a>
-              <a :href="toAbsoluteUrl(task.download_urls.ass)" class="btn-link" target="_blank" rel="noopener">ASS</a>
-              <a :href="toAbsoluteUrl(task.download_urls.video)" class="btn-link" target="_blank" rel="noopener">Video</a>
+            <div v-if="task.status === 'success'" class="task-actions">
+              <a :href="`${apiBaseUrl}/results/${task.task_id}/download?format=srt`" class="btn-link" target="_blank">SRT</a>
+              <a :href="`${apiBaseUrl}/results/${task.task_id}/download?format=ass`" class="btn-link" target="_blank">ASS</a>
+              <a :href="`${apiBaseUrl}/results/${task.task_id}/download?format=video`" class="btn-link" target="_blank">Video</a>
             </div>
           </div>
         </div>
@@ -89,80 +89,18 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from "vue";
 import axios from "axios";
-import { buildApiUrl } from "@/api/client";
-
-type BatchDownloadUrls = {
-  srt: string;
-  ass: string;
-  video: string;
-};
-
-type BatchTask = {
-  task_id: string;
-  filename: string;
-  status: string;
-  progress: number;
-  message?: string | null;
-  error?: string | null;
-  download_urls?: BatchDownloadUrls | null;
-};
-
-type BatchStatusResponse = {
-  batch_id: string;
-  total: number;
-  completed: number;
-  failed: number;
-  processing: number;
-  tasks: BatchTask[];
-};
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
+
 const files = ref<File[]>([]);
 const submitting = ref(false);
 const batchId = ref<string | null>(null);
-const batchStatus = ref<BatchStatusResponse | null>(null);
+const batchStatus = ref<any>(null);
 const targetLangs = ref("Traditional Chinese");
 const subtitleFormat = ref("ass");
 const burnSubtitles = ref(true);
 
-let statusInterval: ReturnType<typeof setInterval> | null = null;
-
-function normalizeStatus(status: string | null | undefined): string {
-  return String(status ?? "").toUpperCase();
-}
-
-function isSuccessStatus(status: string | null | undefined): boolean {
-  return normalizeStatus(status) === "SUCCESS";
-}
-
-function isFailedStatus(status: string | null | undefined): boolean {
-  return ["FAILURE", "FAILED", "ERROR"].includes(normalizeStatus(status));
-}
-
-function isProcessingStatus(status: string | null | undefined): boolean {
-  return ["PROCESSING", "PENDING", "STARTED", "QUEUED"].includes(normalizeStatus(status));
-}
-
-function statusLabel(status: string | null | undefined): string {
-  if (isSuccessStatus(status)) return "Completed";
-  if (isFailedStatus(status)) return "Failed";
-  if (isProcessingStatus(status)) return "Processing";
-  return "Unknown";
-}
-
-function statusClass(status: string | null | undefined): string {
-  if (isSuccessStatus(status)) return "text-success";
-  if (isFailedStatus(status)) return "text-danger";
-  if (isProcessingStatus(status)) return "text-muted";
-  return "text-muted";
-}
-
-function toAbsoluteUrl(path: string | undefined): string {
-  if (!path) return "";
-  if (/^https?:\/\//i.test(path)) return path;
-  if (apiBaseUrl) return `${apiBaseUrl}${path}`;
-  return buildApiUrl(path);
-}
+let statusInterval: any = null;
 
 function onFilesChange(e: Event) {
   const input = e.target as HTMLInputElement;
@@ -174,9 +112,9 @@ function onFilesChange(e: Event) {
 async function onSubmit() {
   if (files.value.length === 0) return;
   submitting.value = true;
-
+  
   const fd = new FormData();
-  files.value.forEach((f) => fd.append("files", f));
+  files.value.forEach(f => fd.append("files", f));
   fd.append("target_langs", targetLangs.value);
   fd.append("subtitle_format", subtitleFormat.value);
   fd.append("burn_subtitles", String(burnSubtitles.value));
@@ -195,10 +133,8 @@ async function onSubmit() {
 }
 
 function startPolling() {
-  void fetchStatus();
-  statusInterval = setInterval(() => {
-    void fetchStatus();
-  }, 3000);
+  fetchStatus();
+  statusInterval = setInterval(fetchStatus, 3000);
 }
 
 async function fetchStatus() {
@@ -206,9 +142,8 @@ async function fetchStatus() {
   try {
     const res = await axios.get(`${apiBaseUrl}/batch/${batchId.value}/status`);
     batchStatus.value = res.data;
-    if (res.data.processing === 0 && res.data.total > 0 && statusInterval) {
+    if (res.data.processing === 0 && res.data.total > 0) {
       clearInterval(statusInterval);
-      statusInterval = null;
     }
   } catch (err) {
     console.error("Failed to fetch batch status", err);
@@ -218,6 +153,12 @@ async function fetchStatus() {
 function downloadZip() {
   if (!batchId.value) return;
   window.open(`${apiBaseUrl}/batch/${batchId.value}/download`, "_blank");
+}
+
+function statusClass(status: string) {
+  if (status === "success") return "text-success";
+  if (status === "failed" || status === "error") return "text-danger";
+  return "text-muted";
 }
 
 onUnmounted(() => {
@@ -274,13 +215,7 @@ onUnmounted(() => {
   text-decoration: none;
   font-size: 0.9em;
 }
-.text-success {
-  color: #4caf50;
-}
-.text-danger {
-  color: #f44336;
-}
-.text-muted {
-  color: #888;
-}
+.text-success { color: #4caf50; }
+.text-danger { color: #f44336; }
+.text-muted { color: #888; }
 </style>

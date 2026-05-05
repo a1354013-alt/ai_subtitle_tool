@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,6 @@ class BatchTask(BaseModel):
     filename: str
     status: str
     error: Optional[str] = None
-    download_urls: Optional[Dict[str, str]] = None
-    target_langs: List[str] = Field(default_factory=list)
 
 class BatchMetadata(BaseModel):
     batch_id: str
@@ -34,9 +32,12 @@ class BatchManager:
     def create_batch(self, tasks: List[Dict[str, str]]) -> str:
         batch_id = f"batch_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc).isoformat()
-
-        batch_tasks = [BatchTask(**t) for t in tasks]
-
+        
+        batch_tasks = [
+            BatchTask(task_id=t["task_id"], filename=t["filename"], status="queued")
+            for t in tasks
+        ]
+        
         metadata = BatchMetadata(
             batch_id=batch_id,
             created_at=created_at,
@@ -68,14 +69,7 @@ class BatchManager:
             logger.error(f"Failed to load batch {batch_id}: {e}")
             return None
 
-    def update_task_status(
-        self,
-        batch_id: str,
-        task_id: str,
-        status: str,
-        error: Optional[str] = None,
-        download_urls: Optional[Dict[str, str]] = None,
-    ):
+    def update_task_status(self, batch_id: str, task_id: str, status: str, error: Optional[str] = None):
         metadata = self.get_batch(batch_id)
         if not metadata:
             return
@@ -83,10 +77,8 @@ class BatchManager:
         for task in metadata.tasks:
             if task.task_id == task_id:
                 task.status = status
-                if error is not None:
+                if error:
                     task.error = error
-                if download_urls is not None:
-                    task.download_urls = download_urls
                 break
         
         self._save_batch(metadata)

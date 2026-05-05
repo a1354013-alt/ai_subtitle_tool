@@ -1,38 +1,18 @@
-import { defineConfig, mergeConfig } from "vitest/config";
+import { mergeConfig } from "vitest/config";
 import viteConfig from "./vite.config";
 
-export default mergeConfig(
-  viteConfig,
-  defineConfig({
-    test: {
-      environment: "jsdom",
-      globals: true,
-      setupFiles: ["./src/tests/setup.ts"],
-      include: ["src/**/*.{test,spec}.ts"],
-      exclude: [
-        "**/node_modules/**",
-        "**/dist/**",
-        "**/.npm-cache/**",
-        "**/.vite/**",
-        "**/coverage/**",
-      ],
-      testTimeout: 10_000,
-      hookTimeout: 10_000,
-      pool: "forks",
-      minWorkers: 1,
-      maxWorkers: 1,
-      isolate: true,
-      clearMocks: true,
-      restoreMocks: true,
-      coverage: {
-        exclude: [
-          "**/node_modules/**",
-          "**/dist/**",
-          "**/.npm-cache/**",
-          "**/coverage/**",
-          "src/tests/**",
-        ],
-      },
+export default mergeConfig(viteConfig, {
+  test: {
+    // Prevent tests from hanging indefinitely
+    testTimeout: 10000,
+    hookTimeout: 10000,
+    teardownTimeout: 10000,
+    // Ensure Vitest exits even if there are active handles (like timers)
+    forceRerunTriggers: ["**/*.test.ts"],
+    // Automatically use fake timers to avoid real-time waiting in tests
+    // This helps with polling logic in stores
+    fakeTimers: {
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
     },
-  })
-);
+  },
+});

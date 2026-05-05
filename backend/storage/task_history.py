@@ -32,6 +32,8 @@ def _connect(db_path: Path) -> sqlite3.Connection:
         );
         """
     )
+    # Create indexes for performance
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_history_created_at ON task_history(created_at);")
     return conn
 
 
@@ -110,6 +112,16 @@ class TaskHistoryStore:
                 (task_id,),
             ).fetchone()
         return row[0] if row else None
+
+    def cleanup_old_records(self, retention_seconds: int) -> int:
+        """Delete records older than retention_seconds."""
+        cutoff_time = datetime.fromtimestamp(time.time() - retention_seconds, tz=timezone.utc).isoformat()
+        with _connect(self._db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM task_history WHERE created_at < ?;",
+                (cutoff_time,),
+            )
+            return cursor.rowcount
 
 
 def duration_seconds_since(created_at_iso: Optional[str]) -> Optional[float]:

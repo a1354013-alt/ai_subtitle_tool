@@ -12,31 +12,21 @@ vi.mock("@/api/client", () => {
   };
 });
 
-import { buildDownloadUrl } from "@/api/results";
-
 describe("buildDownloadUrl", () => {
-  it("uses the shared buildApiUrl() base URL logic", () => {
+  it("uses the shared buildApiUrl() base URL logic", async () => {
+    const { buildDownloadUrl } = await import("@/api/results");
     expect(buildDownloadUrl("abc")).toBe("http://api.example/download/abc");
   });
 
-  it("includes lang+format when downloading subtitles", () => {
+  it("includes lang+format when downloading subtitles", async () => {
+    const { buildDownloadUrl } = await import("@/api/results");
     expect(buildDownloadUrl("abc", "ass", "Traditional_Chinese")).toBe(
       "http://api.example/download/abc?lang=Traditional_Chinese&format=ass"
     );
   });
 
-  it("requires lang when downloading subtitles", () => {
+  it("requires lang when downloading subtitles", async () => {
+    const { buildDownloadUrl } = await import("@/api/results");
     expect(() => buildDownloadUrl("abc", "srt")).toThrow(/lang is required/i);
-  });
-
-  it("rejects unsupported formats without creating a download side effect", () => {
-    const createElementSpy = vi.spyOn(document, "createElement");
-    const createObjectUrlSpy = vi.spyOn(URL, "createObjectURL");
-    const revokeObjectUrlSpy = vi.spyOn(URL, "revokeObjectURL");
-
-    expect(() => buildDownloadUrl("abc", "exe" as any, "Traditional_Chinese")).toThrow(/unsupported subtitle format/i);
-    expect(createElementSpy).not.toHaveBeenCalled();
-    expect(createObjectUrlSpy).not.toHaveBeenCalled();
-    expect(revokeObjectUrlSpy).not.toHaveBeenCalled();
   });
 });

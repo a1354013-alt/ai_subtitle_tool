@@ -21,6 +21,18 @@ celery_app.conf.update(
     # 任務超時設定
     task_soft_time_limit=1800,  # 30 分鐘
     task_time_limit=2100,       # 35 分鐘
+    # 佇列設定
+    task_default_queue="default",
+    task_queues={
+        "default": {
+            "exchange": "default",
+            "routing_key": "default",
+        },
+        "high_priority": {
+            "exchange": "high_priority",
+            "routing_key": "high_priority",
+        },
+    },
     beat_schedule={
         "cleanup-old-files-every-hour": {
             "task": "backend.tasks.cleanup_old_files",

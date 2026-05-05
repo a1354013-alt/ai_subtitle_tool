@@ -85,15 +85,28 @@ def cleanup_old_files(
     stale_lock_threshold_seconds: int = 3600,
 ) -> None:
     """
-    Delete old unlocked files/dirs under upload_dir.
+    Delete old unlocked files/dirs under upload_dir and cleanup database records.
 
     - Keeps files associated with valid locks.
     - Removes stale locks (best-effort).
     - Deletes files/dirs older than retention_seconds.
+    - Deletes database records older than retention_seconds.
     """
     upload_dir = upload_dir or _default_upload_dir()
     if not os.path.exists(upload_dir):
         return
+
+    # 0) Cleanup database records
+    try:
+        from pathlib import Path
+        from ..storage.task_history import TaskHistoryStore
+        db_path = Path(upload_dir) / "task_history.sqlite3"
+        if db_path.exists():
+            store = TaskHistoryStore(db_path)
+            count = store.cleanup_old_records(retention_seconds)
+            logger.info("Cleaned up %d old task history records", count)
+    except Exception as e:
+        logger.warning("Failed to cleanup task history records: %s", e, exc_info=True)
 
     now = time.time()
 
