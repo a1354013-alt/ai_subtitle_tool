@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from .models.status import TaskStatus as TaskStatusEnum
-from .storage.task_history import TaskHistoryStore, duration_seconds_since
+from .storage.task_history import TaskHistoryStore, duration_seconds_since, _connect, TaskHistoryEntry
 from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 from .utils.error_handler import handle_known_error, get_error_response
 from .batch_manager import BatchManager, BatchTask, BatchMetadata
@@ -1030,6 +1030,59 @@ async def get_config():
         "ollama_model": settings.OLLAMA_MODEL,
         "translate_model": settings.TRANSLATE_MODEL
     }
+
+
+@app.get("/api/tasks/{task_id}/report")
+async def get_task_report(task_id: str, format: str = Query("md", regex="^(md|pdf)$")):
+    task_id = validate_task_id(task_id)
+    
+    # 1. 獲取任務狀態資訊
+    from .main import get_status
+    try:
+        status_resp = await get_status(task_id)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # 2. 獲取歷史記錄資訊
+    history_entry = None
+    try:
+        # 這裡假設 TASK_HISTORY 在 main.py 中是全域變數
+        # 我們需要從資料庫中獲取該任務的記錄
+        with _connect(TASK_HISTORY.db_path) as conn:
+            row = conn.execute(
+                "SELECT task_id, filename, status, created_at, duration_seconds FROM task_history WHERE task_id = ?;",
+                (task_id,),
+            ).fetchone()
+            if row:
+                history_entry = TaskHistoryEntry(*row)
+    except Exception as e:
+        logger.warning(f"Failed to fetch history for report: {e}")
+
+    # 3. 生成報告數據
+    from .services import report_service
+    report_data = report_service.generate_report_data(task_id, status_resp.dict(), history_entry)
+    markdown_content = report_service.render_markdown(report_data)
+    
+    if format == "pdf":
+        try:
+            pdf_bytes = report_service.render_pdf(markdown_content)
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="report_{task_id}.pdf"'}
+            )
+        except Exception as e:
+            logger.error(f"PDF generation failed, falling back to MD: {e}")
+            # Fallback to MD with a warning
+            markdown_content = f"> **Warning**: PDF generation failed. Falling back to Markdown format.\n\n" + markdown_content
+            format = "md"
+
+    if format == "md":
+        return Response(
+            content=markdown_content,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="report_{task_id}.md"'}
+        )
 
 
 @app.get("/subtitle/{task_id}")

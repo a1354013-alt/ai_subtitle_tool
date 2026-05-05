@@ -31,6 +31,11 @@
       >
         {{ $t('editor.download') }}
       </RouterLink>
+
+      <div v-if="isTerminal" class="report-actions">
+        <button class="btn secondary" @click="exportReport('md')">Export MD Report</button>
+        <button class="btn secondary" @click="exportReport('pdf')">Export PDF Report</button>
+      </div>
     </div>
   </div>
 </template>
@@ -48,6 +53,14 @@ const taskId = computed(() => props.taskId);
 
 const task = useTaskStore();
 const isSuccess = computed(() => String(task.status).toUpperCase() === "SUCCESS");
+const isTerminal = computed(() => ["SUCCESS", "FAILURE"].includes(String(task.status).toUpperCase()));
+
+import { buildApiUrl } from "@/api/client";
+
+function exportReport(format: 'md' | 'pdf') {
+  const url = buildApiUrl(`/api/tasks/${taskId.value}/report?format=${format}`);
+  window.open(url, "_blank");
+}
 
 watch(
   taskId,
@@ -66,5 +79,22 @@ onBeforeUnmount(() => {
 <style scoped>
 .actions {
   margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.report-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 </style>

@@ -148,6 +148,23 @@ Services:
 - `GET /subtitle/{task_id}`
 - `PUT /subtitle/{task_id}`
 - `POST /tasks/{task_id}/rebuild-final`
+- `GET /api/tasks/{task_id}/report?format=md|pdf`
+
+### Processing Report Export
+
+The tool supports exporting a detailed processing report for each task, available in both Markdown and PDF formats.
+
+- **Markdown** (`md`): A clean, readable text report.
+- **PDF** (`pdf`): A formatted document (falls back to Markdown if PDF generation fails).
+
+The report includes:
+- Filename and Task ID
+- Processing status (Success/Failure)
+- Elapsed time
+- Models used (Whisper, Translation Provider)
+- Warnings and error messages (if any)
+
+You can find the "Export Report" buttons on the Task Status page once a task reaches a terminal state (Success or Failure).
 
 ### Download Rules
 
