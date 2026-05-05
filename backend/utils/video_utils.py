@@ -2,6 +2,15 @@ import os
 import subprocess
 import re
 
+
+def get_hwaccel_params() -> list[str]:
+    """Return stable ffmpeg encoder arguments with a safe CPU fallback.
+
+    The current project delivery does not require GPU acceleration to be available,
+    so we prefer a deterministic software encoder for local tests and CI.
+    """
+    return ["-c:v", "libx264", "-preset", os.getenv("FFMPEG_PRESET", "ultrafast"), "-c:a", "aac"]
+
 def has_audio(video_path):
     """檢查影片是否有音軌"""
     cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", video_path]
@@ -90,7 +99,7 @@ def burn_subtitles(video_path, subtitle_path, output_path):
     cmd_fast = [
         "ffmpeg", "-y", "-i", video_path,
         "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
-        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+        *get_hwaccel_params(),
         output_path
     ]
     

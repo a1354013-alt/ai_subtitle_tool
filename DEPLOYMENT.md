@@ -97,7 +97,7 @@ Services:
 Notes:
 
 - `UPLOAD_DIR` is mounted to `./backend/uploads` for durability across restarts.
-- CORS defaults in `docker-compose.yml` are set for local browser usage (`http://localhost:5173` + credentials enabled).
+- CORS defaults in `docker-compose.yml` are set for local browser usage via `CORS_ORIGINS=http://localhost:5173` with credentials enabled.
 
 ---
 

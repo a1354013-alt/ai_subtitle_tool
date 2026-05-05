@@ -13,3 +13,40 @@ export type ErrorResponse = {
   suggestion: string;
 };
 
+export type BatchTaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE";
+
+export type BatchSubtitleDownloadUrls = {
+  srt?: string;
+  ass?: string;
+  vtt?: string;
+};
+
+export type BatchDownloadUrls = {
+  video?: string;
+  subtitles: Record<string, BatchSubtitleDownloadUrls>;
+};
+
+export type BatchTaskResponse = {
+  task_id: string;
+  filename: string;
+  status: BatchTaskStatus | string;
+  progress: number;
+  message?: string | null;
+  error?: string | null;
+  download_urls?: BatchDownloadUrls | null;
+};
+
+export type BatchUploadResponse = {
+  batch_id: string;
+  tasks: BatchTaskResponse[];
+};
+
+export type BatchStatusResponse = {
+  batch_id: string;
+  total: number;
+  completed: number;
+  failed: number;
+  processing: number;
+  pending: number;
+  tasks: BatchTaskResponse[];
+};

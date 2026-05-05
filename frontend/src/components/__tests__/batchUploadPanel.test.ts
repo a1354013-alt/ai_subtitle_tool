@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import axios from "axios";
 import BatchUploadPanel from "@/components/BatchUploadPanel.vue";
+import type { BatchStatusResponse } from "@/types/api";
 
 vi.mock("axios", () => ({
   default: {
@@ -15,13 +16,14 @@ const mockedAxios = axios as unknown as {
   get: ReturnType<typeof vi.fn>;
 };
 
-function makeBatchStatus(status: string) {
+function makeBatchStatus(status: string): BatchStatusResponse {
   return {
     batch_id: "batch-123",
     total: 1,
     completed: status === "SUCCESS" ? 1 : 0,
-    failed: ["FAILURE", "ERROR"].includes(status) ? 1 : 0,
-    processing: ["PROCESSING", "PENDING"].includes(status) ? 1 : 0,
+    failed: status === "FAILURE" ? 1 : 0,
+    processing: status === "PROCESSING" ? 1 : 0,
+    pending: status === "PENDING" ? 1 : 0,
     tasks: [
       {
         task_id: "task-1",
@@ -32,9 +34,14 @@ function makeBatchStatus(status: string) {
         download_urls:
           status === "SUCCESS"
             ? {
-                srt: "/download/task-1?lang=English&format=srt",
-                ass: "/download/task-1?lang=English&format=ass",
-                video: "/download/task-1?format=video",
+                video: "/download/task-1",
+                subtitles: {
+                  English: {
+                    srt: "/download/task-1?lang=English&format=srt",
+                    ass: "/download/task-1?lang=English&format=ass",
+                    vtt: "/download/task-1?lang=English&format=vtt",
+                  },
+                },
               }
             : null,
       },
@@ -70,22 +77,19 @@ describe("BatchUploadPanel", () => {
 
     expect(wrapper.text()).toContain("Completed");
     const links = wrapper.findAll(".task-actions a");
-    expect(links).toHaveLength(3);
-    expect(links[0].attributes("href")).toBe("/download/task-1?lang=English&format=srt");
-    expect(links[1].attributes("href")).toBe("/download/task-1?lang=English&format=ass");
-    expect(links[2].attributes("href")).toBe("/download/task-1?format=video");
+    expect(links).toHaveLength(4);
+    expect(links[0].attributes("href")).toBe("/download/task-1");
+    expect(links[1].attributes("href")).toBe("/download/task-1?lang=English&format=srt");
+    expect(links[2].attributes("href")).toBe("/download/task-1?lang=English&format=ass");
+    expect(links[3].attributes("href")).toBe("/download/task-1?lang=English&format=vtt");
     expect(wrapper.html()).not.toContain("/results/task-1/download");
   });
 
-  it("shows failed styling for FAILURE and ERROR", async () => {
+  it("shows failed styling for FAILURE", async () => {
     const failureWrapper = await submitBatchWithStatus("FAILURE");
     expect(failureWrapper.text()).toContain("Failed");
     expect(failureWrapper.find(".task-status .text-danger").exists()).toBe(true);
     expect(failureWrapper.text()).toContain("Boom");
-
-    const errorWrapper = await submitBatchWithStatus("ERROR");
-    expect(errorWrapper.text()).toContain("Failed");
-    expect(errorWrapper.find(".task-status .text-danger").exists()).toBe(true);
   });
 
   it("shows processing styling for PROCESSING and PENDING", async () => {

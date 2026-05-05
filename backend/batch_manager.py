@@ -29,12 +29,28 @@ class BatchManager:
     def _get_batch_path(self, batch_id: str) -> Path:
         return self.batches_dir / f"{batch_id}.json"
 
-    def create_batch(self, tasks: List[Dict[str, str]]) -> str:
+    @staticmethod
+    def _normalize_status(status: str | None) -> str:
+        normalized = str(status or "").strip().upper()
+        if normalized == "QUEUED":
+            return "PENDING"
+        if normalized == "ERROR":
+            return "FAILURE"
+        if normalized in {"PENDING", "PROCESSING", "SUCCESS", "FAILURE"}:
+            return normalized
+        return "PENDING"
+
+    def create_batch(self, tasks: List[Dict[str, Any]]) -> str:
         batch_id = f"batch_{uuid.uuid4().hex[:8]}"
         created_at = datetime.now(timezone.utc).isoformat()
         
         batch_tasks = [
-            BatchTask(task_id=t["task_id"], filename=t["filename"], status="queued")
+            BatchTask(
+                task_id=t["task_id"],
+                filename=t["filename"],
+                status=self._normalize_status(t.get("status")),
+                error=t.get("error"),
+            )
             for t in tasks
         ]
         
@@ -76,8 +92,8 @@ class BatchManager:
         
         for task in metadata.tasks:
             if task.task_id == task_id:
-                task.status = status
-                if error:
+                task.status = self._normalize_status(status)
+                if error is not None:
                     task.error = error
                 break
         

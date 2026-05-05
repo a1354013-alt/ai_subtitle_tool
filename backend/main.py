@@ -6,6 +6,7 @@ import subprocess
 import uuid
 import uuid as _uuid
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -20,7 +21,16 @@ from .storage.task_history import TaskHistoryStore, duration_seconds_since
 from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 from .utils.error_handler import handle_known_error, get_error_response
 from .utils.storage_utils import get_storage_backend
-from .batch_manager import BatchManager, BatchTask, BatchMetadata
+from .services.upload_validation import (
+    normalize_target_langs,
+    sanitize_filename,
+    validate_subtitle_format,
+    validate_target_langs,
+    validate_upload_metadata,
+    validate_upload_size,
+)
+from . import settings
+from .batch_manager import BatchManager
 import zipfile
 
 app = FastAPI(
@@ -49,7 +59,7 @@ def _is_test_environment() -> bool:
 
 def configure_cors() -> None:
     """Configure CORS with a predictable, safe policy."""
-    allowed_origins_str = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+    allowed_origins_str = os.getenv("CORS_ORIGINS") or os.getenv("CORS_ALLOWED_ORIGINS", "*")
     allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
 
     origins = [o.strip() for o in allowed_origins_str.split(",") if o.strip()]
@@ -77,6 +87,7 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 TASK_HISTORY = TaskHistoryStore(Path(UPLOAD_DIR) / "task_history.sqlite3")
 BATCH_MANAGER = BatchManager(UPLOAD_DIR)
+MAX_UPLOAD_SIZE_MB = settings.MAX_UPLOAD_SIZE_MB
 
 
 def validate_task_id(task_id: str) -> str:
@@ -97,30 +108,6 @@ def validate_lang(lang: str) -> str:
             detail=f"Invalid lang format: '{lang}'. Only alphanumeric, underscore, and hyphen allowed.",
         )
     return lang
-
-
-def normalize_target_langs(raw: str) -> List[str]:
-    """
-    Normalize multipart/form `target_langs`:
-    - split by comma
-    - trim
-    - collapse internal whitespace
-    - drop empty values (e.g. trailing comma)
-    - de-duplicate while preserving original order (case-insensitive key)
-    """
-    raw = raw or ""
-    parts = [re.sub(r"\s+", " ", p).strip() for p in raw.split(",")]
-    parts = [p for p in parts if p]
-
-    seen = set()
-    out: List[str] = []
-    for p in parts:
-        k = p.lower()
-        if k in seen:
-            continue
-        seen.add(k)
-        out.append(p)
-    return out
 
 
 def validate_path_traversal(filepath: str, allowed_root: str) -> str:
@@ -212,6 +199,55 @@ def _get_async_result(task_id: str):
     from .celery_app import celery_app
 
     return AsyncResult(task_id, app=celery_app)
+
+
+def _validate_uploaded_video_file(file: UploadFile) -> str:
+    safe_filename = validate_upload_metadata(file.filename, file.content_type)
+    validate_upload_size(file.file, MAX_UPLOAD_SIZE_MB)
+    return safe_filename
+
+
+def _validate_saved_video_file(file_path: str) -> None:
+    ffprobe_result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+            file_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
+        raise ValueError("Not a valid video file")
+
+
+class SubtitleDownloadUrls(BaseModel):
+    srt: Optional[str] = None
+    ass: Optional[str] = None
+    vtt: Optional[str] = None
+
+
+class BatchTaskDownloadUrls(BaseModel):
+    video: Optional[str] = None
+    subtitles: dict[str, SubtitleDownloadUrls] = Field(default_factory=dict)
+
+
+class BatchTaskResponse(BaseModel):
+    task_id: str
+    filename: str
+    status: str
+    progress: int = 0
+    message: Optional[str] = None
+    error: Optional[str] = None
+    download_urls: Optional[BatchTaskDownloadUrls] = None
 
 
 class TaskStatusResponse(BaseModel):
@@ -349,28 +385,14 @@ async def upload_video(
     remove_silence: bool = Form(False, description="Remove silence from video"),
     parallel: bool = Form(True, description="Use parallel processing for long videos"),
 ):
-    content_type = (file.content_type or "").lower()
-    if content_type and (not content_type.startswith("video/")) and content_type != "application/octet-stream":
-        raise HTTPException(status_code=400, detail=f"Invalid content type: {file.content_type}. Expected video/*")
-
-    if not file.filename.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
-        raise HTTPException(status_code=400, detail="Unsupported file format. Supported: mp4, mkv, avi, mov")
-
-    if subtitle_format not in ("ass", "srt"):
-        raise HTTPException(status_code=400, detail="subtitle_format must be 'ass' or 'srt'")
+    safe_filename = _validate_uploaded_video_file(file)
+    langs = validate_target_langs(target_langs)
+    normalized_subtitle_format = validate_subtitle_format(subtitle_format)
 
     task_id = str(uuid.uuid4())
-    file_extension = os.path.splitext(file.filename)[1]
+    file_extension = os.path.splitext(safe_filename)[1]
     file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
     file_path = validate_path_traversal(file_path, UPLOAD_DIR)
-
-    # size check (2GB)
-    file.file.seek(0, 2)
-    file_size = file.file.tell()
-    file.file.seek(0)
-    max_file_size = 2 * 1024 * 1024 * 1024
-    if file_size > max_file_size:
-        raise HTTPException(status_code=413, detail="File too large. Maximum size: 2GB")
 
     try:
         with open(file_path, "wb") as buffer:
@@ -398,27 +420,8 @@ async def upload_video(
     finally:
         file.file.close()
 
-    # ffprobe final validation
     try:
-        ffprobe_result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=codec_type",
-                "-of",
-                "csv=p=0",
-                file_path,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
-            raise ValueError("Not a valid video file")
+        _validate_saved_video_file(file_path)
     except Exception as e:
         try:
             os.remove(file_path)
@@ -426,15 +429,11 @@ async def upload_video(
             logger.warning("Failed to remove invalid uploaded file: %s", file_path, exc_info=True)
         raise HTTPException(status_code=400, detail=f"Invalid video file: {str(e)}")
 
-    langs = normalize_target_langs(target_langs)
-    if not langs:
-        raise HTTPException(status_code=400, detail="target_langs must contain at least one non-empty language")
-
     options = {
         "business_id": task_id,
         "target_langs": langs,
         "burn_subtitles": burn_subtitles,
-        "subtitle_format": subtitle_format,
+        "subtitle_format": normalized_subtitle_format,
         "remove_silence": remove_silence,
         "parallel": parallel,
         "hf_token": os.getenv("HF_TOKEN"),
@@ -468,7 +467,7 @@ async def upload_video(
 
     # Store recent task history for product continuity.
     try:
-        TASK_HISTORY.upsert_created(task_id=task_id, filename=file.filename, status=TaskStatusEnum.PENDING.value)
+        TASK_HISTORY.upsert_created(task_id=task_id, filename=safe_filename, status=TaskStatusEnum.PENDING.value)
     except Exception:
         logger.warning("Failed to record task history (non-fatal)", exc_info=True)
 
@@ -605,7 +604,41 @@ async def get_recent_tasks():
 
 class BatchUploadResponse(BaseModel):
     batch_id: str
-    tasks: List[dict]
+    tasks: List[BatchTaskResponse]
+
+
+def _build_batch_task_response(task_id: str, filename: str, status: str, **kwargs: Any) -> BatchTaskResponse:
+    return BatchTaskResponse(
+        task_id=task_id,
+        filename=filename,
+        status=str(status).upper(),
+        **kwargs,
+    )
+
+
+def _model_dump(model: BaseModel, **kwargs: Any) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(**kwargs)
+    return model.dict(**kwargs)
+
+
+def _build_batch_download_urls(task_id: str, manifest: TaskResultManifest) -> BatchTaskDownloadUrls:
+    subtitles: dict[str, SubtitleDownloadUrls] = {}
+    for file_info in manifest.available_files:
+        subtitle_urls = SubtitleDownloadUrls()
+        display_name = file_info.display_name
+        if file_info.srt:
+            subtitle_urls.srt = f"/download/{task_id}?lang={display_name}&format=srt"
+            subtitle_urls.vtt = f"/download/{task_id}?lang={display_name}&format=vtt"
+        if file_info.ass:
+            subtitle_urls.ass = f"/download/{task_id}?lang={display_name}&format=ass"
+        if _model_dump(subtitle_urls, exclude_none=True):
+            subtitles[display_name] = subtitle_urls
+
+    return BatchTaskDownloadUrls(
+        video=f"/download/{task_id}" if manifest.has_video else None,
+        subtitles=subtitles,
+    )
 
 @app.post("/batch/upload", response_model=BatchUploadResponse)
 async def batch_upload_videos(
@@ -619,29 +652,30 @@ async def batch_upload_videos(
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
 
-    tasks_info = []
+    langs = validate_target_langs(target_langs)
+    normalized_subtitle_format = validate_subtitle_format(subtitle_format)
+
+    tasks_info: list[BatchTaskResponse] = []
     enqueue_jobs: List[dict[str, Any]] = []
-    langs = normalize_target_langs(target_langs)
     
     for file in files:
         task_id = str(uuid.uuid4())
-        file_extension = os.path.splitext(file.filename)[1]
+        safe_filename = sanitize_filename(file.filename)
+        file_extension = os.path.splitext(safe_filename)[1]
         file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
-        
-        # Basic validation similar to single upload
-        if not file.filename.lower().endswith((".mp4", ".mkv", ".avi", ".mov")):
-            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "failed", "error": "Unsupported format"})
-            continue
 
         try:
+            _validate_uploaded_video_file(file)
+
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            
+            _validate_saved_video_file(file_path)
+
             options = {
                 "business_id": task_id,
                 "target_langs": langs,
                 "burn_subtitles": burn_subtitles,
-                "subtitle_format": subtitle_format,
+                "subtitle_format": normalized_subtitle_format,
                 "remove_silence": remove_silence,
                 "parallel": parallel,
                 "hf_token": os.getenv("HF_TOKEN"),
@@ -651,18 +685,25 @@ async def batch_upload_videos(
                 {
                     "task_id": task_id,
                     "file_path": file_path,
-                    "filename": file.filename,
+                    "filename": safe_filename,
                     "options": options,
                 }
             )
-            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "queued"})
+            tasks_info.append(_build_batch_task_response(task_id, safe_filename, "PENDING"))
+        except HTTPException as exc:
+            tasks_info.append(_build_batch_task_response(task_id, safe_filename, "FAILURE", error=str(exc.detail)))
         except Exception as e:
             logger.error(f"Failed to process batch file {file.filename}: {e}")
-            tasks_info.append({"task_id": task_id, "filename": file.filename, "status": "failed", "error": str(e)})
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    logger.warning("Failed to remove invalid batch upload: %s", file_path, exc_info=True)
+            tasks_info.append(_build_batch_task_response(task_id, safe_filename, "FAILURE", error=str(e)))
         finally:
             file.file.close()
 
-    batch_id = BATCH_MANAGER.create_batch(tasks_info)
+    batch_id = BATCH_MANAGER.create_batch([_model_dump(task) for task in tasks_info])
 
     for job in enqueue_jobs:
         try:
@@ -675,11 +716,11 @@ async def batch_upload_videos(
         except Exception as e:
             logger.error("Failed to enqueue batch file %s: %s", job["filename"], e)
             for task in tasks_info:
-                if task["task_id"] == job["task_id"]:
-                    task["status"] = "failed"
-                    task["error"] = str(e)
+                if task.task_id == job["task_id"]:
+                    task.status = TaskStatusEnum.FAILURE.value
+                    task.error = str(e)
                     break
-            BATCH_MANAGER.update_task_status(batch_id, job["task_id"], "failed", str(e))
+            BATCH_MANAGER.update_task_status(batch_id, job["task_id"], TaskStatusEnum.FAILURE.value, str(e))
 
     return BatchUploadResponse(batch_id=batch_id, tasks=tasks_info)
 
@@ -689,7 +730,8 @@ class BatchStatusResponse(BaseModel):
     completed: int
     failed: int
     processing: int
-    tasks: List[dict]
+    pending: int
+    tasks: List[BatchTaskResponse]
 
 @app.get("/batch/{batch_id}/status", response_model=BatchStatusResponse)
 async def get_batch_status(batch_id: str):
@@ -701,40 +743,56 @@ async def get_batch_status(batch_id: str):
     completed = 0
     failed = 0
     processing = 0
+    pending = 0
     
     for task in batch.tasks:
-        # Reuse existing get_status logic conceptually but more efficiently
+        stored_status = str(task.status).upper()
+        if stored_status == TaskStatusEnum.FAILURE.value:
+            tasks_details.append(
+                _build_batch_task_response(
+                    task.task_id,
+                    task.filename,
+                    TaskStatusEnum.FAILURE.value,
+                    error=task.error,
+                    message=task.error,
+                )
+            )
+            failed += 1
+            continue
+
         try:
             status_resp = await get_status(task.task_id)
-            task_info = {
-                "task_id": task.task_id,
-                "filename": task.filename,
-                "status": status_resp.status,
-                "progress": status_resp.progress,
-                "message": status_resp.message,
-                "error": status_resp.message if status_resp.status == TaskStatusEnum.FAILURE else None,
-                "download_urls": {
-                    "srt": f"/results/{task.task_id}/download?format=srt",
-                    "ass": f"/results/{task.task_id}/download?format=ass",
-                    "video": f"/results/{task.task_id}/download?format=video"
-                } if status_resp.status == TaskStatusEnum.SUCCESS else None
-            }
+            task_info = _build_batch_task_response(
+                task.task_id,
+                task.filename,
+                status_resp.status.value,
+                progress=status_resp.progress,
+                message=status_resp.message,
+                error=status_resp.message if status_resp.status == TaskStatusEnum.FAILURE else None,
+            )
             
             if status_resp.status == TaskStatusEnum.SUCCESS:
+                manifest = await get_results_manifest(task.task_id)
+                task_info.download_urls = _build_batch_download_urls(task.task_id, manifest)
                 completed += 1
             elif status_resp.status == TaskStatusEnum.FAILURE:
                 failed += 1
+            elif status_resp.status == TaskStatusEnum.PENDING:
+                pending += 1
             else:
                 processing += 1
                 
             tasks_details.append(task_info)
         except Exception:
-            tasks_details.append({
-                "task_id": task.task_id,
-                "filename": task.filename,
-                "status": "error",
-                "progress": 0
-            })
+            tasks_details.append(
+                _build_batch_task_response(
+                    task.task_id,
+                    task.filename,
+                    TaskStatusEnum.FAILURE.value,
+                    error="Failed to load task status",
+                    message="Failed to load task status",
+                )
+            )
             failed += 1
 
     return BatchStatusResponse(
@@ -743,6 +801,7 @@ async def get_batch_status(batch_id: str):
         completed=completed,
         failed=failed,
         processing=processing,
+        pending=pending,
         tasks=tasks_details
     )
 

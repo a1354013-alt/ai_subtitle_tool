@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import json
 from pathlib import Path
 
 from make_release_zip import build_release_zip
@@ -67,12 +68,26 @@ def _verify_repo_examples(repo_root: Path) -> None:
         raise SystemExit(f"required repo files missing: {', '.join(missing)}")
 
 
+def _verify_docs_and_scripts(repo_root: Path) -> None:
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    deployment = (repo_root / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    if "backend/storage/batches" in readme or "backend/storage/batches" in deployment:
+        raise SystemExit("old batch storage path found in documentation")
+
+    package_json = json.loads((repo_root / "frontend" / "package.json").read_text(encoding="utf-8"))
+    scripts = package_json.get("scripts", {})
+    if scripts.get("test:ci") != "vitest run":
+        raise SystemExit("frontend/package.json missing expected test:ci script")
+
+
 def _verify_zip_contents(out_path: Path) -> None:
     with zipfile.ZipFile(out_path, "r") as zf:
         names = zf.namelist()
 
     for name in names:
         normalized = name.lstrip("./")
+        if normalized in {"backend/uploads/.gitkeep", "uploads/.gitkeep"}:
+            continue
         if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in FORBIDDEN_PREFIXES):
             raise SystemExit(f"forbidden path found in release zip: {normalized}")
         if normalized.endswith(FORBIDDEN_SUFFIXES):
@@ -86,6 +101,7 @@ def _verify_zip_contents(out_path: Path) -> None:
 def run_zip_only(repo_root: Path) -> Path:
     out_path = repo_root / "release.zip"
     _verify_repo_examples(repo_root)
+    _verify_docs_and_scripts(repo_root)
     build_release_zip(repo_root, out_path)
     _verify_zip_contents(out_path)
     print(out_path)

@@ -57,9 +57,10 @@
             <span>Total: {{ batchStatus?.total || 0 }}</span> |
             <span class="text-success">Completed: {{ batchStatus?.completed || 0 }}</span> |
             <span class="text-danger">Failed: {{ batchStatus?.failed || 0 }}</span> |
-            <span>Processing: {{ batchStatus?.processing || 0 }}</span>
+            <span>Processing: {{ batchStatus?.processing || 0 }}</span> |
+            <span>Pending: {{ batchStatus?.pending || 0 }}</span>
           </div>
-          <button v-if="batchStatus?.completed > 0" class="btn primary btn-sm" @click="downloadZip">
+          <button v-if="showDownloadZip" class="btn primary btn-sm" @click="downloadZip">
             {{ $t('batch.downloadZip') }}
           </button>
         </div>
@@ -69,15 +70,21 @@
             <div class="task-info">
               <div class="task-filename">{{ task.filename }}</div>
               <div class="task-status">
-                <span :class="statusClass(task.status)">{{ task.status }}</span>
+                <span :class="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
                 <span v-if="task.progress > 0"> - {{ task.progress }}%</span>
               </div>
             </div>
             <div v-if="task.error" class="task-error text-danger">{{ task.error }}</div>
-            <div v-if="task.status === 'success'" class="task-actions">
-              <a :href="`${apiBaseUrl}/results/${task.task_id}/download?format=srt`" class="btn-link" target="_blank">SRT</a>
-              <a :href="`${apiBaseUrl}/results/${task.task_id}/download?format=ass`" class="btn-link" target="_blank">ASS</a>
-              <a :href="`${apiBaseUrl}/results/${task.task_id}/download?format=video`" class="btn-link" target="_blank">Video</a>
+            <div v-if="hasDownloads(task)" class="task-actions">
+              <a
+                v-for="link in taskDownloadLinks(task)"
+                :key="link.key"
+                :href="link.href"
+                class="btn-link"
+                target="_blank"
+              >
+                {{ link.label }}
+              </a>
             </div>
           </div>
         </div>
@@ -87,18 +94,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted } from "vue";
+import { computed, ref, onUnmounted } from "vue";
 import axios from "axios";
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
+import { buildApiUrl } from "@/api/client";
+import type { BatchStatusResponse, BatchTaskResponse } from "@/types/api";
 
 const files = ref<File[]>([]);
 const submitting = ref(false);
 const batchId = ref<string | null>(null);
-const batchStatus = ref<any>(null);
+const batchStatus = ref<BatchStatusResponse | null>(null);
 const targetLangs = ref("Traditional Chinese");
 const subtitleFormat = ref("ass");
 const burnSubtitles = ref(true);
+const showDownloadZip = computed(() => (batchStatus.value?.completed ?? 0) > 0);
 
 let statusInterval: any = null;
 
@@ -121,7 +129,7 @@ async function onSubmit() {
   fd.append("parallel", "true");
 
   try {
-    const res = await axios.post(`${apiBaseUrl}/batch/upload`, fd);
+    const res = await axios.post(buildApiUrl("/batch/upload"), fd);
     batchId.value = res.data.batch_id;
     startPolling();
   } catch (err) {
@@ -140,9 +148,9 @@ function startPolling() {
 async function fetchStatus() {
   if (!batchId.value) return;
   try {
-    const res = await axios.get(`${apiBaseUrl}/batch/${batchId.value}/status`);
+    const res = await axios.get(buildApiUrl(`/batch/${batchId.value}/status`));
     batchStatus.value = res.data;
-    if (res.data.processing === 0 && res.data.total > 0) {
+    if (res.data.processing === 0 && res.data.pending === 0 && res.data.total > 0) {
       clearInterval(statusInterval);
     }
   } catch (err) {
@@ -152,13 +160,61 @@ async function fetchStatus() {
 
 function downloadZip() {
   if (!batchId.value) return;
-  window.open(`${apiBaseUrl}/batch/${batchId.value}/download`, "_blank");
+  window.open(buildApiUrl(`/batch/${batchId.value}/download`), "_blank");
+}
+
+function normalizeStatus(status: string) {
+  return String(status || "").toUpperCase();
+}
+
+function isSuccessStatus(status: string) {
+  return normalizeStatus(status) === "SUCCESS";
 }
 
 function statusClass(status: string) {
-  if (status === "success") return "text-success";
-  if (status === "failed" || status === "error") return "text-danger";
+  if (isSuccessStatus(status)) return "text-success";
+  if (normalizeStatus(status) === "FAILURE") return "text-danger";
   return "text-muted";
+}
+
+function statusLabel(status: string) {
+  const normalized = normalizeStatus(status);
+  if (normalized === "SUCCESS") return "SUCCESS";
+  if (normalized === "FAILURE") return "FAILURE";
+  if (normalized === "PROCESSING") return "PROCESSING";
+  return "PENDING";
+}
+
+function hasDownloads(task: BatchTaskResponse) {
+  return isSuccessStatus(task.status) && taskDownloadLinks(task).length > 0;
+}
+
+function taskDownloadLinks(task: BatchTaskResponse) {
+  const links: Array<{ key: string; label: string; href: string }> = [];
+  const downloadUrls = task.download_urls;
+  if (!downloadUrls) return links;
+
+  if (downloadUrls.video) {
+    links.push({
+      key: `${task.task_id}-video`,
+      label: "Video",
+      href: buildApiUrl(downloadUrls.video),
+    });
+  }
+
+  for (const [language, formats] of Object.entries(downloadUrls.subtitles ?? {})) {
+    if (formats.srt) {
+      links.push({ key: `${task.task_id}-${language}-srt`, label: `${language} SRT`, href: buildApiUrl(formats.srt) });
+    }
+    if (formats.ass) {
+      links.push({ key: `${task.task_id}-${language}-ass`, label: `${language} ASS`, href: buildApiUrl(formats.ass) });
+    }
+    if (formats.vtt) {
+      links.push({ key: `${task.task_id}-${language}-vtt`, label: `${language} VTT`, href: buildApiUrl(formats.vtt) });
+    }
+  }
+
+  return links;
 }
 
 onUnmounted(() => {

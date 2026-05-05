@@ -4,7 +4,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 export function getApiBaseUrl(): string {
   const raw = import.meta.env.VITE_API_BASE_URL;
-  if (!raw && import.meta.env.DEV) {
+  if (!raw && import.meta.env.DEV && import.meta.env.MODE !== "test") {
     console.warn(
       "VITE_API_BASE_URL not set; using same-origin. This may fail in cross-origin setups."
     );

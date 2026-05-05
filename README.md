@@ -135,12 +135,20 @@ Environment variables:
 - The backend auto-loads `backend/.env` for local development (it will not override already-set env vars).
 
 ```ini
+APP_ENV=development
+TESTING=false
+UPLOAD_DIR=./backend/uploads
+MAX_UPLOAD_SIZE_MB=2048
 REDIS_URL=redis://localhost:6379/0
-UPLOAD_DIR=./uploads
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/0
+CORS_ORIGINS=http://localhost:5173
+TRANSLATE_PROVIDER=openai
 OPENAI_API_KEY=
 HF_TOKEN=
-TRANSLATE_MODEL=
-CORS_ALLOWED_ORIGINS=http://localhost:5173
+TRANSLATE_MODEL=gpt-4o-mini
+WHISPER_MODEL=base
+STORAGE_BACKEND=local
 CORS_ALLOW_CREDENTIALS=true
 ```
 
@@ -181,7 +189,7 @@ rm -rf node_modules
 npm ci
 npm run lint
 npm run typecheck
-npm test
+npm run test:ci
 npm run build
 npm run dev
 ```
@@ -251,8 +259,10 @@ docker compose up
 ## Testing
 
 ```bash
-pytest -q
-cd frontend && npm ci && npm test && npm run build
+python -m compileall -q backend tests scripts benchmarks test_report.py test_hwaccel.py
+TESTING=true pytest -q
+python scripts/verify_delivery.py
+cd frontend && npm ci && npm run typecheck && npm run lint && npm run test:ci && npm run build
 ```
 
 ## Release
@@ -290,7 +300,7 @@ The tool supports batch processing of multiple videos. Users can upload multiple
 ### Batch Processing Flow
 
 1. User selects multiple files in the "Batch Processing" tab.
-2. System uploads files and initializes a batch metadata file in `backend/storage/batches/{batch_id}.json`.
+2. System uploads files and initializes a batch metadata file in `UPLOAD_DIR/batches/{batch_id}.json` (default local path: `backend/uploads/batches/{batch_id}.json`).
 3. Each video is enqueued as an independent Celery task.
 4. User monitors progress on the batch status page.
 5. Once processing is complete, user can download individual results or the entire batch as a ZIP.
