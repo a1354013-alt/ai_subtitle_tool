@@ -21,12 +21,16 @@ services:
       # Ensure Docker works even if backend/.env is configured for local (localhost) usage.
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
       UPLOAD_DIR: /app/uploads
+      OUTPUT_DIR: /app/outputs
+      TEMP_DIR: /app/tmp
       CORS_ORIGINS: http://localhost:5173
       CORS_ALLOW_CREDENTIALS: "true"
     volumes:
       - ./backend/uploads:/app/uploads
+      - ./backend/outputs:/app/outputs
+      - ./backend/tmp:/app/tmp
     ports:
       - "9091:8000"
     healthcheck:
@@ -48,10 +52,14 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
       UPLOAD_DIR: /app/uploads
+      OUTPUT_DIR: /app/outputs
+      TEMP_DIR: /app/tmp
     volumes:
       - ./backend/uploads:/app/uploads
+      - ./backend/outputs:/app/outputs
+      - ./backend/tmp:/app/tmp
     command: celery -A backend.celery_app:celery_app worker --loglevel=info
     healthcheck:
       disable: true

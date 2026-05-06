@@ -521,6 +521,7 @@ class TestStatusEndpoint(unittest.TestCase):
                 self.result = result
 
         # PENDING
+        main.TASK_HISTORY.upsert_created(task_id=task_id, filename="demo.mp4", status="PENDING")
         with patch.object(main, "_get_async_result", return_value=_R("PENDING")):
             res = _run(main.get_status(task_id=task_id))
             self.assertEqual(res.status, "PENDING")
@@ -545,6 +546,41 @@ class TestStatusEndpoint(unittest.TestCase):
             res = _run(main.get_status(task_id=task_id))
             self.assertEqual(res.status, "FAILURE")
             self.assertTrue(isinstance(res.message, str))
+
+    def test_status_canceled_is_terminal_canceled(self):
+        tmpdir = _make_tmpdir()
+        main = _load_app_with_upload_dir(str(tmpdir))
+        task_id = str(uuid.uuid4())
+
+        (tmpdir / f"{task_id}.cancel").write_text("canceled\n", encoding="utf-8")
+        res = _run(main.get_status(task_id=task_id))
+        self.assertEqual(res.status, "CANCELED")
+        self.assertEqual(res.error_code, "task_canceled")
+        self.assertTrue(isinstance(res.suggestion, str) and len(res.suggestion) > 0)
+
+
+class TestUnifiedTaskPaths(unittest.TestCase):
+    def test_settings_generate_consistent_paths_for_api_and_worker(self):
+        tmpdir = _make_tmpdir()
+        os.environ["UPLOAD_DIR"] = str(tmpdir)
+
+        import backend.settings as app_settings
+        import backend.main as main
+        import backend.tasks as tasks
+
+        app_settings = importlib.reload(app_settings)
+        main = importlib.reload(main)
+        tasks = importlib.reload(tasks)
+
+        task_id = str(uuid.uuid4())
+        input_path = app_settings.task_input_path(task_id, ".mp4")
+        artifact_base = app_settings.task_artifact_base(task_id)
+        final_path = app_settings.task_final_video_path(task_id)
+
+        self.assertEqual(str(input_path.parent), main.UPLOAD_DIR)
+        self.assertEqual(str(artifact_base.parent), main.UPLOAD_DIR)
+        self.assertEqual(str(final_path.parent), main.UPLOAD_DIR)
+        self.assertEqual(app_settings.get_upload_dir(), main.UPLOAD_DIR)
 
 
 class TestSubtitleFallbackAndDownload(unittest.TestCase):

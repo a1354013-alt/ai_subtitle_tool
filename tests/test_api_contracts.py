@@ -54,6 +54,18 @@ async def test_healthz(app_client):
 
 
 @pytest.mark.anyio
+async def test_app_config_contract(app_client):
+    client, _main, _tmp = app_client
+    r = await client.get("/api/config")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["maxUploadSizeMb"] == 2048
+    assert ".mp4" in body["supportedExtensions"]
+    assert body["batchUploadEnabled"] is True
+    assert body["subtitleFormats"] == ["srt", "ass", "vtt"]
+
+
+@pytest.mark.anyio
 async def test_upload_contract_returns_uuid_and_pending(app_client):
     client, main, _tmp = app_client
 
@@ -110,6 +122,45 @@ async def test_status_contract_processing_and_success(app_client, monkeypatch: p
     assert body2["progress"] == 100
     assert body2["result_url"] == f"/results/{task_id}"
     assert body2["warnings"] == ["w2"]
+
+
+@pytest.mark.anyio
+async def test_status_contract_failure_exposes_error_code_and_suggestion(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "99999999-9999-9999-9999-999999999999"
+
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _tid: _make_async_result(
+            "FAILURE",
+            result={
+                "error_code": "ffmpeg_not_found",
+                "message": "ffmpeg missing",
+                "suggestion": "Install ffmpeg first",
+            },
+        ),
+    )
+
+    r = await client.get(f"/status/{task_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "FAILURE"
+    assert body["error_code"] == "ffmpeg_not_found"
+    assert body["suggestion"] == "Install ffmpeg first"
+
+
+@pytest.mark.anyio
+async def test_status_missing_task_returns_consistent_error_shape(app_client):
+    client, _main, _tmp = app_client
+    task_id = "12345678-1234-1234-1234-123456789012"
+
+    r = await client.get(f"/status/{task_id}")
+    assert r.status_code == 404
+    body = r.json()
+    assert body["error_code"] == "task_not_found"
+    assert "message" in body
+    assert "suggestion" in body
 
 
 @pytest.mark.anyio
@@ -224,5 +275,6 @@ async def test_cancel_contract_marks_task_canceled(app_client, monkeypatch: pyte
     r2 = await client.get(f"/status/{task_id}")
     assert r2.status_code == 200
     body = r2.json()
-    assert body["status"] == "FAILURE"
-    assert body["message"] == "Canceled"
+    assert body["status"] == "CANCELED"
+    assert body["error_code"] == "task_canceled"
+    assert body["suggestion"]

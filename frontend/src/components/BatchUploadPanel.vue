@@ -7,7 +7,12 @@
             <div class="col">
               <div class="label">Select Videos</div>
               <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" multiple @change="onFilesChange" />
-              <div class="help">You can select multiple videos. Max 2GB per file.</div>
+              <div class="help">
+                Supported: {{ config.supportedExtensions.join(", ") }}. Max {{ config.maxUploadSizeMb }}MB per file,
+                up to {{ config.maxBatchFiles }} files per batch.
+              </div>
+              <div v-if="validationError" class="task-error text-danger">{{ validationError }}</div>
+              <div v-else-if="totalSizeText" class="help">Total selected size: {{ totalSizeText }}</div>
               <div v-if="files.length > 0" class="file-list">
                 <div v-for="(f, i) in files" :key="i" class="file-item">
                   {{ f.name }} ({{ (f.size / 1024 / 1024).toFixed(1) }} MB)
@@ -43,7 +48,7 @@
           <div class="divider" />
 
           <div class="row" style="align-items: center; justify-content: flex-end">
-            <button class="btn primary" type="submit" :disabled="submitting || files.length === 0">
+            <button class="btn primary" type="submit" :disabled="submitting || files.length === 0 || !!validationError">
               {{ submitting ? 'Uploading...' : 'Start Batch Process' }}
             </button>
           </div>
@@ -94,10 +99,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onUnmounted } from "vue";
-import axios from "axios";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { getBatchStatus, uploadBatch, downloadBatch } from "@/api/batch";
+import { getAppConfig } from "@/api/config";
 import { buildApiUrl } from "@/api/client";
-import type { BatchStatusResponse, BatchTaskResponse } from "@/types/api";
+import type { AppConfig, BatchStatusResponse, BatchTaskResponse } from "@/types/api";
+import type { APIError } from "@/types/api";
 
 const files = ref<File[]>([]);
 const submitting = ref(false);
@@ -106,35 +113,78 @@ const batchStatus = ref<BatchStatusResponse | null>(null);
 const targetLangs = ref("Traditional Chinese");
 const subtitleFormat = ref("ass");
 const burnSubtitles = ref(true);
+const validationError = ref("");
+const config = ref<AppConfig>({
+  maxUploadSizeMb: 2048,
+  maxBatchFiles: 20,
+  supportedExtensions: [".mp4", ".mkv", ".avi", ".mov"],
+  batchUploadEnabled: true,
+  subtitleFormats: ["srt", "ass", "vtt"],
+});
 const showDownloadZip = computed(() => (batchStatus.value?.completed ?? 0) > 0);
+const totalSizeText = computed(() =>
+  files.value.length > 0 ? `${(files.value.reduce((sum, file) => sum + file.size, 0) / 1024 / 1024).toFixed(1)} MB` : ""
+);
 
 let statusInterval: any = null;
+
+function formatSupportedExtensions() {
+  return config.value.supportedExtensions.join(", ");
+}
+
+function validateSelectedFiles(selectedFiles: File[]): string {
+  if (selectedFiles.length === 0) return "Select at least one file.";
+  if (selectedFiles.length > config.value.maxBatchFiles) {
+    return `You can upload up to ${config.value.maxBatchFiles} files at a time.`;
+  }
+
+  const maxBytes = config.value.maxUploadSizeMb * 1024 * 1024;
+  for (const file of selectedFiles) {
+    const extension = file.name.includes(".") ? `.${file.name.split(".").pop()!.toLowerCase()}` : "";
+    if (!extension || !config.value.supportedExtensions.includes(extension)) {
+      return `Unsupported file format: ${file.name}. Supported formats: ${formatSupportedExtensions()}.`;
+    }
+    if (file.size <= 0) {
+      return `Empty files cannot be uploaded: ${file.name}.`;
+    }
+    if (file.size > maxBytes) {
+      return `${file.name} exceeds the ${config.value.maxUploadSizeMb}MB per-file limit.`;
+    }
+  }
+
+  return "";
+}
 
 function onFilesChange(e: Event) {
   const input = e.target as HTMLInputElement;
   if (input.files) {
-    files.value = Array.from(input.files);
+    const selectedFiles = Array.from(input.files);
+    validationError.value = validateSelectedFiles(selectedFiles);
+    files.value = validationError.value ? [] : selectedFiles;
   }
 }
 
 async function onSubmit() {
-  if (files.value.length === 0) return;
+  validationError.value = validateSelectedFiles(files.value);
+  if (files.value.length === 0 || validationError.value) return;
   submitting.value = true;
   
   const fd = new FormData();
-  files.value.forEach(f => fd.append("files", f));
+  files.value.forEach((file) => fd.append("files", file));
   fd.append("target_langs", targetLangs.value);
   fd.append("subtitle_format", subtitleFormat.value);
   fd.append("burn_subtitles", String(burnSubtitles.value));
   fd.append("parallel", "true");
 
   try {
-    const res = await axios.post(buildApiUrl("/batch/upload"), fd);
-    batchId.value = res.data.batch_id;
+    const response = await uploadBatch(fd);
+    batchId.value = response.batch_id;
     startPolling();
   } catch (err) {
-    console.error("Batch upload failed", err);
-    alert("Batch upload failed");
+    const apiError = err as APIError;
+    validationError.value = apiError.suggestion
+      ? `${apiError.message} ${apiError.suggestion}`
+      : apiError.message || "Batch upload failed";
   } finally {
     submitting.value = false;
   }
@@ -148,9 +198,9 @@ function startPolling() {
 async function fetchStatus() {
   if (!batchId.value) return;
   try {
-    const res = await axios.get(buildApiUrl(`/batch/${batchId.value}/status`));
-    batchStatus.value = res.data;
-    if (res.data.processing === 0 && res.data.pending === 0 && res.data.total > 0) {
+    const response = await getBatchStatus(batchId.value);
+    batchStatus.value = response;
+    if (response.processing === 0 && response.pending === 0 && response.total > 0) {
       clearInterval(statusInterval);
     }
   } catch (err) {
@@ -160,7 +210,7 @@ async function fetchStatus() {
 
 function downloadZip() {
   if (!batchId.value) return;
-  window.open(buildApiUrl(`/batch/${batchId.value}/download`), "_blank");
+  window.open(downloadBatch(batchId.value), "_blank");
 }
 
 function normalizeStatus(status: string) {
@@ -173,7 +223,7 @@ function isSuccessStatus(status: string) {
 
 function statusClass(status: string) {
   if (isSuccessStatus(status)) return "text-success";
-  if (normalizeStatus(status) === "FAILURE") return "text-danger";
+  if (["FAILURE", "CANCELED"].includes(normalizeStatus(status))) return "text-danger";
   return "text-muted";
 }
 
@@ -181,6 +231,7 @@ function statusLabel(status: string) {
   const normalized = normalizeStatus(status);
   if (normalized === "SUCCESS") return "SUCCESS";
   if (normalized === "FAILURE") return "FAILURE";
+  if (normalized === "CANCELED") return "CANCELED";
   if (normalized === "PROCESSING") return "PROCESSING";
   return "PENDING";
 }
@@ -219,6 +270,14 @@ function taskDownloadLinks(task: BatchTaskResponse) {
 
 onUnmounted(() => {
   if (statusInterval) clearInterval(statusInterval);
+});
+
+onMounted(async () => {
+  try {
+    config.value = await getAppConfig();
+  } catch {
+    // Keep the built-in defaults when config cannot be fetched.
+  }
 });
 </script>
 

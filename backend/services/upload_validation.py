@@ -7,9 +7,10 @@ from typing import BinaryIO
 
 from fastapi import HTTPException
 
+from backend import settings
 
-SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov"}
-SUPPORTED_SUBTITLE_FORMATS = {"ass", "srt"}
+SUPPORTED_VIDEO_EXTENSIONS = set(settings.SUPPORTED_VIDEO_EXTENSIONS)
+SUPPORTED_SUBTITLE_FORMATS = set(settings.EDITABLE_SUBTITLE_FORMATS)
 
 
 def sanitize_filename(filename: str | None) -> str:
@@ -70,3 +71,10 @@ def validate_upload_size(file_obj: BinaryIO, max_upload_size_mb: int) -> int:
     if file_size > max_bytes:
         raise HTTPException(status_code=413, detail=f"File too large. Maximum size: {max_upload_size_mb}MB")
     return file_size
+
+
+def validate_batch_files(files: list, max_batch_files: int) -> None:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+    if len(files) > max_batch_files:
+        raise HTTPException(status_code=400, detail=f"Too many files. Maximum allowed: {max_batch_files}")

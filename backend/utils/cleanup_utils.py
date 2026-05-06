@@ -5,12 +5,13 @@ import shutil
 import time
 from typing import Iterable, Optional
 
+from .. import settings
+
 logger = logging.getLogger(__name__)
 
 
 def _default_upload_dir() -> str:
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.getenv("UPLOAD_DIR", os.path.join(base_dir, "uploads"))
+    return settings.get_upload_dir()
 
 
 def create_task_lock(business_id: str, upload_dir: Optional[str] = None) -> str:

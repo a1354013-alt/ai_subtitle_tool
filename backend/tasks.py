@@ -24,6 +24,7 @@ from .pipeline_segments import (
     transcribe_segment,
     build_full_video_payload,
 )
+from . import settings
 from .utils.cleanup_utils import create_task_lock, remove_task_lock, cleanup_old_files as cleanup_old_files_impl
 from .utils.storage_utils import get_storage_backend
 
@@ -54,11 +55,11 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
 
     from .utils.error_handler import handle_known_error, get_error_response
     try:
-        if business_id and is_task_canceled(os.path.dirname(os.path.abspath(video_path)), business_id):
+        if business_id and is_task_canceled(settings.get_upload_dir(), business_id):
             raise RuntimeError("Task canceled")
 
-        upload_dir = os.path.dirname(os.path.abspath(video_path))
-        base_path = os.path.join(upload_dir, business_id)
+        upload_dir = settings.get_upload_dir()
+        base_path = str(settings.task_artifact_base(business_id))
 
         if update_state_func:
             update_state_func(state="PROGRESS", meta={"progress": 40, "status": "Merging parallel results..."})
@@ -88,7 +89,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                     audio_path = f"{base_path}_temp.wav"
                     subprocess.run(
                         [
-                            "ffmpeg",
+                            settings.FFMPEG_BINARY,
                             "-y",
                             "-i",
                             video_path,
@@ -226,7 +227,7 @@ def process_video_task(self, video_path: str, options: dict = None):
     if not business_id:
         raise ValueError("options.business_id is required")
 
-    create_task_lock(business_id)
+    create_task_lock(business_id, settings.get_upload_dir())
 
     try:
         from .utils.video_utils import remove_silence
@@ -238,8 +239,8 @@ def process_video_task(self, video_path: str, options: dict = None):
 
         parallel = options.get("parallel", True)
         do_remove_silence = options.get("remove_silence", False)
-        upload_dir = os.path.dirname(os.path.abspath(video_path))
-        base_path = os.path.join(upload_dir, business_id)
+        upload_dir = settings.get_upload_dir()
+        base_path = str(settings.task_artifact_base(business_id))
 
         current_video = video_path
         if is_task_canceled(upload_dir, business_id):
@@ -278,7 +279,7 @@ def process_video_task(self, video_path: str, options: dict = None):
 
     except Exception as e:
         try:
-            remove_task_lock(business_id)
+            remove_task_lock(business_id, settings.get_upload_dir())
         except Exception:
             logger.warning("Failed to remove task lock after exception: business_id=%s", business_id, exc_info=True)
         
@@ -314,8 +315,8 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
     from .utils.subtitle_video_utils import burn_subtitles
     from .utils.task_control_utils import is_task_canceled
 
-    upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
-    base_path = os.path.join(upload_dir, task_id)
+    upload_dir = settings.get_upload_dir()
+    base_path = str(settings.task_artifact_base(task_id))
 
     if is_task_canceled(upload_dir, task_id):
         raise RuntimeError("Task canceled")

@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse, Response
@@ -22,6 +22,7 @@ from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 from .utils.error_handler import handle_known_error, get_error_response
 from .utils.storage_utils import get_storage_backend
 from .services.upload_validation import (
+    validate_batch_files,
     normalize_target_langs,
     sanitize_filename,
     validate_subtitle_format,
@@ -43,6 +44,13 @@ app = FastAPI(
 logger = logging.getLogger(__name__)
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict):
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 class _TestingAsyncResult:
     def __init__(self, status: str = "PENDING", info: Optional[dict] = None, result: Any = None):
         self.status = status
@@ -59,10 +67,8 @@ def _is_test_environment() -> bool:
 
 def configure_cors() -> None:
     """Configure CORS with a predictable, safe policy."""
-    allowed_origins_str = os.getenv("CORS_ORIGINS") or os.getenv("CORS_ALLOWED_ORIGINS", "*")
-    allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
-
-    origins = [o.strip() for o in allowed_origins_str.split(",") if o.strip()]
+    origins = settings.get_cors_origins()
+    allow_credentials = settings.CORS_ALLOW_CREDENTIALS
 
     # FastAPI/Starlette forbids '*' with credentials; keep this explicit and fail-fast.
     if "*" in origins and allow_credentials:
@@ -82,12 +88,13 @@ def configure_cors() -> None:
 
 configure_cors()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+UPLOAD_DIR = settings.get_upload_dir()
+OUTPUT_DIR = settings.get_output_dir()
+TEMP_DIR = settings.get_temp_dir()
 TASK_HISTORY = TaskHistoryStore(Path(UPLOAD_DIR) / "task_history.sqlite3")
 BATCH_MANAGER = BatchManager(UPLOAD_DIR)
 MAX_UPLOAD_SIZE_MB = settings.MAX_UPLOAD_SIZE_MB
+MAX_BATCH_FILES = settings.MAX_BATCH_FILES
 
 
 def validate_task_id(task_id: str) -> str:
@@ -134,6 +141,16 @@ def write_text_atomic(target_path: str, content: str) -> None:
                 os.remove(tmp_path)
         except OSError:
             logger.warning("Failed to remove temp file: %s", tmp_path, exc_info=True)
+
+
+def _task_has_local_artifacts(task_id: str) -> bool:
+    task_prefix = f"{task_id}_"
+    for path in Path(UPLOAD_DIR).glob(f"{task_id}*"):
+        if path.name == f"{task_id}.cancel":
+            return True
+        if path.name.startswith(task_prefix) or path.stem == task_id:
+            return True
+    return False
 
 
 def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> None:
@@ -210,7 +227,7 @@ def _validate_uploaded_video_file(file: UploadFile) -> str:
 def _validate_saved_video_file(file_path: str) -> None:
     ffprobe_result = subprocess.run(
         [
-            "ffprobe",
+            settings.FFPROBE_BINARY,
             "-v",
             "error",
             "-select_streams",
@@ -257,6 +274,16 @@ class TaskStatusResponse(BaseModel):
     message: Optional[str] = None
     result_url: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
+    error_code: Optional[str] = None
+    suggestion: Optional[str] = None
+
+
+class AppConfigResponse(BaseModel):
+    maxUploadSizeMb: int
+    maxBatchFiles: int
+    supportedExtensions: List[str]
+    batchUploadEnabled: bool
+    subtitleFormats: List[str]
 
 
 class SubtitleEditRequest(BaseModel):
@@ -297,20 +324,31 @@ async def healthz():
     return {"status": "ok"}
 
 
+@app.get("/api/config", response_model=AppConfigResponse)
+async def get_app_config():
+    return AppConfigResponse(
+        maxUploadSizeMb=settings.MAX_UPLOAD_SIZE_MB,
+        maxBatchFiles=settings.MAX_BATCH_FILES,
+        supportedExtensions=list(settings.SUPPORTED_VIDEO_EXTENSIONS),
+        batchUploadEnabled=settings.BATCH_UPLOAD_ENABLED,
+        subtitleFormats=list(settings.SUBTITLE_FORMATS),
+    )
+
+
 def check_system_dependencies():
     """Check critical dependencies on startup."""
     from .utils.error_messages import ERROR_MESSAGES
     
     # 1. Check ffmpeg
     try:
-        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        subprocess.run([settings.FFMPEG_BINARY, "-version"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         logger.error("CRITICAL: %s. Suggestion: %s", 
                      ERROR_MESSAGES["ffmpeg_not_found"]["message"], 
                      ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"])
 
     # 2. Check OpenAI API Key
-    if not os.getenv("OPENAI_API_KEY"):
+    if not settings.OPENAI_API_KEY:
         logger.error("CRITICAL: %s. Suggestion: %s", 
                      ERROR_MESSAGES["openai_api_key_missing"]["message"], 
                      ERROR_MESSAGES["openai_api_key_missing"]["suggestion"])
@@ -318,7 +356,7 @@ def check_system_dependencies():
     # 3. Check Redis (best effort on startup)
     try:
         import redis as _redis
-        r = _redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_connect_timeout=2)
+        r = _redis.Redis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
         r.ping()
     except Exception:
         logger.error("CRITICAL: %s. Suggestion: %s", 
@@ -352,7 +390,7 @@ async def readyz():
     # Redis check
     try:
         import redis as _redis
-        r = _redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_connect_timeout=2)
+        r = _redis.Redis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
         r.ping()
     except Exception:
         errors.append({
@@ -363,7 +401,7 @@ async def readyz():
         
     # ffmpeg check
     try:
-        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        subprocess.run([settings.FFMPEG_BINARY, "-version"], capture_output=True, check=True)
     except Exception:
         errors.append({
             "code": "ffmpeg_not_found",
@@ -391,7 +429,7 @@ async def upload_video(
 
     task_id = str(uuid.uuid4())
     file_extension = os.path.splitext(safe_filename)[1]
-    file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
+    file_path = str(settings.task_input_path(task_id, file_extension))
     file_path = validate_path_traversal(file_path, UPLOAD_DIR)
 
     try:
@@ -436,7 +474,7 @@ async def upload_video(
         "subtitle_format": normalized_subtitle_format,
         "remove_silence": remove_silence,
         "parallel": parallel,
-        "hf_token": os.getenv("HF_TOKEN"),
+        "hf_token": settings.HF_TOKEN,
     }
 
     try:
@@ -478,15 +516,16 @@ async def upload_video(
 async def get_status(task_id: str):
     task_id = validate_task_id(task_id)
 
-    # Cancellation is an explicit user action; treat it as a terminal FAILURE from the API perspective.
     if is_task_canceled(UPLOAD_DIR, task_id):
         return TaskStatusResponse(
             task_id=task_id,
-            status=TaskStatusEnum.FAILURE,
+            status=TaskStatusEnum.CANCELED,
             progress=0,
-            message="Canceled",
+            message="Task canceled by user",
             result_url=None,
             warnings=[],
+            error_code="task_canceled",
+            suggestion="Restart the task if you still need subtitle generation for this file.",
         )
 
     task_result = _get_async_result(task_id)
@@ -496,6 +535,8 @@ async def get_status(task_id: str):
     message = ""
     result_url = None
     warnings: List[str] = []
+    error_code: Optional[str] = None
+    suggestion: Optional[str] = None
 
     if status == "PROGRESS":
         info = task_result.info or {}
@@ -519,10 +560,7 @@ async def get_status(task_id: str):
             warnings.extend(task_result.result.get("warnings", []) or [])
         status = TaskStatusEnum.SUCCESS
     elif status == "FAILURE":
-        # Extract structured error info if available
         result = task_result.result
-        error_code = "unknown_error"
-        suggestion = ""
         if isinstance(result, dict) and "error_code" in result:
             error_code = result["error_code"]
             message = result.get("message", str(result))
@@ -534,9 +572,17 @@ async def get_status(task_id: str):
             suggestion = error_info["suggestion"]
             
         status = TaskStatusEnum.FAILURE
-        # Add suggestion to warnings or a separate field if needed, 
-        # but for now we'll rely on the frontend to handle message/suggestion.
     elif status == "PENDING":
+        if TASK_HISTORY.get_created_at(task_id) is None and not _task_has_local_artifacts(task_id):
+            error_info = get_error_response("task_not_found")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "task_not_found",
+                    "message": error_info["message"],
+                    "suggestion": error_info["suggestion"],
+                },
+            )
         message = "Waiting for worker..."
         status = TaskStatusEnum.PENDING
     else:
@@ -546,7 +592,7 @@ async def get_status(task_id: str):
     # Best-effort status tracking for "Recent Tasks"
     try:
         duration = None
-        if status in (TaskStatusEnum.SUCCESS, TaskStatusEnum.FAILURE):
+        if status in (TaskStatusEnum.SUCCESS, TaskStatusEnum.FAILURE, TaskStatusEnum.CANCELED):
             duration = duration_seconds_since(TASK_HISTORY.get_created_at(task_id))
         TASK_HISTORY.update_status(task_id=task_id, status=status.value, duration_seconds=duration)
     except Exception:
@@ -559,6 +605,8 @@ async def get_status(task_id: str):
         message=message,
         result_url=result_url,
         warnings=warnings,
+        error_code=error_code,
+        suggestion=suggestion,
     )
 
 
@@ -575,6 +623,12 @@ async def cancel_task(task_id: str):
         task_result.revoke(terminate=False)
     except Exception:
         logger.warning("Failed to revoke task (non-fatal): %s", task_id, exc_info=True)
+
+    try:
+        duration = duration_seconds_since(TASK_HISTORY.get_created_at(task_id))
+        TASK_HISTORY.update_status(task_id=task_id, status=TaskStatusEnum.CANCELED.value, duration_seconds=duration)
+    except Exception:
+        logger.warning("Failed to record canceled status (non-fatal): %s", task_id, exc_info=True)
 
     return {"status": "canceled", "task_id": task_id}
 
@@ -640,6 +694,18 @@ def _build_batch_download_urls(task_id: str, manifest: TaskResultManifest) -> Ba
         subtitles=subtitles,
     )
 
+
+def _sanitize_archive_stem(filename: str) -> str:
+    stem = Path(sanitize_filename(filename)).stem
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
+    return normalized or "file"
+
+
+def _build_batch_archive_name(filename: str, task_id: str, extension: str, lang_suffix: str | None = None) -> str:
+    ext = extension if extension.startswith(".") else f".{extension}"
+    suffix = f"_{lang_suffix}" if lang_suffix else ""
+    return f"{_sanitize_archive_stem(filename)}_{task_id}{suffix}{ext}"
+
 @app.post("/batch/upload", response_model=BatchUploadResponse)
 async def batch_upload_videos(
     files: List[UploadFile] = File(...),
@@ -649,8 +715,7 @@ async def batch_upload_videos(
     remove_silence: bool = Form(False, description="Remove silence from video"),
     parallel: bool = Form(True, description="Use parallel processing for long videos"),
 ):
-    if not files:
-        raise HTTPException(status_code=400, detail="No files uploaded")
+    validate_batch_files(files, MAX_BATCH_FILES)
 
     langs = validate_target_langs(target_langs)
     normalized_subtitle_format = validate_subtitle_format(subtitle_format)
@@ -662,7 +727,7 @@ async def batch_upload_videos(
         task_id = str(uuid.uuid4())
         safe_filename = sanitize_filename(file.filename)
         file_extension = os.path.splitext(safe_filename)[1]
-        file_path = os.path.join(UPLOAD_DIR, f"{task_id}{file_extension}")
+        file_path = str(settings.task_input_path(task_id, file_extension))
 
         try:
             _validate_uploaded_video_file(file)
@@ -678,7 +743,7 @@ async def batch_upload_videos(
                 "subtitle_format": normalized_subtitle_format,
                 "remove_silence": remove_silence,
                 "parallel": parallel,
-                "hf_token": os.getenv("HF_TOKEN"),
+                "hf_token": settings.HF_TOKEN,
             }
 
             enqueue_jobs.append(
@@ -768,7 +833,7 @@ async def get_batch_status(batch_id: str):
                 status_resp.status.value,
                 progress=status_resp.progress,
                 message=status_resp.message,
-                error=status_resp.message if status_resp.status == TaskStatusEnum.FAILURE else None,
+                error=status_resp.message if status_resp.status in (TaskStatusEnum.FAILURE, TaskStatusEnum.CANCELED) else None,
             )
             
             if status_resp.status == TaskStatusEnum.SUCCESS:
@@ -776,6 +841,8 @@ async def get_batch_status(batch_id: str):
                 task_info.download_urls = _build_batch_download_urls(task.task_id, manifest)
                 completed += 1
             elif status_resp.status == TaskStatusEnum.FAILURE:
+                failed += 1
+            elif status_resp.status == TaskStatusEnum.CANCELED:
                 failed += 1
             elif status_resp.status == TaskStatusEnum.PENDING:
                 pending += 1
@@ -812,11 +879,11 @@ async def download_batch_zip(batch_id: str):
         raise HTTPException(status_code=404, detail="Batch not found")
     
     zip_filename = f"subtitle_batch_{batch_id}.zip"
-    zip_path = os.path.join(UPLOAD_DIR, zip_filename)
+    zip_path = os.path.join(OUTPUT_DIR, zip_filename)
     
     failed_tasks = []
     
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
         for task in batch.tasks:
             try:
                 status_resp = await get_status(task.task_id)
@@ -825,20 +892,29 @@ async def download_batch_zip(batch_id: str):
                 continue
 
             if status_resp.status == TaskStatusEnum.SUCCESS:
-                # Add SRT, ASS, and final video
-                for ext in ["srt", "ass"]:
-                    # We need to find the actual file on disk. 
-                    # Usually it's {task_id}_{lang}.{ext} or {task_id}.{ext}
-                    # For simplicity, we'll look for any file starting with task_id and ending with ext
-                    for f in os.listdir(UPLOAD_DIR):
-                        if f.startswith(task.task_id) and f.endswith(f".{ext}"):
-                            zipf.write(os.path.join(UPLOAD_DIR, f), arcname=f"{task.filename}_{f}")
-                
-                video_file = f"{task.task_id}_final.mp4"
-                video_path = os.path.join(UPLOAD_DIR, video_file)
+                for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.srt")):
+                    lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
+                    zipf.write(
+                        local_file,
+                        arcname=_build_batch_archive_name(task.filename, task.task_id, ".srt", lang_suffix),
+                    )
+                for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.ass")):
+                    lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
+                    zipf.write(
+                        local_file,
+                        arcname=_build_batch_archive_name(task.filename, task.task_id, ".ass", lang_suffix),
+                    )
+                for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.vtt")):
+                    lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
+                    zipf.write(
+                        local_file,
+                        arcname=_build_batch_archive_name(task.filename, task.task_id, ".vtt", lang_suffix),
+                    )
+
+                video_path = os.path.join(UPLOAD_DIR, f"{task.task_id}_final.mp4")
                 if os.path.exists(video_path):
-                    zipf.write(video_path, arcname=f"{task.filename}_final.mp4")
-            elif status_resp.status == TaskStatusEnum.FAILURE:
+                    zipf.write(video_path, arcname=_build_batch_archive_name(task.filename, task.task_id, ".mp4"))
+            elif status_resp.status in (TaskStatusEnum.FAILURE, TaskStatusEnum.CANCELED):
                 failed_tasks.append({
                     "task_id": task.task_id,
                     "filename": task.filename,
@@ -865,7 +941,7 @@ async def get_results_manifest(task_id: str):
 
     status = task_result.status
     if is_task_canceled(UPLOAD_DIR, task_id):
-        task_status = TaskStatusEnum.FAILURE
+        task_status = TaskStatusEnum.CANCELED
     else:
         task_status = TaskStatusEnum.PROCESSING if status == "PROGRESS" else TaskStatusEnum(status) if status in TaskStatusEnum._value2member_map_ else TaskStatusEnum.PROCESSING
 
@@ -1066,4 +1142,4 @@ async def update_subtitle(task_id: str, edit: SubtitleEditRequest, lang: str = Q
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=settings.API_HOST, port=settings.API_PORT)

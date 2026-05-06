@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
-import os
 import sys
 import zipfile
 from pathlib import Path
@@ -13,26 +12,33 @@ EXCLUDED_DIR_NAMES = {
     "__pycache__",
     "node_modules",
     "dist",
+    "build",
     ".vite",
     ".npm-cache",
     ".cache",
     "uploads",
-    "backend/uploads",
+    "outputs",
+    "temp",
+    "tmp",
     "segments",
     "release_out",
     "release_pkg",
     ".release_staging",
-    "tmp",
-    "temp",
-    "data_tmp",
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
-    ".coverage",
     "htmlcov",
     ".venv",
     "venv",
     "env",
+}
+
+EXCLUDED_RELATIVE_PATHS = {
+    "backend/uploads",
+    "backend/outputs",
+    "backend/tmp",
+    "frontend/node_modules",
+    "frontend/dist",
 }
 
 EXCLUDED_GLOBS = {
@@ -43,48 +49,40 @@ EXCLUDED_GLOBS = {
     "*.tar.gz",
     "*.tar.bz2",
     "*.log",
-    ".coverage",
-    "coverage.xml",
-    "*.mp4",
-    "*.mov",
-    "*.avi",
-    "*.mkv",
-    "*.webm",
-    "*.srt",
-    "*.vtt",
-    "*.ass",
+    "*.tmp",
+    "*.key",
+    "*.pem",
+    "secrets.*",
+}
+
+SENSITIVE_ENV_PATHS = {
+    ".env",
+    ".env.local",
+    "backend/.env",
+    "frontend/.env",
 }
 
 
-def _is_env_file(p: Path) -> bool:
-    name = p.name
-    if name == ".env":
+def _is_env_file(rel_posix: str) -> bool:
+    if rel_posix in SENSITIVE_ENV_PATHS:
         return True
-    if name.startswith(".env.") and name != ".env.example":
-        return True
-    if name.endswith(".env") and name != ".env.example":
-        return True
-    return False
+    path = Path(rel_posix)
+    if path.name == ".env.example":
+        return False
+    return path.name == ".env" or path.name == ".env.local" or path.name.startswith(".env.")
 
 
 def _is_excluded(rel_posix: str) -> bool:
     parts = rel_posix.split("/")
-    
-    # Check if any parent directory is in EXCLUDED_DIR_NAMES
-    # Also check full relative path for cases like "backend/uploads"
-    for i in range(len(parts)):
-        sub_path = "/".join(parts[:i+1])
-        if sub_path in EXCLUDED_DIR_NAMES or parts[i] in EXCLUDED_DIR_NAMES:
-            # Special case: allow .gitkeep in uploads
-            if parts[-1] == ".gitkeep" and ("uploads" in parts):
-                return False
+    for idx in range(len(parts)):
+        sub_path = "/".join(parts[: idx + 1])
+        if sub_path in EXCLUDED_RELATIVE_PATHS:
+            return True
+        if parts[idx] in EXCLUDED_DIR_NAMES:
             return True
 
     filename = parts[-1]
-    for pat in EXCLUDED_GLOBS:
-        if fnmatch.fnmatch(filename, pat):
-            return True
-    return False
+    return any(fnmatch.fnmatch(filename, pattern) for pattern in EXCLUDED_GLOBS)
 
 
 def build_release_zip(repo_root: Path, out_path: Path) -> None:
@@ -94,7 +92,7 @@ def build_release_zip(repo_root: Path, out_path: Path) -> None:
     if out_path.exists():
         out_path.unlink()
 
-    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for abs_path in sorted(repo_root.rglob("*")):
             if abs_path.is_dir():
                 continue
@@ -104,93 +102,39 @@ def build_release_zip(repo_root: Path, out_path: Path) -> None:
 
             if rel_posix == out_path.relative_to(repo_root).as_posix():
                 continue
-
-            if _is_env_file(abs_path):
+            if _is_env_file(rel_posix):
                 continue
-
             if _is_excluded(rel_posix):
                 continue
 
-            zf.write(abs_path, rel_posix)
+            archive.write(abs_path, rel_posix)
 
 
 def _assert_release_zip_clean(out_path: Path) -> None:
-    with zipfile.ZipFile(out_path, "r") as zf:
-        names = zf.namelist()
+    with zipfile.ZipFile(out_path, "r") as archive:
+        names = archive.namelist()
 
-    forbidden_dir_names = {
-        ".git",
-        "__pycache__",
-        "node_modules",
-        "dist",
-        ".vite",
-        ".npm-cache",
-        ".cache",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "uploads",
-        "backend/uploads",
-        "segments",
-        "release_out",
-        "release_pkg",
-        ".release_staging",
-        "htmlcov",
-        ".venv",
-        "venv",
-    }
-    forbidden_file_names = {
-        ".env",
-        ".coverage",
-    }
-    forbidden_suffixes = {
-        ".pyc",
-        ".pyo",
-        ".pyd",
-        ".log",
-        ".zip",
-        ".tar.gz",
-        ".tar.bz2",
-        ".tmp",
-        ".mp4",
-        ".mov",
-        ".avi",
-        ".mkv",
-        ".webm",
-        ".srt",
-        ".vtt",
-        ".ass",
+    required = {
+        "README.md",
+        "DEPLOYMENT.md",
+        "docker-compose.yml",
+        "backend/.env.example",
+        "frontend/.env.example",
+        "backend/Dockerfile",
+        "frontend/Dockerfile",
+        "frontend/package.json",
+        "requirements.txt",
+        "tests/test_api_contracts.py",
     }
 
     for name in names:
-        p = Path(name)
-        parts = [part for part in p.parts if part not in (".", "")]
+        normalized = name.lstrip("./")
+        if _is_env_file(normalized) or _is_excluded(normalized):
+            raise SystemExit(f"release zip contains forbidden content: {normalized}")
 
-        if not parts:
-            continue
-
-        # Forbidden directories (any depth)
-        for i in range(len(parts)):
-            sub_path = "/".join(parts[:i+1])
-            if sub_path in forbidden_dir_names or parts[i] in forbidden_dir_names:
-                # Special case: allow .gitkeep in uploads
-                if parts[-1] == ".gitkeep" and ("uploads" in parts):
-                    continue
-                raise SystemExit(f"release zip contains forbidden path: {name}")
-
-        # Forbidden files (any depth)
-        if parts[-1] in forbidden_file_names:
-            raise SystemExit(f"release zip contains forbidden file: {name}")
-
-        # Env files (except .env.example)
-        if parts[-1] == ".env.example":
-            pass
-        elif parts[-1] == ".env" or parts[-1].startswith(".env.") or parts[-1].endswith(".env"):
-            raise SystemExit(f"release zip contains forbidden env file: {name}")
-
-        # Forbidden suffix patterns
-        if any(str(p).endswith(suf) for suf in forbidden_suffixes):
-            raise SystemExit(f"release zip contains forbidden file type: {name}")
+    missing = sorted(required - set(names))
+    if missing:
+        raise SystemExit(f"release zip is missing required files: {', '.join(missing)}")
 
 
 def main(argv: list[str]) -> int:

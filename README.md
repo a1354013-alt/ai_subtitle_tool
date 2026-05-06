@@ -1,230 +1,83 @@
 # AI Subtitle Tool
 
-AI subtitle generation + editing tool with a FastAPI backend (Celery + Redis) and a Vue 3 SPA frontend.
+## Project Overview
 
-Core workflow (must remain stable):
+AI Subtitle Tool is a delivery-focused subtitle workflow for video uploads. It provides a FastAPI backend, Celery worker, Redis queue, and a Vue 3 frontend for upload, status polling, subtitle editing, batch processing, and result download.
 
-1. Upload video and options
-2. Celery task processes the video
-3. Frontend polls task status
-4. Results manifest lists available outputs (only when task is `SUCCESS`)
-5. View/edit subtitles (ASS/SRT)
-6. Download final video / subtitles
+## Features
 
-## Architecture Diagram
+- Single-file upload with task polling.
+- Batch upload with ZIP download of completed results.
+- Subtitle editing for `srt` and `ass`.
+- Explicit final-video rebuild after subtitle edits.
+- Frontend-safe task status contract with `warnings`, `error_code`, and `suggestion`.
+- Release packaging script that excludes local secrets and runtime artifacts.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-  U["User (Browser)"] -->|HTTP| F["Frontend (Vue SPA)"]
-  F -->|HTTP| B["Backend API (FastAPI)"]
-  B -->|enqueue| R["Redis (broker/backend)"]
-  W["Worker (Celery)"] -->|consume| R
-  W -->|read/write| FS["Uploads Dir (files)"]
-  B -->|read| FS
+  U["Browser"] -->|HTTP| F["Vue 3 Frontend"]
+  F -->|HTTP| B["FastAPI Backend"]
+  B -->|enqueue| R["Redis"]
+  W["Celery Worker"] -->|consume| R
+  B -->|read/write| S["Upload Storage"]
+  W -->|read/write| S
 ```
 
-## Task Flow Diagram
+## Quick Start: Docker Compose
 
-```mermaid
-sequenceDiagram
-  participant U as User (Browser)
-  participant F as Frontend (Vue)
-  participant B as Backend API (FastAPI)
-  participant R as Redis
-  participant W as Worker (Celery)
-  participant FS as Uploads Dir
-
-  U->>F: Select video + options
-  F->>B: POST /upload (multipart)
-  B->>FS: Save original file
-  B->>R: Enqueue Celery task (task_id)
-  B-->>F: {task_id, status:PENDING}
-  loop Poll until terminal
-    F->>B: GET /status/{task_id}
-    B-->>F: {status, progress, warnings}
-  end
-  F->>B: GET /results/{task_id}
-  B->>FS: Enumerate available files
-  B-->>F: manifest (available_files + has_video)
-  opt View/edit subtitle
-    F->>B: GET /subtitle/{task_id}?lang=...&format=...
-    F->>B: PUT /subtitle/{task_id}?lang=...
-    Note over B,FS: Writes subtitle + deletes final.mp4 (no auto rebuild)
-  end
-  opt Explicit rebuild after edits
-    F->>B: POST /tasks/{task_id}/rebuild-final
-    B->>R: Enqueue rebuild task
-  end
-  F->>B: GET /download/{task_id} (video) or ?lang&format (subs)
-  B-->>F: FileResponse / text payload
-```
-
-## Tech Stack
-
-- Backend: FastAPI + Uvicorn
-- Task queue: Celery + Redis
-- Media: ffmpeg / ffprobe
-- STT: faster-whisper
-- Translation: OpenAI (optional; controlled by env + options)
-- Frontend: Vue 3 + Vite + TypeScript + Vue Router + Pinia (SPA)
-
-## Repo Structure
-
-- `backend/`: FastAPI app + Celery tasks
-- `frontend/`: Vue 3 SPA
-- `tests/`: backend behavior tests (`pytest`)
-- `scripts/`: release helpers (cross-platform)
-
-## Processing Flow
-
-1. Upload (`POST /upload`)
-2. Split (optional; long video + parallel mode)
-3. Transcribe (faster-whisper)
-4. Translate (optional; OpenAI if configured)
-5. Generate subtitles (always generates bilingual SRT; optionally generates ASS too)
-6. Burn subtitles into final video (optional)
-7. Download (`GET /download/{task_id}`) or edit subtitles (`PUT /subtitle/{task_id}`)
-
-## Delivery / Clean Package Rules
-
-Do NOT include these in a release package:
-
-- `.git/`
-- `frontend/node_modules/`
-- `frontend/dist/`
-- `tests/_tmp/`
-- `__pycache__/` and `*.pyc`
-- `backend/uploads/*` (runtime outputs)
-
-This repo includes `make_release_zip.ps1` which stages a clean tree and produces a zip release package (default output: `release_out/ai_subtitle_tool_release.zip`).
-
-Important: the script does **not** keep a second copy of the source tree (no committed `release_pkg/`). The staging directory is temporary and removed after the zip is created.
-
-Do **NOT** manually zip the repo (Explorer / Finder / `zip -r`). Manual zips routinely ship forbidden artifacts (e.g. `.git/`, `node_modules/`, caches) and are considered a broken release process for this project.
-
-For cross-platform release packaging (CI uses this):
+Docker Compose is the fastest way to run the full stack locally.
 
 ```bash
-python scripts/make_release_zip.py --out release.zip --check
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+docker compose config
+docker compose up --build
 ```
 
-## Backend Setup
+Services:
+
+- Frontend: [http://localhost:5173](http://localhost:5173)
+- Backend API: [http://localhost:9091](http://localhost:9091)
+- Backend health: [http://localhost:9091/healthz](http://localhost:9091/healthz)
+
+Notes:
+
+- `docker-compose.yml` uses `backend/.env.example` as the default backend env source so `docker compose up` works out of the box.
+- The frontend Docker image is built with `VITE_API_BASE_URL=http://localhost:9091` so browser requests hit the mapped backend port.
+- Runtime artifacts are mounted to `backend/uploads`, `backend/outputs`, and `backend/tmp`.
+
+## Local Development: Backend
 
 Requirements:
 
-- Python 3.11 (recommended; aligns with Docker/CI)
-- `ffmpeg` and `ffprobe`
+- Python 3.11
 - Redis
+- `ffmpeg` and `ffprobe`
 
-Install:
+Setup:
 
 ```bash
 python -m venv venv
 # Windows: venv\Scripts\activate
 # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
+cp backend/.env.example backend/.env
 ```
 
-Dependencies are locked in `requirements.lock.txt` (single source of truth).
-Optional diarization dependencies are in `requirements.optional-diarization.txt`.
-For Docker/Linux reproducibility, the lock explicitly pins `faster-whisper==1.0.3` with `av==12.3.0` so PyAV is installed from a prebuilt `cp311` manylinux wheel instead of compiling against system FFmpeg headers during image build.
-
-Environment variables:
-
-- Copy `backend/.env.example` to `backend/.env` (do not commit real keys).
-- The backend auto-loads `backend/.env` for local development (it will not override already-set env vars).
+Recommended local overrides inside `backend/.env`:
 
 ```ini
-APP_ENV=development
-TESTING=false
-UPLOAD_DIR=./backend/uploads
-MAX_UPLOAD_SIZE_MB=2048
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/0
-CORS_ORIGINS=http://localhost:5173
-TRANSLATE_PROVIDER=openai
-OPENAI_API_KEY=
-HF_TOKEN=
-TRANSLATE_MODEL=gpt-4o-mini
-WHISPER_MODEL=base
-STORAGE_BACKEND=local
-CORS_ALLOW_CREDENTIALS=true
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+UPLOAD_DIR=./backend/uploads
+OUTPUT_DIR=./backend/outputs
+TEMP_DIR=./backend/tmp
 ```
 
-Run services:
-
-```bash
-redis-server
-celery -A backend.celery_app:celery_app worker --loglevel=info
-# optional periodic cleanup
-celery -A backend.celery_app:celery_app beat --loglevel=info
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
-```
-
-Health checks:
-
-- `GET /healthz` returns `{"status":"ok"}`
-- `GET /readyz` checks Redis + `UPLOAD_DIR` write access
-
-Backend tests:
-
-```bash
-pytest -q
-```
-
-Codecov in GitHub Actions:
-
-- Add `CODECOV_TOKEN` at `GitHub Repo Settings > Secrets and variables > Actions` if you want to enable Codecov uploads in CI.
-- If `CODECOV_TOKEN` is not configured, the workflow skips the Codecov upload step and the overall CI result is unaffected.
-
-## Frontend Setup
-
-The release package must NOT ship with `frontend/node_modules/`.
-Always install in a clean environment:
-
-```bash
-cd frontend
-rm -rf node_modules
-npm ci
-npm run lint
-npm run typecheck
-npm run test:ci
-npm run build
-npm run dev
-```
-
-### API Base URL
-
-Configure `VITE_API_BASE_URL` (see `frontend/.env.example`).
-
-- If frontend and backend are same-origin: you can omit it.
-- If different-origin: set it to the FastAPI origin (e.g. `http://localhost:9091`).
-
-Important: `VITE_API_BASE_URL` affects BOTH:
-
-- API requests (`/upload`, `/status/...`, `/results/...`, `/subtitle/...`)
-- Download URLs (`/download/...`)
-
-## Docker Quick Start
-
-```bash
-cp backend/.env.example backend/.env
-docker compose build backend --no-cache --progress=plain
-docker compose build frontend --no-cache --progress=plain
-docker compose up
-```
-
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:9091`
-- Health: `http://localhost:9091/healthz`
-
-## Deployment Steps
-
-### Local
-
-1. Copy env: `backend/.env.example` → `backend/.env`
-2. Start Redis + worker + API:
+Run the backend stack:
 
 ```bash
 redis-server
@@ -232,83 +85,148 @@ celery -A backend.celery_app:celery_app worker --loglevel=info
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-3. Start frontend:
+Health endpoints:
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /api/config`
+
+## Local Development: Frontend
 
 ```bash
 cd frontend
 npm ci
+cp .env.example .env
 npm run dev
 ```
 
-### Docker
+Frontend env:
 
-```bash
-cp backend/.env.example backend/.env
-docker compose build backend --no-cache --progress=plain
-docker compose build frontend --no-cache --progress=plain
-docker compose up
+```ini
+VITE_API_BASE_URL=http://localhost:8000
+VITE_APP_TITLE=AI Subtitle Tool
 ```
-
-### Production (minimal guidance)
-
-- Put backend API behind a reverse proxy (TLS, timeouts, upload limits).
-- Ensure `REDIS_URL` points to a production Redis instance.
-- Persist `UPLOAD_DIR` to durable storage (volume or host mount).
-- Serve the built frontend (`frontend/dist`) from a static server (the Docker frontend image uses nginx).
 
 ## Testing
 
+Backend:
+
 ```bash
-python -m compileall -q backend tests scripts benchmarks test_report.py test_hwaccel.py
-TESTING=true pytest -q
-python scripts/verify_delivery.py
-cd frontend && npm ci && npm run typecheck && npm run lint && npm run test:ci && npm run build
+python scripts/verify_delivery.py --full
+cd backend
+python -m pytest -q
 ```
 
-## Release
+Frontend:
+
+```bash
+cd frontend
+npm ci
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
+
+Docker contract:
+
+```bash
+docker compose config
+docker compose up --build
+```
+
+## Release Packaging
+
+Use the Python script as the single source of truth:
 
 ```bash
 python scripts/make_release_zip.py --out release.zip --check
 ```
 
-`release.zip` must NOT contain: `uploads/`, `segments/`, `.cache/`, `.env`.
+PowerShell wrapper:
 
-## Design Decisions
+```powershell
+powershell -ExecutionPolicy Bypass -File .\make_release_zip.ps1
+```
 
-- Why polling: simpler deployment than WebSockets, resilient to refreshes, and easy to test via `GET /status/{task_id}`.
-- Why not auto-rebuild: editing subtitles should be fast and safe; rebuilding video is expensive and should be an explicit user action (`POST /tasks/{task_id}/rebuild-final`).
-- Why split subtitle text/video utils: downloading/converting subtitles (SRT/VTT) must stay lightweight and must not depend on video libraries; video burning stays in video-only modules.
-- Why Celery: isolates long-running CPU/IO work from the API process, provides progress reporting, and matches Docker/Redis deployment with clear responsibilities.
+The release ZIP keeps:
 
-## Notes
+- `backend/.env.example`
+- `frontend/.env.example`
+- `README.md`
+- `DEPLOYMENT.md`
+- `docker-compose.yml`
+- `backend/Dockerfile`
+- `frontend/Dockerfile`
+- test files
 
-- Subtitle editing updates only the subtitle file; it does NOT rebuild/burn the final video.
-- Task status response includes `warnings: string[]` (non-fatal); the frontend shows them separately from errors.
-- Task status updates are via polling (`GET /status/{task_id}`); there is no WebSocket status endpoint in this repo.
-- Recent tasks: `GET /tasks/recent` and the frontend page `/tasks/recent`.
+The release ZIP excludes:
 
-## Batch Processing
+- `.git/`
+- `node_modules/`
+- `dist/`
+- `build/`
+- `__pycache__/`
+- `.pytest_cache/`
+- `.venv/`
+- `venv/`
+- `.env`
+- `.env.local`
+- `backend/.env`
+- `frontend/.env`
+- `*.key`
+- `*.pem`
+- `secrets.*`
+- `uploads/`
+- `outputs/`
+- `temp/`
+- `tmp/`
 
-The tool supports batch processing of multiple videos. Users can upload multiple files at once, and the system will create independent tasks for each video.
+## Environment Variables
 
-### Batch APIs
+Backend example: [backend/.env.example](/C:/Users/whois/OneDrive/文件/GitHub/ai_subtitle_tool/backend/.env.example)
 
-- `POST /batch/upload`: Upload multiple video files. Returns `batch_id` and a list of `tasks`.
-- `GET /batch/{batch_id}/status`: Get the overall status of a batch and individual task progress.
-- `GET /batch/{batch_id}/download`: Download a ZIP file containing results (SRT, ASS, final.mp4) for all successful tasks in the batch.
+Important variables:
 
-### Batch Processing Flow
+- `ENVIRONMENT`
+- `API_HOST`
+- `API_PORT`
+- `CORS_ORIGINS`
+- `UPLOAD_DIR`
+- `OUTPUT_DIR`
+- `TEMP_DIR`
+- `MAX_UPLOAD_SIZE_MB`
+- `MAX_BATCH_FILES`
+- `REDIS_URL`
+- `CELERY_BROKER_URL`
+- `CELERY_RESULT_BACKEND`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `TRANSLATE_MODEL`
+- `WHISPER_MODEL`
+- `FFMPEG_BINARY`
+- `FFPROBE_BINARY`
 
-1. User selects multiple files in the "Batch Processing" tab.
-2. System uploads files and initializes a batch metadata file in `UPLOAD_DIR/batches/{batch_id}.json` (default local path: `backend/uploads/batches/{batch_id}.json`).
-3. Each video is enqueued as an independent Celery task.
-4. User monitors progress on the batch status page.
-5. Once processing is complete, user can download individual results or the entire batch as a ZIP.
-6. The ZIP includes a `failed_tasks.json` if any videos failed to process, detailing the reasons for failure.
+Frontend example: [frontend/.env.example](/C:/Users/whois/OneDrive/文件/GitHub/ai_subtitle_tool/frontend/.env.example)
 
-### Batch ZIP Content
+- `VITE_API_BASE_URL`
+- `VITE_APP_TITLE`
 
-- `{filename}_{task_id}.srt`: Subtitle file in SRT format.
-- `{filename}_{task_id}.ass`: Subtitle file in ASS format.
-- `{filename}_final.mp4`: Final video with burned-in subtitles (if enabled).
-- `failed_tasks.json`: (Optional) Log of failed tasks in the batch.
+## Known Limitations
+
+- End-to-end media processing still depends on local `ffmpeg`, Redis, and a running Celery worker.
+- Real transcription and translation are mocked in tests; the default suite does not call external APIs.
+- Batch ZIP names include the sanitized original filename, task id, and language suffix to avoid collisions when multiple target languages are generated.
+
+## Portfolio Highlights
+
+- Strong API contract coverage between FastAPI and Vue.
+- Delivery verification script checks docs, env examples, release ZIP contents, tests, and frontend build steps.
+- Stable release packaging uses one Python implementation and a thin PowerShell wrapper, which avoids duplicated exclusion rules.
+
+Batch ZIP naming:
+
+- Subtitle files use `{safe_original_filename}_{task_id}_{language}.srt`
+- Subtitle files use `{safe_original_filename}_{task_id}_{language}.ass`
+- Subtitle files use `{safe_original_filename}_{task_id}_{language}.vtt`
+- Final video uses `{safe_original_filename}_{task_id}.mp4`

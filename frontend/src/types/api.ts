@@ -13,7 +13,15 @@ export type ErrorResponse = {
   suggestion: string;
 };
 
-export type BatchTaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE";
+export type AppConfig = {
+  maxUploadSizeMb: number;
+  maxBatchFiles: number;
+  supportedExtensions: string[];
+  batchUploadEnabled: boolean;
+  subtitleFormats: string[];
+};
+
+export type BatchTaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE" | "CANCELED";
 
 export type BatchSubtitleDownloadUrls = {
   srt?: string;

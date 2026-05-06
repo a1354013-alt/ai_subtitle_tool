@@ -1,48 +1,31 @@
-# Deployment Guide (Local / Docker / Release)
+# Deployment Guide
 
-This repo supports three modes:
+This document covers local development, Docker startup, and release packaging for the current `ai_subtitle_tool` delivery contract.
 
-- **Local development** (fast iteration; run Redis/worker/API locally, Vite dev server for UI)
-- **Docker deployment** (single `docker compose up` for demo/staging environments)
-- **Release package** (a clean zip for delivery; no workspace artifacts)
+## Local Development
 
-The frontend **polls** task status via `GET /status/{task_id}` (no WebSocket status endpoint).
-
----
-
-## 0) Prerequisites
-
-- **Python**: 3.11 (this is the version used by CI and Docker)
-- **Node.js**: 20 (CI uses Node 20)
-- **System deps**: `ffmpeg` + `ffprobe`
-- **Redis**: required for Celery broker/backend
-
----
-
-## 1) Local development (recommended)
-
-### Backend + worker
-
-1) Create env file:
-
-- Copy `backend/.env.example` to `backend/.env`
-- Fill in optional keys (e.g. `OPENAI_API_KEY`) if you want translation
-
-2) Install Python deps:
+### Backend
 
 ```bash
 python -m venv venv
 # Windows: venv\Scripts\activate
 # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
+cp backend/.env.example backend/.env
 ```
 
-Locked media dependency note:
+Recommended local overrides in `backend/.env`:
 
-- `requirements.lock.txt` pins `faster-whisper==1.0.3` and `av==12.3.0`.
-- This combination keeps Python 3.11 installs reproducible in Docker by using the published PyAV Linux wheel instead of compiling `av==11.0.0` from source against host FFmpeg headers.
+```ini
+REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+UPLOAD_DIR=./backend/uploads
+OUTPUT_DIR=./backend/outputs
+TEMP_DIR=./backend/tmp
+```
 
-3) Start Redis + worker + API (in separate terminals):
+Run services:
 
 ```bash
 redis-server
@@ -50,74 +33,59 @@ celery -A backend.celery_app:celery_app worker --loglevel=info
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-Health endpoints:
-
-- `GET /healthz` → `{"status":"ok"}`
-- `GET /readyz` → checks Redis + `UPLOAD_DIR` write access
-
 ### Frontend
 
 ```bash
 cd frontend
 npm ci
+cp .env.example .env
 npm run dev
 ```
 
-Default dev URLs:
+Default local frontend env:
+
+```ini
+VITE_API_BASE_URL=http://localhost:8000
+VITE_APP_TITLE=AI Subtitle Tool
+```
+
+## Docker Startup
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+docker compose config
+docker compose up --build
+```
+
+Expected URLs:
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:9091`
+- Health: `http://localhost:9091/healthz`
 
-If frontend and backend are different origins, set `VITE_API_BASE_URL` (see `frontend/.env.example`).
+Contract notes:
 
----
+- `docker-compose.yml` points backend services at `backend/.env.example`.
+- The frontend Docker build uses `VITE_API_BASE_URL=http://localhost:9091`.
+- Runtime directories are mounted under `backend/uploads`, `backend/outputs`, and `backend/tmp`.
 
-## 2) Docker deployment
+## Release Packaging
 
-1) (Optional) Create env file:
-
-- `docker-compose.yml` uses `backend/.env.example` by default so `docker compose up` works out-of-the-box.
-- If you want to set real secrets (e.g. `OPENAI_API_KEY`), set them as environment variables or edit a local copy.
-
-2) Run:
-
-```bash
-docker compose build backend --no-cache --progress=plain
-docker compose build frontend --no-cache --progress=plain
-docker compose up
-```
-
-Services:
-
-- Frontend (nginx): `http://localhost:5173`
-- Backend API: `http://localhost:9091`
-- Backend health check: `http://localhost:9091/healthz`
-- Redis: `localhost:6379` (host-mapped for convenience)
-
-Notes:
-
-- `UPLOAD_DIR` is mounted to `./backend/uploads` for durability across restarts.
-- CORS defaults in `docker-compose.yml` are set for local browser usage via `CORS_ORIGINS=http://localhost:5173` with credentials enabled.
-
----
-
-## 3) Release package (zip)
-
-Do not manually zip the repo. Always use the release script so the output is reproducible and clean.
-
-Cross-platform (CI uses this):
+Canonical command:
 
 ```bash
 python scripts/make_release_zip.py --out release.zip --check
 ```
 
-Windows PowerShell convenience wrapper:
+PowerShell wrapper:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\\make_release_zip.ps1
+powershell -ExecutionPolicy Bypass -File .\make_release_zip.ps1
 ```
 
-Release requirements:
+Verification command:
 
-- The zip must **not** contain `.git/`, `node_modules/`, `dist/`, `__pycache__/`, test caches, runtime outputs (`uploads/`, `segments/`), or local `.env` files.
-- The scripts perform a **fail-fast check** on zip contents; CI verifies this too.
+```bash
+python scripts/verify_delivery.py --full
+```

@@ -23,6 +23,9 @@
 .env
 .env.local
 *.env.*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
 
 # Logs
 *.log
@@ -94,6 +97,11 @@ frontend/.npm-cache/
 frontend/dist/
 uploads/
 backend/uploads/
+backend/outputs/
+backend/tmp/
+outputs/
+temp/
+tmp/
 *.mp4
 *.mov
 *.avi

@@ -13,6 +13,10 @@ data_tmp/
 
 backend/uploads/
 backend/uploads/*
+backend/outputs/
+backend/outputs/*
+backend/tmp/
+backend/tmp/*
 
 frontend/node_modules/
 frontend/dist/

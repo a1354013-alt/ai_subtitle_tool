@@ -1,4 +1,5 @@
 import importlib
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -151,8 +152,10 @@ def test_batch_download_zip(batch_app, monkeypatch: pytest.MonkeyPatch):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
 
-    zip_path = Path(main.UPLOAD_DIR) / f"subtitle_batch_{batch_id}.zip"
+    zip_path = Path(main.OUTPUT_DIR) / f"subtitle_batch_{batch_id}.zip"
     assert zip_path.exists()
+    with zipfile.ZipFile(zip_path) as archive:
+        assert f"fake_{task_id}_English.srt" in archive.namelist()
 
 
 def test_upload_and_batch_share_option_validation(batch_app):

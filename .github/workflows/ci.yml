@@ -7,8 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  backend-test:
-    name: Backend Test
+  backend:
     runs-on: ubuntu-latest
     services:
       redis:
@@ -20,10 +19,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
-    env:
-      REDIS_URL: redis://localhost:6379/0
-      CELERY_BROKER_URL: redis://localhost:6379/0
-      CELERY_RESULT_BACKEND: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -32,114 +27,52 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            ffmpeg \
-            pkg-config \
-            libavformat-dev \
-            libavcodec-dev \
-            libavdevice-dev \
-            libavutil-dev \
-            libavfilter-dev \
-            libswscale-dev \
-            libswresample-dev
+          sudo apt-get install -y ffmpeg
 
-      - name: Install deps
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pip-audit
 
-      - name: Security audit
-        run: pip-audit -r requirements.txt || true
+      - name: Backend tests
+        run: python -m pytest -q
 
-      - name: Pytest
-        run: pytest -v --tb=short --cov=backend --cov-report=xml:coverage.xml
+      - name: Delivery verification
+        run: python scripts/verify_delivery.py --full
 
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v5
-        if: ${{ always() }}
-        with:
-          files: ./coverage.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-
-  frontend-build:
-    name: Frontend Build
+  frontend:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run build
 
-  frontend-test:
-    name: Frontend Test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
 
-  release-package-check:
-    name: Release Package Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Build release.zip
-        run: bash ./make_release_zip
-      - name: Verify zip content
-        run: python scripts/make_release_zip.py --out release.zip --check
-      - name: Release smoke (extract + scan)
-        run: |
-          rm -rf .release_smoke
-          mkdir -p .release_smoke
-          python - <<'PY'
-          import os, re, zipfile, pathlib, sys, shutil
-          zpath = pathlib.Path("release.zip")
-          out = pathlib.Path(".release_smoke")
-          if out.exists():
-            shutil.rmtree(out)
-          out.mkdir(parents=True, exist_ok=True)
-          with zipfile.ZipFile(zpath) as zf:
-            zf.extractall(out)
-          forbidden_dir = {".git","node_modules",".npm-cache","__pycache__",".pytest_cache",".mypy_cache","dist","coverage","htmlcov","release_out",".release_staging"}
-          forbidden_files = {".coverage","coverage.xml"}
-          bad = []
-          for p in out.rglob("*"):
-            rel = p.relative_to(out)
-            parts = rel.parts
-            if any(part in forbidden_dir for part in parts):
-              bad.append(str(rel))
-              continue
-            if p.is_file() and p.name in forbidden_files:
-              bad.append(str(rel))
-          if bad:
-            print("Forbidden paths in extracted release:", *bad[:50], sep="\n- ")
-            sys.exit(1)
-          print("Release smoke OK")
-          PY
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build

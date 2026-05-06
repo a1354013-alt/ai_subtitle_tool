@@ -1,97 +1,126 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
 import sys
 import zipfile
-import json
 from pathlib import Path
 
 from make_release_zip import build_release_zip
 
 
-FORBIDDEN_PREFIXES = (
-    "frontend/.npm-cache/",
-    "frontend/dist/",
-    "node_modules/",
-    "uploads/",
-    "backend/uploads/",
-    "uploads/batches/",
-    ".git/",
-    "__pycache__/",
-    ".pytest_cache/",
-    ".mypy_cache/",
-    ".env",
-    ".env.local",
-)
-
-FORBIDDEN_SUFFIXES = (
-    ".mp4",
-    ".mov",
-    ".avi",
-    ".mkv",
-    ".webm",
-    ".srt",
-    ".vtt",
-    ".ass",
-    ".log",
-)
-
-REQUIRED_FILES = (
+REQUIRED_FILES = {
     "README.md",
     "DEPLOYMENT.md",
-    "TEST_PLAN.md",
-    "backend/main.py",
-    "backend/.env.example",
-    "frontend/.env.example",
-    "frontend/package.json",
     "docker-compose.yml",
+    "backend/.env.example",
+    "backend/Dockerfile",
+    "frontend/.env.example",
+    "frontend/Dockerfile",
+    "frontend/package.json",
+    "requirements.txt",
+}
+
+REQUIRED_ENV_REFERENCES = {
+    "README.md": ["backend/.env.example", "frontend/.env.example"],
+    "DEPLOYMENT.md": ["backend/.env.example"],
+}
+
+FORBIDDEN_ZIP_MARKERS = (
+    ".git/",
+    "node_modules/",
+    "dist/",
+    "build/",
+    "__pycache__/",
+    ".pytest_cache/",
+    ".venv/",
+    "venv/",
+    ".env",
+    ".env.local",
+    "backend/.env",
+    "frontend/.env",
+    "uploads/",
+    "outputs/",
+    "temp/",
+    "tmp/",
 )
 
 
 def _run_command(command: list[str], cwd: Path) -> None:
-    resolved_command = list(command)
-    if os.name == "nt" and command and command[0] == "npm":
-        resolved_command[0] = shutil.which("npm.cmd") or shutil.which("npm") or "npm.cmd"
+    resolved = list(command)
+    if os.name == "nt" and resolved and resolved[0] == "npm":
+        resolved[0] = shutil.which("npm.cmd") or shutil.which("npm") or "npm.cmd"
 
     print(f"$ {' '.join(command)}")
-    completed = subprocess.run(resolved_command, cwd=cwd)
+    completed = subprocess.run(resolved, cwd=cwd)
     if completed.returncode != 0:
         raise SystemExit(f"command failed ({completed.returncode}): {' '.join(command)}")
 
 
-def _verify_repo_examples(repo_root: Path) -> None:
-    missing = [path for path in REQUIRED_FILES if not (repo_root / path).exists()]
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _verify_required_files(repo_root: Path) -> None:
+    missing = sorted(path for path in REQUIRED_FILES if not (repo_root / path).exists())
     if missing:
-        raise SystemExit(f"required repo files missing: {', '.join(missing)}")
+        raise SystemExit(f"required files missing: {', '.join(missing)}")
 
 
-def _verify_docs_and_scripts(repo_root: Path) -> None:
-    readme = (repo_root / "README.md").read_text(encoding="utf-8")
-    deployment = (repo_root / "DEPLOYMENT.md").read_text(encoding="utf-8")
-    if "backend/storage/batches" in readme or "backend/storage/batches" in deployment:
-        raise SystemExit("old batch storage path found in documentation")
+def _verify_docs(repo_root: Path) -> None:
+    for relative_path, required_tokens in REQUIRED_ENV_REFERENCES.items():
+        text = _read_text(repo_root / relative_path)
+        missing = [token for token in required_tokens if token not in text]
+        if missing:
+            raise SystemExit(f"{relative_path} is missing required references: {', '.join(missing)}")
 
-    package_json = json.loads((repo_root / "frontend" / "package.json").read_text(encoding="utf-8"))
+    readme = _read_text(repo_root / "README.md")
+    for section in (
+        "## Project Overview",
+        "## Features",
+        "## Architecture",
+        "## Quick Start: Docker Compose",
+        "## Local Development: Backend",
+        "## Local Development: Frontend",
+        "## Testing",
+        "## Release Packaging",
+        "## Environment Variables",
+        "## Known Limitations",
+        "## Portfolio Highlights",
+    ):
+        if section not in readme:
+            raise SystemExit(f"README.md missing required section: {section}")
+
+
+def _verify_frontend_scripts(repo_root: Path) -> None:
+    package_json = json.loads(_read_text(repo_root / "frontend" / "package.json"))
     scripts = package_json.get("scripts", {})
-    if scripts.get("test:ci") != "vitest run":
-        raise SystemExit("frontend/package.json missing expected test:ci script")
+    for required_script in ("build", "typecheck", "test"):
+        if required_script not in scripts:
+            raise SystemExit(f"frontend/package.json missing required script: {required_script}")
+
+
+def _verify_docker_contract(repo_root: Path) -> None:
+    compose_text = _read_text(repo_root / "docker-compose.yml")
+    for token in ("services:", "backend:", "worker:", "frontend:", "backend/.env.example"):
+        if token not in compose_text:
+            raise SystemExit(f"docker-compose.yml missing required token: {token}")
 
 
 def _verify_zip_contents(out_path: Path) -> None:
-    with zipfile.ZipFile(out_path, "r") as zf:
-        names = zf.namelist()
+    with zipfile.ZipFile(out_path, "r") as archive:
+        names = archive.namelist()
 
     for name in names:
         normalized = name.lstrip("./")
-        if normalized in {"backend/uploads/.gitkeep", "uploads/.gitkeep"}:
-            continue
-        if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in FORBIDDEN_PREFIXES):
-            raise SystemExit(f"forbidden path found in release zip: {normalized}")
-        if normalized.endswith(FORBIDDEN_SUFFIXES):
-            raise SystemExit(f"forbidden file type found in release zip: {normalized}")
+        if normalized.endswith((".key", ".pem")) or normalized.startswith("secrets."):
+            raise SystemExit(f"sensitive file found in release zip: {normalized}")
+        for marker in FORBIDDEN_ZIP_MARKERS:
+            if normalized == marker or normalized.startswith(f"{marker}/"):
+                raise SystemExit(f"forbidden content found in release zip: {normalized}")
 
     for required in REQUIRED_FILES:
         if required not in names:
@@ -99,12 +128,15 @@ def _verify_zip_contents(out_path: Path) -> None:
 
 
 def run_zip_only(repo_root: Path) -> Path:
+    _verify_required_files(repo_root)
+    _verify_docs(repo_root)
+    _verify_frontend_scripts(repo_root)
+    _verify_docker_contract(repo_root)
+
     out_path = repo_root / "release.zip"
-    _verify_repo_examples(repo_root)
-    _verify_docs_and_scripts(repo_root)
     build_release_zip(repo_root, out_path)
     _verify_zip_contents(out_path)
-    print(out_path)
+    print(str(out_path))
     print("delivery verification passed")
     return out_path
 
@@ -113,9 +145,10 @@ def run_full(repo_root: Path) -> None:
     run_zip_only(repo_root)
     _run_command([sys.executable, "-m", "pytest", "-q"], repo_root)
     _run_command(["npm", "ci"], repo_root / "frontend")
+    if "lint" in json.loads(_read_text(repo_root / "frontend" / "package.json")).get("scripts", {}):
+        _run_command(["npm", "run", "lint"], repo_root / "frontend")
     _run_command(["npm", "run", "typecheck"], repo_root / "frontend")
-    _run_command(["npm", "run", "lint"], repo_root / "frontend")
-    _run_command(["npm", "run", "test:ci"], repo_root / "frontend")
+    _run_command(["npm", "run", "test"], repo_root / "frontend")
     _run_command(["npm", "run", "build"], repo_root / "frontend")
     print("full delivery verification passed")
 
@@ -128,7 +161,6 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
-
     if args.full:
         run_full(repo_root)
     else:

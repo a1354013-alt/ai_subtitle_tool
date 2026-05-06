@@ -36,7 +36,7 @@ class BatchManager:
             return "PENDING"
         if normalized == "ERROR":
             return "FAILURE"
-        if normalized in {"PENDING", "PROCESSING", "SUCCESS", "FAILURE"}:
+        if normalized in {"PENDING", "PROCESSING", "SUCCESS", "FAILURE", "CANCELED"}:
             return normalized
         return "PENDING"
 
