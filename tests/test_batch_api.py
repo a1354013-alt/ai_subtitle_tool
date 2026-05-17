@@ -155,7 +155,33 @@ def test_batch_download_zip(batch_app, monkeypatch: pytest.MonkeyPatch):
     zip_path = Path(main.OUTPUT_DIR) / f"subtitle_batch_{batch_id}.zip"
     assert zip_path.exists()
     with zipfile.ZipFile(zip_path) as archive:
-        assert f"fake_{task_id}_English.srt" in archive.namelist()
+        names = archive.namelist()
+        assert f"fake_{task_id}_English.srt" in names
+        assert f"fake_{task_id}_English.vtt" in names
+        vtt = archive.read(f"fake_{task_id}_English.vtt").decode("utf-8")
+        assert vtt.startswith("WEBVTT\n\n")
+        assert "00:00:00.000 --> 00:00:01.000" in vtt
+
+
+def test_batch_download_zip_records_missing_subtitles(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    task_id = str(uuid4())
+    tasks = [{"task_id": task_id, "filename": "fake.mp4", "status": "PENDING"}]
+    batch_id = main.BATCH_MANAGER.create_batch(tasks)
+
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _task_id: main._TestingAsyncResult(status="SUCCESS", result={"warnings": []}),
+    )
+
+    response = client.get(f"/batch/{batch_id}/download")
+    assert response.status_code == 200
+    zip_path = Path(main.OUTPUT_DIR) / f"subtitle_batch_{batch_id}.zip"
+    with zipfile.ZipFile(zip_path) as archive:
+        assert "failed_tasks.json" in archive.namelist()
+        payload = archive.read("failed_tasks.json").decode("utf-8")
+        assert "No subtitle or video artifacts found" in payload
 
 
 def test_upload_and_batch_share_option_validation(batch_app):

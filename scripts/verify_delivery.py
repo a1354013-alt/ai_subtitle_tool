@@ -10,9 +10,11 @@ import zipfile
 from pathlib import Path
 
 from make_release_zip import build_release_zip
+from verify_docker_config import verify as verify_docker_config
 
 
 REQUIRED_FILES = {
+    ".gitattributes",
     "README.md",
     "DEPLOYMENT.md",
     "docker-compose.yml",
@@ -22,6 +24,7 @@ REQUIRED_FILES = {
     "frontend/Dockerfile",
     "frontend/package.json",
     "requirements.txt",
+    "scripts/verify_docker_config.py",
 }
 
 REQUIRED_ENV_REFERENCES = {
@@ -29,8 +32,16 @@ REQUIRED_ENV_REFERENCES = {
     "DEPLOYMENT.md": ["backend/.env.example"],
 }
 
+FORBIDDEN_DOC_PATH_MARKERS = (
+    "C:/Users/",
+    "/C:/Users/",
+    "OneDrive/",
+    "OneDrive\\",
+)
+
 FORBIDDEN_ZIP_MARKERS = (
     ".git/",
+    ".github/",
     "node_modules/",
     "dist/",
     "build/",
@@ -64,6 +75,15 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _iter_markdown_docs(repo_root: Path) -> list[Path]:
+    ignored_parts = {"node_modules", "dist", "build", ".git", "__pycache__"}
+    return [
+        path
+        for path in sorted(repo_root.rglob("*.md"))
+        if not ignored_parts.intersection(path.relative_to(repo_root).parts)
+    ]
+
+
 def _verify_required_files(repo_root: Path) -> None:
     missing = sorted(path for path in REQUIRED_FILES if not (repo_root / path).exists())
     if missing:
@@ -76,6 +96,13 @@ def _verify_docs(repo_root: Path) -> None:
         missing = [token for token in required_tokens if token not in text]
         if missing:
             raise SystemExit(f"{relative_path} is missing required references: {', '.join(missing)}")
+
+    for doc_path in _iter_markdown_docs(repo_root):
+        relative_path = doc_path.relative_to(repo_root).as_posix()
+        text = _read_text(doc_path)
+        for marker in FORBIDDEN_DOC_PATH_MARKERS:
+            if marker in text:
+                raise SystemExit(f"{relative_path} contains local absolute path marker: {marker}")
 
     readme = _read_text(repo_root / "README.md")
     for section in (
@@ -98,9 +125,19 @@ def _verify_docs(repo_root: Path) -> None:
 def _verify_frontend_scripts(repo_root: Path) -> None:
     package_json = json.loads(_read_text(repo_root / "frontend" / "package.json"))
     scripts = package_json.get("scripts", {})
-    for required_script in ("build", "typecheck", "test"):
+    for required_script in ("build", "typecheck", "test:ci"):
         if required_script not in scripts:
             raise SystemExit(f"frontend/package.json missing required script: {required_script}")
+
+
+def _verify_gitattributes(repo_root: Path) -> None:
+    attributes = _read_text(repo_root / ".gitattributes")
+    for forbidden_rule in (".env.* export-ignore", "backend/.env.* export-ignore", "frontend/.env.* export-ignore"):
+        if forbidden_rule in attributes:
+            raise SystemExit(f".gitattributes must not broadly export-ignore env examples: {forbidden_rule}")
+    for required_rule in ("backend/.env.example -export-ignore", "frontend/.env.example -export-ignore"):
+        if required_rule not in attributes:
+            raise SystemExit(f".gitattributes missing required rule: {required_rule}")
 
 
 def _verify_docker_contract(repo_root: Path) -> None:
@@ -131,7 +168,9 @@ def run_zip_only(repo_root: Path) -> Path:
     _verify_required_files(repo_root)
     _verify_docs(repo_root)
     _verify_frontend_scripts(repo_root)
+    _verify_gitattributes(repo_root)
     _verify_docker_contract(repo_root)
+    verify_docker_config(repo_root)
 
     out_path = repo_root / "release.zip"
     build_release_zip(repo_root, out_path)
@@ -148,7 +187,7 @@ def run_full(repo_root: Path) -> None:
     if "lint" in json.loads(_read_text(repo_root / "frontend" / "package.json")).get("scripts", {}):
         _run_command(["npm", "run", "lint"], repo_root / "frontend")
     _run_command(["npm", "run", "typecheck"], repo_root / "frontend")
-    _run_command(["npm", "run", "test"], repo_root / "frontend")
+    _run_command(["npm", "run", "test:ci"], repo_root / "frontend")
     _run_command(["npm", "run", "build"], repo_root / "frontend")
     print("full delivery verification passed")
 

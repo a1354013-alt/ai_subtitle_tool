@@ -58,9 +58,22 @@ describe("useTaskStore polling", () => {
 
     await expect(store.fetchTaskStatus("x")).rejects.toEqual(apiError);
 
-    // error is reset at start of fetchTaskStatus, so it will be null after the failed call
-    expect(store.error).toBeNull();
+    expect(store.error).toEqual(apiError);
     expect(store.pollingTimer).toBeNull();
+  });
+
+  it("stops polling on task 404", async () => {
+    setActivePinia(createPinia());
+    const store = useTaskStore();
+    const apiError: APIError = { message: "Task not found", status: 404 };
+    (getTaskStatus as unknown as any).mockRejectedValueOnce(apiError);
+
+    await store.startPolling("missing-task");
+
+    expect(store.pollingTimer).toBeNull();
+    expect(store.status).toBe("FAILURE");
+    expect(store.error?.status).toBe(404);
+    expect(store.message).toBe("Task not found");
   });
 
   it("clears error on successful poll after error", async () => {

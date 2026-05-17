@@ -58,6 +58,7 @@
       <div v-else>
         <div class="batch-header">
           <h3>Batch ID: {{ batchId }}</h3>
+          <div v-if="pollingError" class="task-error text-danger">{{ pollingError }}</div>
           <div class="batch-summary">
             <span>Total: {{ batchStatus?.total || 0 }}</span> |
             <span class="text-success">Completed: {{ batchStatus?.completed || 0 }}</span> |
@@ -114,6 +115,7 @@ const targetLangs = ref("Traditional Chinese");
 const subtitleFormat = ref("ass");
 const burnSubtitles = ref(true);
 const validationError = ref("");
+const pollingError = ref("");
 const config = ref<AppConfig>({
   maxUploadSizeMb: 2048,
   maxBatchFiles: 20,
@@ -191,6 +193,7 @@ async function onSubmit() {
 }
 
 function startPolling() {
+  pollingError.value = "";
   fetchStatus();
   statusInterval = setInterval(fetchStatus, 3000);
 }
@@ -199,12 +202,17 @@ async function fetchStatus() {
   if (!batchId.value) return;
   try {
     const response = await getBatchStatus(batchId.value);
+    pollingError.value = "";
     batchStatus.value = response;
     if (response.processing === 0 && response.pending === 0 && response.total > 0) {
       clearInterval(statusInterval);
     }
   } catch (err) {
-    console.error("Failed to fetch batch status", err);
+    const apiError = err as APIError;
+    pollingError.value = apiError.message || "Failed to fetch batch status";
+    if (apiError.status === 404 && statusInterval) {
+      clearInterval(statusInterval);
+    }
   }
 }
 

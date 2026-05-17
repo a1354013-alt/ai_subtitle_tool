@@ -50,6 +50,15 @@
 
       <DownloadList v-else :items="downloadItems" />
 
+      <div v-if="fallbackMessages.length > 0" class="card" style="margin-top: 12px">
+        <div class="card-inner">
+          <div class="label">Translation warnings</div>
+          <ul class="help warning-list">
+            <li v-for="message in fallbackMessages" :key="message">{{ message }}</li>
+          </ul>
+        </div>
+      </div>
+
       <div v-if="manifest && !manifest.has_video" class="card" style="margin-top: 12px">
         <div class="card-inner">
           <div class="label">Note</div>
@@ -100,6 +109,11 @@ const selectedLang = ref(prefs.preferredLang);
 
 const manifest = computed(() => res.manifest);
 const files = computed(() => manifest.value?.available_files ?? []);
+const fallbackMessages = computed(() =>
+  files.value
+    .filter((f) => f.translated === false)
+    .map((f) => `${f.display_name} used original text because translation failed: ${f.fallback_reason || "unknown reason"}`)
+);
 const isSuccessManifest = computed(() => {
   const s = manifest.value?.task_status;
   if (!s) return true; // backwards-compat for older manifests
@@ -133,6 +147,8 @@ async function onRebuildFinal() {
     const format = langInfo?.ass ? "ass" : "srt";
     await rebuildFinalVideo(taskId.value, selectedLang.value, format);
     await router.push({ name: "task", params: { taskId: taskId.value } });
+  } catch (e) {
+    res.error = e as any;
   } finally {
     rebuilding.value = false;
   }
@@ -157,6 +173,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
   items.push({
     key: "ass",
     label: `Subtitle (ASS) - ${selectedLang.value}`,
+    description: langInfo?.translated === false ? "Translation failed; this subtitle uses original text." : undefined,
     available: hasAss,
     url: hasAss ? buildDownloadUrl(taskId.value, "ass", selectedLang.value) : undefined,
   });
@@ -164,6 +181,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
   items.push({
     key: "srt",
     label: `Subtitle (SRT) - ${selectedLang.value}`,
+    description: langInfo?.translated === false ? "Translation failed; this subtitle uses original text." : undefined,
     available: hasSrt,
     url: hasSrt ? buildDownloadUrl(taskId.value, "srt", selectedLang.value) : undefined,
   });
@@ -190,3 +208,10 @@ watch(
   { immediate: true }
 );
 </script>
+
+<style scoped>
+.warning-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+</style>

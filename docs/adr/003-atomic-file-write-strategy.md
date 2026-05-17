@@ -53,7 +53,7 @@ def write_text_atomic(path: Path, content: str) -> None:
 ### Subtitle Files
 When updating edited subtitles:
 ```python
-# In main.py - edit_subtitle endpoint
+# In backend/main.py - update_subtitle endpoint
 write_text_atomic(srt_path, new_content)
 ```
 
@@ -153,4 +153,4 @@ Multiple processes writing same file:
 ## References
 - Python `os.replace()` documentation
 - Related pattern: "Temporary File Rename" in POSIX systems
-- Implementation: `backend/utils/file_utils.py::write_text_atomic`
+- Implementation: `backend/services/file_service.py::write_text_atomic`

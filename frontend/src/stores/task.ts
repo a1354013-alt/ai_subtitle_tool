@@ -51,12 +51,24 @@ export const useTaskStore = defineStore("task", {
     },
     async fetchTaskStatus(taskId: string) {
       this.error = null;
-      const res = await getTaskStatus(taskId);
-      this.applyStatus(res);
-      if (isTerminalStatus(res.status)) {
+      try {
+        const res = await getTaskStatus(taskId);
+        this.applyStatus(res);
+        if (isTerminalStatus(res.status)) {
+          this.stopPolling();
+        }
+        return res;
+      } catch (e) {
+        const err = e as APIError;
+        this.error = err;
+        if (err.status === 404) {
+          this.status = "FAILURE";
+          this.message = err.message || "Task not found";
+          this.error_code = err.error_code ?? "task_not_found";
+        }
         this.stopPolling();
+        throw err;
       }
-      return res;
     },
     applyStatus(res: TaskStatusResponse) {
       this.taskId = res.task_id;
@@ -89,11 +101,12 @@ export const useTaskStore = defineStore("task", {
         this.suggestion = err.suggestion ?? "";
       }
 
-      if (isTerminalStatus(this.status)) return;
+      if (isTerminalStatus(this.status) || this.error?.status === 404) return;
 
       this.pollingTimer = window.setInterval(() => {
         void this.fetchTaskStatus(taskId).catch((e) => {
           this.error = e as APIError;
+          this.stopPolling();
         });
       }, 1000);
     },

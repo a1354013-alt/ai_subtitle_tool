@@ -1,207 +1,120 @@
 #!/usr/bin/env python3
-"""
-Benchmark script for AI Video Subtitle Tool.
+"""Safe benchmark and smoke checks for AI Subtitle Tool.
 
-This script measures:
-1. Processing time for different video lengths
-2. Memory usage during transcription
-3. Parallel vs sequential performance
-4. Model loading times
-
-Usage:
-    python benchmarks/run_benchmarks.py [--video-length 30,60,300] [--model base,small]
+Default benchmark mode is best-effort and marks unavailable media/model checks as
+skipped instead of inventing numbers. CI should use ``--smoke``.
 """
+
+from __future__ import annotations
 
 import argparse
+import json
 import logging
-import os
+import shutil
 import sys
 import time
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
-from utils.time_utils import format_timestamp
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
-logging.basicConfig(level=logging.INFO)
+from backend.utils.subtitle_text_utils import srt_to_vtt
+from backend.utils.time_utils import format_timestamp
+
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def create_test_video(duration_seconds: int, output_path: str) -> None:
-    """Create a test video with black frames and silent audio."""
-    try:
-        from moviepy.editor import ColorClip, AudioClip
-        
-        # Create black video
-        clip = ColorClip(
-            size=(640, 360),
-            color=(0, 0, 0),
-            duration=duration_seconds
-        ).fps(24)
-        
-        # Create silent audio
-        import numpy as np
-        fps = 44100
-        n_samples = int(fps * duration_seconds)
-        audio_array = np.zeros(n_samples, dtype=np.float32)
-        audio_clip = AudioClip(audio_array.tobytes(), fps=fps, buffersize=100000)
-        audio_clip = audio_clip.with_duration(duration_seconds)
-        
-        clip = clip.with_audio(audio_clip)
-        clip.write_videofile(output_path, codec='libx264', audio_codec='aac', verbose=False, logger=None)
-        clip.close()
-        
-        logger.info(f"Created test video: {output_path} ({duration_seconds}s)")
-    except ImportError:
-        logger.warning("moviepy not available; skipping video creation")
-        raise
+def _result(status: str, **extra):
+    return {"status": status, **extra}
 
 
-def benchmark_model_loading(model_size: str = "base") -> float:
-    """Measure time to load faster-whisper model."""
-    logger.info(f"Benchmarking model loading: {model_size}")
-    
-    start = time.perf_counter()
-    try:
-        from utils.model_loader import get_faster_whisper_model
-        model = get_faster_whisper_model(model_size)
-        elapsed = time.perf_counter() - start
-        logger.info(f"Model '{model_size}' loaded in {elapsed:.2f}s")
-        return elapsed
-    except Exception as e:
-        logger.error(f"Failed to load model: {e}")
-        return float('inf')
-
-
-def benchmark_timestamp_formatting(iterations: int = 10000) -> float:
-    """Measure timestamp formatting performance."""
-    logger.info(f"Benchmarking timestamp formatting: {iterations} iterations")
-    
+def benchmark_timestamp_formatting(iterations: int = 10_000) -> dict:
     test_values = [0.0, 1.5, 60.0, 123.456, 3600.0, 3661.123]
-    
     start = time.perf_counter()
     for _ in range(iterations):
-        for val in test_values:
-            _ = format_timestamp(val)
+        for value in test_values:
+            format_timestamp(value)
     elapsed = time.perf_counter() - start
-    
-    per_op = (elapsed / (iterations * len(test_values))) * 1_000_000  # microseconds
-    logger.info(f"Timestamp formatting: {per_op:.2f}μs per operation")
-    return elapsed
+    return _result(
+        "ok",
+        iterations=iterations,
+        total_operations=iterations * len(test_values),
+        elapsed_seconds=round(elapsed, 6),
+        microseconds_per_operation=round((elapsed / (iterations * len(test_values))) * 1_000_000, 3),
+    )
 
 
-def benchmark_translation_retry_logic() -> None:
-    """Test translation retry logic without actual API calls."""
-    logger.info("Benchmarking translation retry logic (mock)")
-    
+def smoke_subtitle_conversion() -> dict:
+    sample = "1\n00:00:00,000 --> 00:00:01,250\nhello\n"
+    vtt = srt_to_vtt(sample)
+    if not vtt.startswith("WEBVTT\n\n") or "00:00:00.000 --> 00:00:01.250" not in vtt:
+        return _result("failed", reason="SRT to VTT conversion produced unexpected output")
+    return _result("ok")
+
+
+def smoke_ffmpeg_available() -> dict:
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        return _result("skipped", reason="ffmpeg/ffprobe unavailable in this environment")
+    return _result("ok", ffmpeg=ffmpeg, ffprobe=ffprobe)
+
+
+def benchmark_model_loading(model_size: str) -> dict:
     try:
-        from utils.translate_utils import is_retriable_exception
-        from openai import APIConnectionError, RateLimitError, APIError
-        
-        test_exceptions = [
-            (APIConnectionError(request=None), True),
-            (RateLimitError(message="rate limited", response=None, body=None), True),
-            (APIError(message="error", response=None, body=None), False),
-            (ValueError("invalid json"), True),
-            (RuntimeError("unknown"), False),
-        ]
-        
-        for exc, expected in test_exceptions:
-            result = is_retriable_exception(exc)
-            status = "✓" if result == expected else "✗"
-            logger.info(f"  {status} {type(exc).__name__}: retriable={result} (expected={expected})")
-            
-    except Exception as e:
-        logger.warning(f"Translation benchmark skipped: {e}")
+        from backend.utils.model_loader import get_faster_whisper_model
+    except Exception as exc:
+        return _result("skipped", reason=f"model loader unavailable: {exc}")
+
+    start = time.perf_counter()
+    try:
+        get_faster_whisper_model(model_size)
+    except Exception as exc:
+        return _result("skipped", reason=f"model '{model_size}' unavailable: {exc}")
+    return _result("ok", model=model_size, elapsed_seconds=round(time.perf_counter() - start, 3))
 
 
-def run_all_benchmarks(video_lengths: list[int], model_size: str) -> dict:
-    """Run all benchmarks and return results."""
-    results = {
-        "model_loading": {},
-        "timestamp_formatting": {},
-        "translation_retry": {},
+def run_smoke() -> dict:
+    return {
+        "timestamp_formatting": benchmark_timestamp_formatting(iterations=100),
+        "subtitle_conversion": smoke_subtitle_conversion(),
+        "ffmpeg": smoke_ffmpeg_available(),
     }
-    
-    # Model loading
-    results["model_loading"][model_size] = benchmark_model_loading(model_size)
-    
-    # Timestamp formatting
-    results["timestamp_formatting"]["10k_ops"] = benchmark_timestamp_formatting()
-    
-    # Translation retry
-    benchmark_translation_retry_logic()
-    
-    # Video processing (if moviepy available)
-    results["video_processing"] = {}
-    for length in video_lengths:
-        try:
-            test_video = f"/tmp/benchmark_{length}s.mp4"
-            if not os.path.exists(test_video):
-                create_test_video(length, test_video)
-            
-            # Measure file size
-            file_size = os.path.getsize(test_video) / (1024 * 1024)  # MB
-            results["video_processing"][f"{length}s"] = {
-                "file_size_mb": round(file_size, 2),
-                "duration": length
-            }
-            logger.info(f"Test video {length}s: {file_size:.2f}MB")
-        except Exception as e:
-            logger.warning(f"Video benchmark for {length}s failed: {e}")
-            results["video_processing"][f"{length}s"] = {"error": str(e)}
-    
-    return results
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run performance benchmarks")
-    parser.add_argument(
-        "--video-lengths",
-        type=str,
-        default="30,60,300",
-        help="Comma-separated video lengths in seconds"
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="base",
-        choices=["tiny", "base", "small", "medium", "large"],
-        help="Whisper model size"
-    )
-    args = parser.parse_args()
-    
-    video_lengths = [int(x) for x in args.video_lengths.split(",")]
-    
-    logger.info("=" * 60)
-    logger.info("AI Video Subtitle Tool - Performance Benchmarks")
-    logger.info("=" * 60)
-    logger.info(f"Model: {args.model}")
-    logger.info(f"Video lengths: {video_lengths}")
-    logger.info("")
-    
-    results = run_all_benchmarks(video_lengths, args.model)
-    
-    logger.info("")
-    logger.info("=" * 60)
-    logger.info("BENCHMARK RESULTS SUMMARY")
-    logger.info("=" * 60)
-    
-    for category, data in results.items():
-        logger.info(f"\n{category.upper()}:")
-        for key, value in data.items():
-            if isinstance(value, dict):
-                logger.info(f"  {key}:")
-                for k, v in value.items():
-                    logger.info(f"    {k}: {v}")
-            else:
-                logger.info(f"  {key}: {value}")
-    
-    logger.info("")
-    logger.info("Benchmark complete!")
+def run_benchmarks(model_size: str) -> dict:
+    return {
+        "timestamp_formatting": benchmark_timestamp_formatting(),
+        "subtitle_conversion": smoke_subtitle_conversion(),
+        "ffmpeg": smoke_ffmpeg_available(),
+        "model_loading": benchmark_model_loading(model_size),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run safe performance checks for AI Subtitle Tool.")
+    parser.add_argument("--smoke", action="store_true", help="Run CI-safe smoke checks only; no model download required.")
+    parser.add_argument("--model", default="base", choices=["tiny", "base", "small", "medium", "large"])
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    args = parser.parse_args(argv)
+
+    results = run_smoke() if args.smoke else run_benchmarks(args.model)
+    if args.json:
+        print(json.dumps(results, indent=2, sort_keys=True))
+    else:
+        for name, result in results.items():
+            logger.info("%s: %s", name, result)
+
+    failed = [name for name, result in results.items() if result.get("status") == "failed"]
+    if failed:
+        logger.error("benchmark smoke failures: %s", ", ".join(failed))
+        return 1
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
+

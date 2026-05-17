@@ -66,6 +66,19 @@ async def test_app_config_contract(app_client):
 
 
 @pytest.mark.anyio
+async def test_openapi_exposes_stable_contract_fields(app_client):
+    client, _main, _tmp = app_client
+    r = await client.get("/openapi.json")
+    assert r.status_code == 200
+    schemas = r.json()["components"]["schemas"]
+    assert "AppConfigResponse" in schemas
+    assert "TaskResultManifest" in schemas
+    assert "BatchStatusResponse" in schemas
+    assert "maxUploadSizeMb" in schemas["AppConfigResponse"]["properties"]
+    assert "translations" in schemas["TaskResultManifest"]["properties"]
+
+
+@pytest.mark.anyio
 async def test_upload_contract_returns_uuid_and_pending(app_client):
     client, main, _tmp = app_client
 
@@ -185,7 +198,19 @@ async def test_results_manifest_contract_and_orphan_detection(app_client, monkey
     # SUCCESS: enumerate available subtitle files.
     (upload_dir / f"{task_id}_Traditional_Chinese.ass").write_text("[Script Info]\n", encoding="utf-8")
     (upload_dir / f"{task_id}_final.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
-    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("SUCCESS", result={"warnings": ["ok"]}))
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _tid: _make_async_result(
+            "SUCCESS",
+            result={
+                "warnings": ["ok"],
+                "translations": [
+                    {"language": "Traditional Chinese", "translated": False, "fallback_reason": "provider unavailable"}
+                ],
+            },
+        ),
+    )
 
     r2 = await client.get(f"/results/{task_id}")
     assert r2.status_code == 200
@@ -194,7 +219,17 @@ async def test_results_manifest_contract_and_orphan_detection(app_client, monkey
     assert body2["has_video"] is True
     assert body2["warnings"] == ["ok"]
     assert body2["available_files"] == [
-        {"lang": "Traditional_Chinese", "display_name": "Traditional Chinese", "ass": True, "srt": True}
+        {
+            "lang": "Traditional_Chinese",
+            "display_name": "Traditional Chinese",
+            "ass": True,
+            "srt": True,
+            "translated": False,
+            "fallback_reason": "provider unavailable",
+        }
+    ]
+    assert body2["translations"] == [
+        {"language": "Traditional Chinese", "translated": False, "fallback_reason": "provider unavailable"}
     ]
 
 

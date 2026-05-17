@@ -3,6 +3,14 @@ export type FileInfo = {
   display_name: string;
   ass: boolean;
   srt: boolean;
+  translated?: boolean | null;
+  fallback_reason?: string | null;
+};
+
+export type TranslationInfo = {
+  language: string;
+  translated: boolean;
+  fallback_reason?: string | null;
 };
 
 export type ResultsManifestResponse = {
@@ -20,6 +28,7 @@ export type ResultsManifestResponse = {
    */
   available_files: FileInfo[];
   warnings: string[];
+  translations?: TranslationInfo[];
   is_partial?: boolean;
   orphaned_files_detected?: boolean;
 };

@@ -4,9 +4,7 @@ import re
 import shutil
 import subprocess
 import uuid
-import uuid as _uuid
 import json
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -14,7 +12,6 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
 
 from .models.status import TaskStatus as TaskStatusEnum
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
@@ -32,6 +29,20 @@ from .services.upload_validation import (
 )
 from . import settings
 from .batch_manager import BatchManager
+from .core.paths import validate_path_traversal
+from .schemas.batch import BatchStatusResponse, BatchTaskResponse, BatchUploadResponse
+from .schemas.config import AppConfigResponse
+from .schemas.results import FileInfo, TaskResultManifest, TranslationInfo
+from .schemas.subtitles import SubtitleEditRequest
+from .schemas.tasks import RecentTask, TaskStatusResponse
+from .services.batch_service import (
+    build_batch_archive_name as _build_batch_archive_name,
+    build_batch_download_urls as _build_batch_download_urls,
+    build_batch_task_response as _build_batch_task_response,
+    model_dump as _model_dump,
+)
+from .services.file_service import write_text_atomic
+from .services.subtitle_service import load_vtt_from_srt, write_vtt_for_srt_to_zip
 import zipfile
 
 app = FastAPI(
@@ -115,32 +126,6 @@ def validate_lang(lang: str) -> str:
             detail=f"Invalid lang format: '{lang}'. Only alphanumeric, underscore, and hyphen allowed.",
         )
     return lang
-
-
-def validate_path_traversal(filepath: str, allowed_root: str) -> str:
-    resolved_path = Path(filepath).resolve()
-    resolved_root = Path(allowed_root).resolve()
-    try:
-        resolved_path.relative_to(resolved_root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Path traversal detected: {filepath} is outside allowed directory.")
-    return str(resolved_path)
-
-
-def write_text_atomic(target_path: str, content: str) -> None:
-    tmp_path = f"{target_path}.tmp.{_uuid.uuid4().hex}"
-    try:
-        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, target_path)
-    finally:
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except OSError:
-            logger.warning("Failed to remove temp file: %s", tmp_path, exc_info=True)
 
 
 def _task_has_local_artifacts(task_id: str) -> bool:
@@ -244,79 +229,6 @@ def _validate_saved_video_file(file_path: str) -> None:
     )
     if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
         raise ValueError("Not a valid video file")
-
-
-class SubtitleDownloadUrls(BaseModel):
-    srt: Optional[str] = None
-    ass: Optional[str] = None
-    vtt: Optional[str] = None
-
-
-class BatchTaskDownloadUrls(BaseModel):
-    video: Optional[str] = None
-    subtitles: dict[str, SubtitleDownloadUrls] = Field(default_factory=dict)
-
-
-class BatchTaskResponse(BaseModel):
-    task_id: str
-    filename: str
-    status: str
-    progress: int = 0
-    message: Optional[str] = None
-    error: Optional[str] = None
-    download_urls: Optional[BatchTaskDownloadUrls] = None
-
-
-class TaskStatusResponse(BaseModel):
-    task_id: str
-    status: TaskStatusEnum
-    progress: int
-    message: Optional[str] = None
-    result_url: Optional[str] = None
-    warnings: List[str] = Field(default_factory=list)
-    error_code: Optional[str] = None
-    suggestion: Optional[str] = None
-
-
-class AppConfigResponse(BaseModel):
-    maxUploadSizeMb: int
-    maxBatchFiles: int
-    supportedExtensions: List[str]
-    batchUploadEnabled: bool
-    subtitleFormats: List[str]
-
-
-class SubtitleEditRequest(BaseModel):
-    content: str
-    format: str = Field(..., description="Target subtitle format: 'ass' or 'srt'")
-
-
-class FileInfo(BaseModel):
-    lang: str
-    display_name: str
-    ass: bool
-    srt: bool
-
-
-class TaskResultManifest(BaseModel):
-    task_id: str
-    task_status: TaskStatusEnum = Field(..., description="Task status at the time of manifest generation")
-    has_video: bool
-    subtitle_languages: List[str]
-    available_files: List[FileInfo]
-    warnings: List[str] = Field(default_factory=list)
-    is_partial: bool = Field(False, description="True when task is SUCCESS but outputs are incomplete/missing")
-    orphaned_files_detected: bool = Field(
-        False, description="True when task is not SUCCESS but files with this task_id exist in uploads directory"
-    )
-
-
-class RecentTask(BaseModel):
-    task_id: str
-    filename: str
-    status: str
-    created_at: str
-    duration_seconds: Optional[float] = None
 
 
 @app.get("/healthz")
@@ -656,56 +568,6 @@ async def get_recent_tasks():
         raise HTTPException(status_code=500, detail="Failed to read task history")
 
 
-class BatchUploadResponse(BaseModel):
-    batch_id: str
-    tasks: List[BatchTaskResponse]
-
-
-def _build_batch_task_response(task_id: str, filename: str, status: str, **kwargs: Any) -> BatchTaskResponse:
-    return BatchTaskResponse(
-        task_id=task_id,
-        filename=filename,
-        status=str(status).upper(),
-        **kwargs,
-    )
-
-
-def _model_dump(model: BaseModel, **kwargs: Any) -> dict[str, Any]:
-    if hasattr(model, "model_dump"):
-        return model.model_dump(**kwargs)
-    return model.dict(**kwargs)
-
-
-def _build_batch_download_urls(task_id: str, manifest: TaskResultManifest) -> BatchTaskDownloadUrls:
-    subtitles: dict[str, SubtitleDownloadUrls] = {}
-    for file_info in manifest.available_files:
-        subtitle_urls = SubtitleDownloadUrls()
-        display_name = file_info.display_name
-        if file_info.srt:
-            subtitle_urls.srt = f"/download/{task_id}?lang={display_name}&format=srt"
-            subtitle_urls.vtt = f"/download/{task_id}?lang={display_name}&format=vtt"
-        if file_info.ass:
-            subtitle_urls.ass = f"/download/{task_id}?lang={display_name}&format=ass"
-        if _model_dump(subtitle_urls, exclude_none=True):
-            subtitles[display_name] = subtitle_urls
-
-    return BatchTaskDownloadUrls(
-        video=f"/download/{task_id}" if manifest.has_video else None,
-        subtitles=subtitles,
-    )
-
-
-def _sanitize_archive_stem(filename: str) -> str:
-    stem = Path(sanitize_filename(filename)).stem
-    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
-    return normalized or "file"
-
-
-def _build_batch_archive_name(filename: str, task_id: str, extension: str, lang_suffix: str | None = None) -> str:
-    ext = extension if extension.startswith(".") else f".{extension}"
-    suffix = f"_{lang_suffix}" if lang_suffix else ""
-    return f"{_sanitize_archive_stem(filename)}_{task_id}{suffix}{ext}"
-
 @app.post("/batch/upload", response_model=BatchUploadResponse)
 async def batch_upload_videos(
     files: List[UploadFile] = File(...),
@@ -789,15 +651,6 @@ async def batch_upload_videos(
 
     return BatchUploadResponse(batch_id=batch_id, tasks=tasks_info)
 
-class BatchStatusResponse(BaseModel):
-    batch_id: str
-    total: int
-    completed: int
-    failed: int
-    processing: int
-    pending: int
-    tasks: List[BatchTaskResponse]
-
 @app.get("/batch/{batch_id}/status", response_model=BatchStatusResponse)
 async def get_batch_status(batch_id: str):
     batch = BATCH_MANAGER.get_batch(batch_id)
@@ -872,6 +725,26 @@ async def get_batch_status(batch_id: str):
         tasks=tasks_details
     )
 
+
+def _translation_info_from_result(result: Any) -> dict[str, TranslationInfo]:
+    if not isinstance(result, dict):
+        return {}
+    raw_items = result.get("translations") or result.get("translation_metadata") or []
+    translations: dict[str, TranslationInfo] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        language = str(item.get("language") or "").strip()
+        if not language:
+            continue
+        lang_suffix = language.replace(" ", "_")
+        translations[lang_suffix] = TranslationInfo(
+            language=language,
+            translated=bool(item.get("translated")),
+            fallback_reason=item.get("fallback_reason"),
+        )
+    return translations
+
 @app.get("/batch/{batch_id}/download")
 async def download_batch_zip(batch_id: str):
     batch = BATCH_MANAGER.get_batch(batch_id)
@@ -892,28 +765,38 @@ async def download_batch_zip(batch_id: str):
                 continue
 
             if status_resp.status == TaskStatusEnum.SUCCESS:
+                wrote_artifact = False
                 for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.srt")):
                     lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
                     zipf.write(
                         local_file,
                         arcname=_build_batch_archive_name(task.filename, task.task_id, ".srt", lang_suffix),
                     )
+                    wrote_artifact = True
+                    write_vtt_for_srt_to_zip(
+                        zipf,
+                        local_file,
+                        _build_batch_archive_name(task.filename, task.task_id, ".vtt", lang_suffix),
+                    )
+                    wrote_artifact = True
                 for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.ass")):
                     lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
                     zipf.write(
                         local_file,
                         arcname=_build_batch_archive_name(task.filename, task.task_id, ".ass", lang_suffix),
                     )
-                for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.vtt")):
-                    lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
-                    zipf.write(
-                        local_file,
-                        arcname=_build_batch_archive_name(task.filename, task.task_id, ".vtt", lang_suffix),
-                    )
+                    wrote_artifact = True
 
                 video_path = os.path.join(UPLOAD_DIR, f"{task.task_id}_final.mp4")
                 if os.path.exists(video_path):
                     zipf.write(video_path, arcname=_build_batch_archive_name(task.filename, task.task_id, ".mp4"))
+                    wrote_artifact = True
+                if not wrote_artifact:
+                    failed_tasks.append({
+                        "task_id": task.task_id,
+                        "filename": task.filename,
+                        "error": "No subtitle or video artifacts found for completed task",
+                    })
             elif status_resp.status in (TaskStatusEnum.FAILURE, TaskStatusEnum.CANCELED):
                 failed_tasks.append({
                     "task_id": task.task_id,
@@ -926,7 +809,7 @@ async def download_batch_zip(batch_id: str):
             
     return FileResponse(zip_path, media_type="application/zip", filename=zip_filename)
 
-@app.get("/results/{task_id}", response_model=TaskResultManifest)
+@app.get("/results/{task_id}", response_model=TaskResultManifest, response_model_exclude_none=True)
 async def get_results_manifest(task_id: str):
     task_id = validate_task_id(task_id)
     task_result = _get_async_result(task_id)
@@ -963,6 +846,7 @@ async def get_results_manifest(task_id: str):
             subtitle_languages=[],
             available_files=[],
             warnings=warnings,
+            translations=[],
             is_partial=False,
             orphaned_files_detected=orphaned_files_detected,
         )
@@ -984,10 +868,19 @@ async def get_results_manifest(task_id: str):
             lang_map[lang_suffix][ext] = True
 
     available_files: List[FileInfo] = []
+    translations_by_lang = _translation_info_from_result(task_result.result)
     for lang_suffix, exts in sorted(lang_map.items(), key=lambda kv: kv[0].lower()):
         display_name = lang_suffix.replace("_", " ")
+        translation_info = translations_by_lang.get(lang_suffix)
         available_files.append(
-            FileInfo(lang=lang_suffix, display_name=display_name, ass=exts["ass"], srt=exts["srt"])
+            FileInfo(
+                lang=lang_suffix,
+                display_name=display_name,
+                ass=exts["ass"],
+                srt=exts["srt"],
+                translated=translation_info.translated if translation_info else None,
+                fallback_reason=translation_info.fallback_reason if translation_info else None,
+            )
         )
 
     return TaskResultManifest(
@@ -997,6 +890,7 @@ async def get_results_manifest(task_id: str):
         subtitle_languages=[f.display_name for f in available_files],
         available_files=available_files,
         warnings=warnings,
+        translations=list(translations_by_lang.values()),
         is_partial=(len(available_files) == 0),
         orphaned_files_detected=False,
     )
@@ -1024,15 +918,7 @@ async def download_result(
     lang_suffix = validate_lang(lang)
 
     if format == "vtt":
-        srt_path = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.srt"), UPLOAD_DIR)
-        if not os.path.exists(srt_path):
-            raise HTTPException(status_code=404, detail=f"Subtitle 'srt' for language '{lang}' not found (required for vtt)")
-
-        from .utils.subtitle_text_utils import srt_to_vtt
-
-        with open(srt_path, "r", encoding="utf-8") as f:
-            vtt = srt_to_vtt(f.read())
-
+        vtt = load_vtt_from_srt(UPLOAD_DIR, task_id, lang_suffix, lang)
         filename = f"subtitle_{task_id}_{lang_suffix}.vtt"
         return Response(
             content=vtt,
@@ -1072,14 +958,7 @@ async def get_subtitle(
         raise HTTPException(status_code=400, detail="format must be 'ass', 'srt', or 'vtt'")
 
     if format == "vtt":
-        srt_path = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.srt"), UPLOAD_DIR)
-        if not os.path.exists(srt_path):
-            raise HTTPException(status_code=404, detail=f"Subtitle 'srt' for language '{lang}' not found (required for vtt)")
-
-        from .utils.subtitle_text_utils import srt_to_vtt
-
-        with open(srt_path, "r", encoding="utf-8") as f:
-            vtt = srt_to_vtt(f.read())
+        vtt = load_vtt_from_srt(UPLOAD_DIR, task_id, lang_suffix, lang)
         filename = f"{task_id}_{lang_suffix}.vtt"
         return {"content": vtt, "format": "vtt", "filename": filename}
 

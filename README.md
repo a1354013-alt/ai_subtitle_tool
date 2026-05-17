@@ -112,9 +112,8 @@ VITE_APP_TITLE=AI Subtitle Tool
 Backend:
 
 ```bash
-python scripts/verify_delivery.py --full
-cd backend
 python -m pytest -q
+python -m compileall backend tests scripts
 ```
 
 Frontend:
@@ -124,16 +123,25 @@ cd frontend
 npm ci
 npm run lint
 npm run typecheck
-npm run test
+npm run test:ci
 npm run build
 ```
 
 Docker contract:
 
 ```bash
+python scripts/verify_docker_config.py
 docker compose config
 docker compose up --build
 ```
+
+Benchmark smoke:
+
+```bash
+python benchmarks/run_benchmarks.py --smoke
+```
+
+`--smoke` is CI-safe and does not download Whisper models. For local machine-specific measurements, see [benchmarks/performance_report.md](benchmarks/performance_report.md).
 
 ## Release Packaging
 
@@ -184,10 +192,11 @@ The release ZIP excludes:
 
 ## Environment Variables
 
-Backend example: [backend/.env.example](/C:/Users/whois/OneDrive/文件/GitHub/ai_subtitle_tool/backend/.env.example)
+Backend example: [backend/.env.example](backend/.env.example)
 
 Important variables:
 
+- `APP_ENV`
 - `ENVIRONMENT`
 - `API_HOST`
 - `API_PORT`
@@ -206,8 +215,15 @@ Important variables:
 - `WHISPER_MODEL`
 - `FFMPEG_BINARY`
 - `FFPROBE_BINARY`
+- `FFMPEG_PRESET`
+- `STORAGE_BACKEND`
+- `S3_ENDPOINT`
+- `S3_ACCESS_KEY`
+- `S3_SECRET_KEY`
+- `S3_REGION`
+- `S3_BUCKET`
 
-Frontend example: [frontend/.env.example](/C:/Users/whois/OneDrive/文件/GitHub/ai_subtitle_tool/frontend/.env.example)
+Frontend example: [frontend/.env.example](frontend/.env.example)
 
 - `VITE_API_BASE_URL`
 - `VITE_APP_TITLE`
@@ -217,11 +233,12 @@ Frontend example: [frontend/.env.example](/C:/Users/whois/OneDrive/文件/GitHub
 - End-to-end media processing still depends on local `ffmpeg`, Redis, and a running Celery worker.
 - Real transcription and translation are mocked in tests; the default suite does not call external APIs.
 - Batch ZIP names include the sanitized original filename, task id, and language suffix to avoid collisions when multiple target languages are generated.
+- Batch ZIP includes VTT subtitles generated from SRT using the same conversion path as single-file VTT downloads.
 
 ## Portfolio Highlights
 
 - Strong API contract coverage between FastAPI and Vue.
-- Delivery verification script checks docs, env examples, release ZIP contents, tests, and frontend build steps.
+- Delivery verification script checks docs, env examples, Docker config, release ZIP contents, tests, and frontend build steps.
 - Stable release packaging uses one Python implementation and a thin PowerShell wrapper, which avoids duplicated exclusion rules.
 
 Batch ZIP naming:

@@ -122,16 +122,32 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
             update_state_func(state="PROGRESS", meta={"progress": 70, "status": "Translating..."})
 
         translations = {}
+        translation_metadata = []
         for lang in target_langs:
             if is_task_canceled(upload_dir, business_id):
                 raise RuntimeError("Task canceled")
             try:
                 lang_trans, _ = translate_segments(segments, "Auto", [lang])
                 translations[lang] = lang_trans[lang]
+                translation_metadata.append(
+                    {
+                        "language": lang,
+                        "translated": True,
+                        "fallback_reason": None,
+                    }
+                )
             except Exception as e:
+                fallback_reason = f"translation provider unavailable: {e}"
                 msg = f"Translation to {lang} failed: {e}. Using original text."
                 warnings.append(msg)
                 translations[lang] = [s.text for s in segments]
+                translation_metadata.append(
+                    {
+                        "language": lang,
+                        "translated": False,
+                        "fallback_reason": fallback_reason,
+                    }
+                )
                 if update_state_func:
                     update_state_func(state="PROGRESS", meta={"progress": 70, "status": msg})
 
@@ -191,6 +207,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
             "business_id": business_id,
             "video_path": final_video_path,
             "warnings": list(dict.fromkeys(warnings)),
+            "translations": translation_metadata,
         }
     finally:
         if segments_dir and os.path.exists(segments_dir):

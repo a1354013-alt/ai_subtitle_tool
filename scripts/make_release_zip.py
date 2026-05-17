@@ -9,6 +9,7 @@ from pathlib import Path
 
 EXCLUDED_DIR_NAMES = {
     ".git",
+    ".github",
     "__pycache__",
     "node_modules",
     "dist",

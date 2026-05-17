@@ -87,5 +87,7 @@ powershell -ExecutionPolicy Bypass -File .\make_release_zip.ps1
 Verification command:
 
 ```bash
-python scripts/verify_delivery.py --full
+python scripts/verify_docker_config.py
+python scripts/verify_delivery.py --zip-only
+python scripts/make_release_zip.py --out release.zip --check
 ```

@@ -6,7 +6,11 @@
           <div class="col">
             <div class="label">{{ $t('upload.selectVideo') }}</div>
             <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" @change="onFileChange" />
-            <div class="help">Accepted: mp4 / mkv / avi / mov (final validation is done by ffprobe).</div>
+            <div class="help">
+              Supported: {{ config.supportedExtensions.join(", ") }}. Max {{ config.maxUploadSizeMb }}MB.
+              Final validation is done by ffprobe.
+            </div>
+            <div v-if="validationError" class="task-error text-danger">{{ validationError }}</div>
           </div>
 
           <div class="col">
@@ -67,7 +71,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
+import { getAppConfig } from "@/api/config";
+import type { AppConfig } from "@/types/api";
 import type { SubtitleFormat } from "@/types/subtitle";
 
 const emit = defineEmits<{
@@ -87,17 +93,39 @@ const subtitleFormat = ref<SubtitleFormat>("ass");
 const burnSubtitles = ref(true);
 const removeSilence = ref(false);
 const parallel = ref(true);
+const validationError = ref("");
+const config = ref<AppConfig>({
+  maxUploadSizeMb: 2048,
+  maxBatchFiles: 20,
+  supportedExtensions: [".mp4", ".mkv", ".avi", ".mov"],
+  batchUploadEnabled: true,
+  subtitleFormats: ["srt", "ass", "vtt"],
+});
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "(same origin)";
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+function validateSelectedFile(selected: File | null): string {
+  if (!selected) return "";
+  const extension = selected.name.includes(".") ? `.${selected.name.split(".").pop()!.toLowerCase()}` : "";
+  if (!extension || !config.value.supportedExtensions.includes(extension)) {
+    return `Unsupported file format: ${selected.name}. Supported formats: ${config.value.supportedExtensions.join(", ")}.`;
+  }
+  if (selected.size <= 0) {
+    return `Empty files cannot be uploaded: ${selected.name}.`;
+  }
+  const maxBytes = config.value.maxUploadSizeMb * 1024 * 1024;
+  if (selected.size > maxBytes) {
+    return `${selected.name} exceeds the ${config.value.maxUploadSizeMb}MB upload limit.`;
+  }
+  return "";
+}
 
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
   const selected = input.files?.[0] ?? null;
-  if (selected && selected.size > MAX_FILE_SIZE) {
-    window.alert(`File too large. Maximum size: 2GB`);
-    input.value = ""; // Reset
+  validationError.value = validateSelectedFile(selected);
+  if (validationError.value) {
+    input.value = "";
     file.value = null;
     return;
   }
@@ -105,7 +133,8 @@ function onFileChange(e: Event) {
 }
 
 async function onSubmit() {
-  if (!file.value) return;
+  validationError.value = validateSelectedFile(file.value);
+  if (!file.value || validationError.value) return;
   const fd = new FormData();
   fd.append("file", file.value);
   fd.append("target_langs", targetLangs.value);
@@ -115,6 +144,14 @@ async function onSubmit() {
   fd.append("parallel", String(parallel.value));
   emit("submit", fd);
 }
+
+onMounted(async () => {
+  try {
+    config.value = await getAppConfig();
+  } catch {
+    // Keep built-in defaults when the config endpoint is temporarily unavailable.
+  }
+});
 </script>
 
 <style scoped>
