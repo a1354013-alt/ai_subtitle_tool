@@ -164,6 +164,76 @@ async def test_status_contract_failure_exposes_error_code_and_suggestion(app_cli
 
 
 @pytest.mark.anyio
+async def test_status_contract_failure_prefers_info_payload(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "99999999-9999-9999-9999-999999999998"
+
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _tid: _make_async_result(
+            "FAILURE",
+            info={
+                "error_code": "upload_failed",
+                "message": "info payload wins",
+                "suggestion": "Retry upload",
+            },
+            result={
+                "error_code": "ffmpeg_not_found",
+                "message": "result payload should be ignored here",
+                "suggestion": "Install ffmpeg first",
+            },
+        ),
+    )
+
+    r = await client.get(f"/status/{task_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "FAILURE"
+    assert body["error_code"] == "upload_failed"
+    assert body["message"] == "info payload wins"
+    assert body["suggestion"] == "Retry upload"
+
+
+@pytest.mark.anyio
+async def test_status_contract_failure_handles_exception_result_without_500(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "99999999-9999-9999-9999-999999999997"
+
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _tid: _make_async_result("FAILURE", result=RuntimeError("boom")),
+    )
+
+    r = await client.get(f"/status/{task_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "FAILURE"
+    assert isinstance(body["message"], str)
+    assert isinstance(body["error_code"], str)
+
+
+@pytest.mark.anyio
+async def test_status_contract_failure_handles_non_dict_info_and_result_without_500(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "99999999-9999-9999-9999-999999999996"
+
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _tid: _make_async_result("FAILURE", info="bad-info", result="bad-result"),
+    )
+
+    r = await client.get(f"/status/{task_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "FAILURE"
+    assert isinstance(body["message"], str)
+    assert isinstance(body["error_code"], str)
+
+
+@pytest.mark.anyio
 async def test_status_missing_task_returns_consistent_error_shape(app_client):
     client, _main, _tmp = app_client
     task_id = "12345678-1234-1234-1234-123456789012"

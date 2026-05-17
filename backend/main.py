@@ -472,10 +472,15 @@ async def get_status(task_id: str):
             warnings.extend(task_result.result.get("warnings", []) or [])
         status = TaskStatusEnum.SUCCESS
     elif status == "FAILURE":
+        info = task_result.info
         result = task_result.result
-        if isinstance(result, dict) and "error_code" in result:
+        if isinstance(info, dict) and "error_code" in info:
+            error_code = info["error_code"]
+            message = str(info.get("message", error_code))
+            suggestion = info.get("suggestion", "")
+        elif isinstance(result, dict) and "error_code" in result:
             error_code = result["error_code"]
-            message = result.get("message", str(result))
+            message = str(result.get("message", error_code))
             suggestion = result.get("suggestion", "")
         else:
             error_code = handle_known_error(Exception(str(result)))

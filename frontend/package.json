@@ -10,7 +10,7 @@
     "build": "vue-tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:ci": "vitest run",
+    "test:ci": "vitest run --pool=forks --no-file-parallelism --maxWorkers=1",
     "test:watch": "vitest"
   },
   "dependencies": {

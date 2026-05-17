@@ -60,15 +60,15 @@ FORBIDDEN_ZIP_MARKERS = (
 )
 
 
-def _run_command(command: list[str], cwd: Path) -> None:
+def _run_command(command: list[str], cwd: Path, *, label: str) -> None:
     resolved = list(command)
     if os.name == "nt" and resolved and resolved[0] == "npm":
         resolved[0] = shutil.which("npm.cmd") or shutil.which("npm") or "npm.cmd"
 
-    print(f"$ {' '.join(command)}")
+    print(f"[{label}] $ {' '.join(command)}", flush=True)
     completed = subprocess.run(resolved, cwd=cwd)
     if completed.returncode != 0:
-        raise SystemExit(f"command failed ({completed.returncode}): {' '.join(command)}")
+        raise SystemExit(f"[{label}] command failed ({completed.returncode}): {' '.join(command)}")
 
 
 def _read_text(path: Path) -> str:
@@ -182,13 +182,40 @@ def run_zip_only(repo_root: Path) -> Path:
 
 def run_full(repo_root: Path) -> None:
     run_zip_only(repo_root)
-    _run_command([sys.executable, "-m", "pytest", "-q"], repo_root)
-    _run_command(["npm", "ci"], repo_root / "frontend")
-    if "lint" in json.loads(_read_text(repo_root / "frontend" / "package.json")).get("scripts", {}):
-        _run_command(["npm", "run", "lint"], repo_root / "frontend")
-    _run_command(["npm", "run", "typecheck"], repo_root / "frontend")
-    _run_command(["npm", "run", "test:ci"], repo_root / "frontend")
-    _run_command(["npm", "run", "build"], repo_root / "frontend")
+    _run_command(
+        [
+            sys.executable,
+            "-m",
+            "compileall",
+            "-q",
+            "backend",
+            "tests",
+            "scripts",
+            "benchmarks",
+            "test_hwaccel.py",
+            "test_report.py",
+        ],
+        repo_root,
+        label="python-compile",
+    )
+    _run_command([sys.executable, "-m", "pytest", "-q"], repo_root, label="pytest")
+    frontend_dir = repo_root / "frontend"
+    frontend_scripts = json.loads(_read_text(frontend_dir / "package.json")).get("scripts", {})
+    if "lint" in frontend_scripts:
+        _run_command(["npm", "run", "lint"], frontend_dir, label="frontend-lint")
+    _run_command(["npm", "run", "typecheck"], frontend_dir, label="frontend-typecheck")
+    _run_command(["npm", "run", "test:ci"], frontend_dir, label="frontend-test-ci")
+    _run_command(["npm", "run", "build"], frontend_dir, label="frontend-build")
+    _run_command(
+        [sys.executable, "scripts/make_release_zip.py", "--out", "release.zip", "--check"],
+        repo_root,
+        label="release-zip-build-check",
+    )
+    _run_command(
+        [sys.executable, "scripts/verify_release_zip.py", "release.zip"],
+        repo_root,
+        label="release-zip-verify",
+    )
     print("full delivery verification passed")
 
 

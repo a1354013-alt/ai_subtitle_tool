@@ -89,6 +89,10 @@ def _is_excluded(rel_posix: str) -> bool:
 def build_release_zip(repo_root: Path, out_path: Path) -> None:
     repo_root = repo_root.resolve()
     out_path = out_path.resolve()
+    try:
+        out_rel = out_path.relative_to(repo_root).as_posix()
+    except ValueError:
+        out_rel = None
 
     if out_path.exists():
         out_path.unlink()
@@ -101,7 +105,7 @@ def build_release_zip(repo_root: Path, out_path: Path) -> None:
             rel_path = abs_path.relative_to(repo_root)
             rel_posix = rel_path.as_posix()
 
-            if rel_posix == out_path.relative_to(repo_root).as_posix():
+            if out_rel is not None and rel_posix == out_rel:
                 continue
             if _is_env_file(rel_posix):
                 continue
@@ -141,7 +145,7 @@ def _assert_release_zip_clean(out_path: Path) -> None:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Build a clean, reproducible release zip for ai_subtitle_tool.")
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]), help="Repository root path")
-    parser.add_argument("--out", default="release.zip", help="Output zip path (relative to repo root)")
+    parser.add_argument("--out", default="release.zip", help="Output zip path (relative to repo root unless absolute)")
     parser.add_argument("--check", action="store_true", help="Fail if the produced zip contains forbidden paths/files")
     args = parser.parse_args(argv)
 
