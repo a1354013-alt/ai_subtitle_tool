@@ -7,8 +7,8 @@ import { usePreferencesStore } from "@/stores/preferences";
 type PollTimer = number | null;
 
 function isTerminalStatus(status: string): boolean {
-  const s = String(status).toUpperCase();
-  return s === "SUCCESS" || s === "FAILURE" || s === "CANCELED";
+  const normalizedStatus = String(status).toUpperCase();
+  return normalizedStatus === "SUCCESS" || normalizedStatus === "FAILURE" || normalizedStatus === "CANCELED";
 }
 
 export const useTaskStore = defineStore("task", {
@@ -39,7 +39,10 @@ export const useTaskStore = defineStore("task", {
       this.error = null;
       this.warnings = [];
       const rawLangs = String(formData.get("target_langs") ?? "").trim();
-      const first = rawLangs.split(",").map((s) => s.trim()).filter(Boolean)[0];
+      const first = rawLangs
+        .split(",")
+        .map((segment) => segment.trim())
+        .filter(Boolean)[0];
       if (first) {
         const prefs = usePreferencesStore();
         prefs.setPreferredLang(first.replaceAll(" ", "_"));
@@ -78,12 +81,12 @@ export const useTaskStore = defineStore("task", {
       this.warnings = Array.isArray(res.warnings) ? res.warnings : [];
       this.error_code = res.error_code ?? "";
       this.suggestion = res.suggestion ?? "";
-      
+
       if (res.error_code) {
         this.error = {
           message: res.message ?? "Unknown error",
           error_code: res.error_code,
-          suggestion: res.suggestion
+          suggestion: res.suggestion,
         };
       }
     },
@@ -91,7 +94,7 @@ export const useTaskStore = defineStore("task", {
       this.stopPolling();
       this.resetForTask(taskId);
 
-      // 先抓一次，避免「任務已終態但仍建立 timer」的競態條件
+      // Fetch once immediately so terminal states and 404s never leave a dangling interval.
       try {
         await this.fetchTaskStatus(taskId);
       } catch (e) {

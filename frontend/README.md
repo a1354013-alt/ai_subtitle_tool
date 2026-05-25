@@ -19,8 +19,7 @@ Important: do NOT ship `node_modules/` in a release package.
 
 ```bash
 cd frontend
-rm -rf node_modules
-npm install
+npm ci
 npm run dev
 ```
 
@@ -35,7 +34,11 @@ Test:
 
 ```bash
 npm test
+npm run test:ci
 ```
+
+- `npm test` runs Vitest in watch mode for local iteration.
+- `npm run test:ci` runs the non-watch, CI-safe suite and must exit automatically.
 
 ## API Base URL (`VITE_API_BASE_URL`)
 

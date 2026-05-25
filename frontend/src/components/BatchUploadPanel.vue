@@ -194,6 +194,10 @@ async function onSubmit() {
 
 function startPolling() {
   pollingError.value = "";
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
+  }
   fetchStatus();
   statusInterval = setInterval(fetchStatus, 3000);
 }
@@ -206,12 +210,14 @@ async function fetchStatus() {
     batchStatus.value = response;
     if (response.processing === 0 && response.pending === 0 && response.total > 0) {
       clearInterval(statusInterval);
+      statusInterval = null;
     }
   } catch (err) {
     const apiError = err as APIError;
     pollingError.value = apiError.message || "Failed to fetch batch status";
     if (apiError.status === 404 && statusInterval) {
       clearInterval(statusInterval);
+      statusInterval = null;
     }
   }
 }
@@ -277,7 +283,10 @@ function taskDownloadLinks(task: BatchTaskResponse) {
 }
 
 onUnmounted(() => {
-  if (statusInterval) clearInterval(statusInterval);
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
+  }
 });
 
 onMounted(async () => {

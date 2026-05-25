@@ -25,6 +25,7 @@ from .pipeline_segments import (
     build_full_video_payload,
 )
 from . import settings
+from .services.upload_validation import normalize_lang_suffix
 from .utils.cleanup_utils import create_task_lock, remove_task_lock, cleanup_old_files as cleanup_old_files_impl
 from .utils.storage_utils import get_storage_backend
 
@@ -53,7 +54,6 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
     hf_token = options.get("hf_token")
     warnings = []
 
-    from .utils.error_handler import handle_known_error, get_error_response
     try:
         if business_id and is_task_canceled(settings.get_upload_dir(), business_id):
             raise RuntimeError("Task canceled")
@@ -156,7 +156,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
 
         result_files = {}
         for lang in target_langs:
-            lang_suffix = lang.replace(" ", "_")
+            lang_suffix = normalize_lang_suffix(lang)
             bilingual_srt = f"{base_path}_{lang_suffix}.srt"
             generate_bilingual_srt(segments, translations[lang], bilingual_srt)
 
@@ -196,7 +196,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
             storage.upload_file(final_video_path, f"{business_id}_final.mp4")
             # Upload subtitles
             for lang, path in result_files.items():
-                lang_suffix = lang.replace(" ", "_")
+                lang_suffix = normalize_lang_suffix(lang)
                 ext = os.path.splitext(path)[1]
                 storage.upload_file(path, f"{business_id}_{lang_suffix}{ext}")
         except Exception as e:

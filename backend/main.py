@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 import shutil
 import subprocess
 import uuid
@@ -19,6 +18,7 @@ from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 from .utils.error_handler import handle_known_error, get_error_response
 from .utils.storage_utils import get_storage_backend
 from .services.upload_validation import (
+    normalize_lang_suffix,
     validate_batch_files,
     normalize_target_langs,
     sanitize_filename,
@@ -117,15 +117,32 @@ def validate_task_id(task_id: str) -> str:
 
 
 def validate_lang(lang: str) -> str:
-    """Validate lang and apply predictable normalization (trim + whitespace -> underscore)."""
-    lang = (lang or "").strip()
-    lang = re.sub(r"\s+", "_", lang)
-    if not re.match(r"^[a-zA-Z0-9_-]+$", lang):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid lang format: '{lang}'. Only alphanumeric, underscore, and hyphen allowed.",
-        )
-    return lang
+    return normalize_lang_suffix(lang)
+
+
+def _coerce_failure_payload(value: Any) -> dict[str, str]:
+    if isinstance(value, dict) and value.get("error_code"):
+        error_code = str(value["error_code"])
+        return {
+            "error_code": error_code,
+            "message": str(value.get("message") or error_code),
+            "suggestion": str(value.get("suggestion") or ""),
+        }
+
+    if isinstance(value, BaseException):
+        fallback_source = value
+    elif value is None:
+        fallback_source = Exception("Task failed without error details")
+    else:
+        fallback_source = Exception(str(value))
+
+    error_code = handle_known_error(fallback_source)
+    error_info = get_error_response(error_code)
+    return {
+        "error_code": error_code,
+        "message": str(error_info["message"]),
+        "suggestion": str(error_info["suggestion"]),
+    }
 
 
 def _task_has_local_artifacts(task_id: str) -> bool:
@@ -472,22 +489,16 @@ async def get_status(task_id: str):
             warnings.extend(task_result.result.get("warnings", []) or [])
         status = TaskStatusEnum.SUCCESS
     elif status == "FAILURE":
-        info = task_result.info
-        result = task_result.result
-        if isinstance(info, dict) and "error_code" in info:
-            error_code = info["error_code"]
-            message = str(info.get("message", error_code))
-            suggestion = info.get("suggestion", "")
-        elif isinstance(result, dict) and "error_code" in result:
-            error_code = result["error_code"]
-            message = str(result.get("message", error_code))
-            suggestion = result.get("suggestion", "")
+        if isinstance(task_result.info, dict) and task_result.info.get("error_code"):
+            failure_payload = _coerce_failure_payload(task_result.info)
+        elif isinstance(task_result.result, dict) and task_result.result.get("error_code"):
+            failure_payload = _coerce_failure_payload(task_result.result)
         else:
-            error_code = handle_known_error(Exception(str(result)))
-            error_info = get_error_response(error_code)
-            message = error_info["message"]
-            suggestion = error_info["suggestion"]
-            
+            fallback_value = task_result.result if task_result.result is not None else task_result.info
+            failure_payload = _coerce_failure_payload(fallback_value)
+        error_code = failure_payload["error_code"]
+        message = failure_payload["message"]
+        suggestion = failure_payload["suggestion"]
         status = TaskStatusEnum.FAILURE
     elif status == "PENDING":
         if TASK_HISTORY.get_created_at(task_id) is None and not _task_has_local_artifacts(task_id):
@@ -742,7 +753,11 @@ def _translation_info_from_result(result: Any) -> dict[str, TranslationInfo]:
         language = str(item.get("language") or "").strip()
         if not language:
             continue
-        lang_suffix = language.replace(" ", "_")
+        try:
+            lang_suffix = normalize_lang_suffix(language)
+        except HTTPException:
+            logger.warning("Skipping translation metadata with invalid language value: %s", language)
+            continue
         translations[lang_suffix] = TranslationInfo(
             language=language,
             translated=bool(item.get("translated")),

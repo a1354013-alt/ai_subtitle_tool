@@ -121,11 +121,17 @@ Frontend:
 ```bash
 cd frontend
 npm ci
+npm audit
 npm run lint
 npm run typecheck
 npm run test:ci
 npm run build
 ```
+
+Notes:
+
+- `npm test` starts Vitest watch mode for local development.
+- `npm run test:ci` is the CI-safe, non-watch command and must exit on its own.
 
 Docker contract:
 
@@ -150,6 +156,16 @@ Use the Python script as the single source of truth:
 ```bash
 python scripts/make_release_zip.py --out release.zip --check
 ```
+
+End-to-end delivery verification:
+
+```bash
+python scripts/verify_delivery.py --zip-only
+python scripts/verify_delivery.py --full
+```
+
+`--zip-only` validates docs, Docker/release inputs, and the clean release archive.
+`--full` additionally runs Python compile checks, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, then rebuilds and verifies `release.zip`.
 
 PowerShell wrapper:
 

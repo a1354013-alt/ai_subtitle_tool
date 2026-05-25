@@ -507,6 +507,21 @@ class TestTargetLangNormalization(unittest.TestCase):
         langs = main.normalize_target_langs(raw)
         self.assertEqual(langs, ["Traditional Chinese", "English"])
 
+    def test_normalize_lang_suffix_accepts_safe_values(self):
+        from backend.services.upload_validation import normalize_lang_suffix
+
+        self.assertEqual(normalize_lang_suffix("English"), "English")
+        self.assertEqual(normalize_lang_suffix("Traditional Chinese"), "Traditional_Chinese")
+        self.assertEqual(normalize_lang_suffix("zh-TW"), "zh-TW")
+
+    def test_normalize_lang_suffix_rejects_unsafe_values(self):
+        from fastapi import HTTPException
+        from backend.services.upload_validation import normalize_lang_suffix
+
+        for value in ("../evil", "a/b", r"a\b", "", "   "):
+            with self.assertRaises(HTTPException, msg=value):
+                normalize_lang_suffix(value)
+
 
 class TestStatusEndpoint(unittest.TestCase):
     def test_status_pending_progress_success_failure(self):

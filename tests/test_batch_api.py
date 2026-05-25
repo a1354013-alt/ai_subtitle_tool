@@ -202,3 +202,24 @@ def test_upload_and_batch_share_option_validation(batch_app):
     )
     assert batch_response.status_code == 400
     assert batch_response.json()["detail"] == "target_langs must contain at least one non-empty language"
+
+
+@pytest.mark.parametrize("invalid_langs", ["../evil", "a/b", r"a\b"])
+def test_upload_and_batch_reject_unsafe_target_langs(batch_app, invalid_langs: str):
+    client, _main = batch_app
+
+    upload_response = client.post(
+        "/upload",
+        files={"file": ("demo.mp4", b"video", "video/mp4")},
+        data={"target_langs": invalid_langs, "subtitle_format": "ass"},
+    )
+    assert upload_response.status_code == 400
+    assert "Invalid language value" in upload_response.json()["detail"]
+
+    batch_response = client.post(
+        "/batch/upload",
+        files=[("files", ("demo.mp4", b"video", "video/mp4"))],
+        data={"target_langs": invalid_langs, "subtitle_format": "ass"},
+    )
+    assert batch_response.status_code == 400
+    assert "Invalid language value" in batch_response.json()["detail"]

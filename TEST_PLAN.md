@@ -44,11 +44,17 @@ Run:
 ```bash
 cd frontend
 npm ci
+npm audit
 npm run typecheck
 npm run lint
-npm test
+npm run test:ci
 npm run build
 ```
+
+Notes:
+
+- `npm test` is for interactive watch mode during local development.
+- `npm run test:ci` is the stable non-watch command used by CI and `scripts/verify_delivery.py --full`.
 
 Scope:
 
@@ -65,6 +71,13 @@ Release zip must be built via script only:
 
 ```bash
 python scripts/make_release_zip.py --out release.zip --check
+```
+
+Full delivery verification:
+
+```bash
+python scripts/verify_delivery.py --zip-only
+python scripts/verify_delivery.py --full
 ```
 
 The check fails if the zip contains:
@@ -101,4 +114,3 @@ Then:
 - Verify results show subtitles + final video
 - Edit a subtitle line and verify the UI reflects updated content
 - Download final video and subtitle files
-

@@ -11,6 +11,7 @@ from backend import settings
 
 SUPPORTED_VIDEO_EXTENSIONS = set(settings.SUPPORTED_VIDEO_EXTENSIONS)
 SUPPORTED_SUBTITLE_FORMATS = set(settings.EDITABLE_SUBTITLE_FORMATS)
+SAFE_LANG_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def sanitize_filename(filename: str | None) -> str:
@@ -35,10 +36,28 @@ def normalize_target_langs(raw: str) -> list[str]:
     return normalized
 
 
+def normalize_lang_suffix(lang: str) -> str:
+    normalized = re.sub(r"\s+", "_", (lang or "").strip())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Language value must not be empty")
+    if any(token in normalized for token in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail=f"Invalid language value: '{lang}'")
+    if any(ord(char) < 32 for char in normalized):
+        raise HTTPException(status_code=400, detail=f"Invalid language value: '{lang}'")
+    if not SAFE_LANG_SUFFIX_RE.fullmatch(normalized):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid language value: '{lang}'. Only alphanumeric, underscore, and hyphen allowed.",
+        )
+    return normalized
+
+
 def validate_target_langs(raw: str) -> list[str]:
     langs = normalize_target_langs(raw)
     if not langs:
         raise HTTPException(status_code=400, detail="target_langs must contain at least one non-empty language")
+    for lang in langs:
+        normalize_lang_suffix(lang)
     return langs
 
 

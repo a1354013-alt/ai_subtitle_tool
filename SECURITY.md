@@ -108,6 +108,13 @@ pip-audit -r requirements.txt
 npm audit
 ```
 
+Current frontend audit status:
+
+- `npm audit fix` has been applied to remove the prior high-severity `js-cookie` issue.
+- Remaining advisories are currently dev-only `vite` / `vitest` / `esbuild` chain findings that require a breaking major upgrade (`npm audit fix --force` currently proposes `vite@8`).
+- Runtime impact is limited because the reported issue targets the Vite development server, not the production build output.
+- Recommended follow-up: schedule a dedicated compatibility pass to upgrade `vite`, `@vitejs/plugin-vue`, and `vitest` together, then re-run frontend lint/typecheck/test/build and CI on Node 20.
+
 ### Current Dependencies
 - Backend: FastAPI, Celery, OpenAI, faster-whisper
 - Frontend: Vue 3, TypeScript, Pinia

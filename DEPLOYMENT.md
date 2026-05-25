@@ -89,5 +89,9 @@ Verification command:
 ```bash
 python scripts/verify_docker_config.py
 python scripts/verify_delivery.py --zip-only
+python scripts/verify_delivery.py --full
 python scripts/make_release_zip.py --out release.zip --check
+python scripts/verify_release_zip.py release.zip
 ```
+
+`python scripts/verify_delivery.py --full` is the pre-release closed-loop check. It runs backend compile/tests, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, then rebuilds and re-validates the release zip.

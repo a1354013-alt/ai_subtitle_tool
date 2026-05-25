@@ -9,8 +9,8 @@
     "lint": "eslint .",
     "build": "vue-tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:ci": "vitest run --pool=forks --no-file-parallelism --maxWorkers=1",
+    "test": "node ./node_modules/vitest/vitest.mjs",
+    "test:ci": "node ./node_modules/vitest/vitest.mjs run --pool=forks --poolOptions.forks.singleFork --no-file-parallelism",
     "test:watch": "vitest"
   },
   "dependencies": {

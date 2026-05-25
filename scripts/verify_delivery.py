@@ -65,10 +65,10 @@ def _run_command(command: list[str], cwd: Path, *, label: str) -> None:
     if os.name == "nt" and resolved and resolved[0] == "npm":
         resolved[0] = shutil.which("npm.cmd") or shutil.which("npm") or "npm.cmd"
 
-    print(f"[{label}] $ {' '.join(command)}", flush=True)
+    print(f"[{label}] ({cwd}) $ {' '.join(command)}", flush=True)
     completed = subprocess.run(resolved, cwd=cwd)
     if completed.returncode != 0:
-        raise SystemExit(f"[{label}] command failed ({completed.returncode}): {' '.join(command)}")
+        raise SystemExit(f"[{label}] command failed ({completed.returncode}) in {cwd}: {' '.join(command)}")
 
 
 def _read_text(path: Path) -> str:
@@ -201,6 +201,7 @@ def run_full(repo_root: Path) -> None:
     _run_command([sys.executable, "-m", "pytest", "-q"], repo_root, label="pytest")
     frontend_dir = repo_root / "frontend"
     frontend_scripts = json.loads(_read_text(frontend_dir / "package.json")).get("scripts", {})
+    _run_command(["npm", "ci"], frontend_dir, label="frontend-npm-ci")
     if "lint" in frontend_scripts:
         _run_command(["npm", "run", "lint"], frontend_dir, label="frontend-lint")
     _run_command(["npm", "run", "typecheck"], frontend_dir, label="frontend-typecheck")

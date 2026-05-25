@@ -72,8 +72,8 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Verify delivery
-        run: python scripts/verify_delivery.py
+      - name: Verify delivery zip-only
+        run: python scripts/verify_delivery.py --zip-only
 
       - name: Build checked release zip
         run: python scripts/make_release_zip.py --out release.zip --check
