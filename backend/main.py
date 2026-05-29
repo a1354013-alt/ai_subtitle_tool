@@ -246,6 +246,35 @@ def _validate_saved_video_file(file_path: str) -> None:
     )
     if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
         raise ValueError("Not a valid video file")
+    
+    # Check video duration if in demo mode
+    if settings.DEMO_MODE and settings.MAX_VIDEO_DURATION_MINUTES > 0:
+        duration_result = subprocess.run(
+            [
+                settings.FFPROBE_BINARY,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if duration_result.returncode == 0:
+            try:
+                duration_seconds = float(duration_result.stdout.strip())
+                max_seconds = settings.MAX_VIDEO_DURATION_MINUTES * 60
+                if duration_seconds > max_seconds:
+                    raise ValueError(
+                        f"Video duration ({duration_seconds / 60:.1f} min) exceeds "
+                        f"demo limit ({settings.MAX_VIDEO_DURATION_MINUTES} min)"
+                    )
+            except (ValueError, TypeError) as e:
+                logger.warning("Could not parse video duration: %s", e)
 
 
 @app.get("/healthz")
@@ -261,6 +290,10 @@ async def get_app_config():
         supportedExtensions=list(settings.SUPPORTED_VIDEO_EXTENSIONS),
         batchUploadEnabled=settings.BATCH_UPLOAD_ENABLED,
         subtitleFormats=list(settings.SUBTITLE_FORMATS),
+        translationEnabled=bool(settings.OPENAI_API_KEY),
+        openaiConfigured=bool(settings.OPENAI_API_KEY),
+        defaultTargetLanguage="Traditional Chinese",
+        availableModes=["transcribe"] + (["translate"] if settings.OPENAI_API_KEY else []),
     )
 
 
@@ -355,6 +388,17 @@ async def upload_video(
     safe_filename = _validate_uploaded_video_file(file)
     langs = validate_target_langs(target_langs)
     normalized_subtitle_format = validate_subtitle_format(subtitle_format)
+
+    # Check if translation is requested but not configured
+    if len(langs) > 1 and not settings.OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "openai_not_configured",
+                "message": "Translation not available: OpenAI API Key is not configured.",
+                "suggestion": "Set OPENAI_API_KEY in your .env file to enable translation, or request only original language subtitles."
+            }
+        )
 
     task_id = str(uuid.uuid4())
     file_extension = os.path.splitext(safe_filename)[1]
@@ -597,6 +641,17 @@ async def batch_upload_videos(
 
     langs = validate_target_langs(target_langs)
     normalized_subtitle_format = validate_subtitle_format(subtitle_format)
+    
+    # Check if translation is requested but not configured
+    if len(langs) > 1 and not settings.OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "openai_not_configured",
+                "message": "Translation not available: OpenAI API Key is not configured.",
+                "suggestion": "Set OPENAI_API_KEY in your .env file to enable translation, or request only original language subtitles."
+            }
+        )
 
     tasks_info: list[BatchTaskResponse] = []
     enqueue_jobs: List[dict[str, Any]] = []

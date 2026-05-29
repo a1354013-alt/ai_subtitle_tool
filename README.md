@@ -12,6 +12,7 @@ AI Subtitle Tool is a delivery-focused subtitle workflow for video uploads. It p
 - Explicit final-video rebuild after subtitle edits.
 - Frontend-safe task status contract with `warnings`, `error_code`, and `suggestion`.
 - Release packaging script that excludes local secrets and runtime artifacts.
+- **One-click development setup** with F5 in VS Code or command-line scripts.
 
 ## Architecture
 
@@ -25,14 +26,44 @@ flowchart LR
   W -->|read/write| S
 ```
 
-## Quick Start: Docker Compose
+## Quick Start: One-Click Development (Recommended)
 
-Docker Compose is the fastest way to run the full stack locally.
+### Method 1: VS Code F5 (Fastest)
+
+1. **Clone and open** the project in VS Code
+2. **Press F5** to launch the full development stack
+3. Wait for the terminal to show:
+   ```
+   [BACKEND] Application startup complete
+   [FRONTEND] VITE ready in ...
+   [WORKER] ready
+   ```
+4. Open [http://localhost:5173](http://localhost:5173)
+
+**What happens automatically:**
+- Python virtual environment created (`.venv/`)
+- Backend and frontend dependencies installed
+- `.env` file created from `.env.example`
+- Redis, backend API, and frontend dev server started in background
+- All subprocesses managed and stopped together with Ctrl+C
+
+### Method 2: Command Line
+
+```bash
+# One-time setup
+python scripts/dev_bootstrap.py
+
+# Start development stack
+python scripts/dev_start.py
+```
+
+Then open [http://localhost:5173](http://localhost:5173)
+
+### Method 3: Docker Compose (If Docker Available)
 
 ```bash
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
-docker compose config
 docker compose up --build
 ```
 
@@ -42,18 +73,23 @@ Services:
 - Backend API: [http://localhost:9091](http://localhost:9091)
 - Backend health: [http://localhost:9091/healthz](http://localhost:9091/healthz)
 
-Notes:
+**Notes:**
+- `docker-compose.yml` uses `backend/.env.example` as the default backend env source
+- The frontend Docker image is built with `VITE_API_BASE_URL=http://localhost:9091`
+- Runtime artifacts mounted to `backend/uploads`, `backend/outputs`, `backend/tmp`
 
-- `docker-compose.yml` uses `backend/.env.example` as the default backend env source so `docker compose up` works out of the box.
-- The frontend Docker image is built with `VITE_API_BASE_URL=http://localhost:9091` so browser requests hit the mapped backend port.
-- Runtime artifacts are mounted to `backend/uploads`, `backend/outputs`, and `backend/tmp`.
+## Quick Start: Docker Compose (Legacy)
 
-## Local Development: Backend
+## Local Development: Manual Mode
+
+> **Note:** If using VS Code or `scripts/dev_start.py`, skip this section. It's for advanced users who prefer manual control.
+
+### Backend
 
 Requirements:
 
 - Python 3.11
-- Redis
+- Redis (running separately)
 - `ffmpeg` and `ffprobe`
 
 Setup:
@@ -77,12 +113,17 @@ OUTPUT_DIR=./backend/outputs
 TEMP_DIR=./backend/tmp
 ```
 
-Run the backend stack:
+Run the backend stack (in separate terminals):
 
 ```bash
+# Terminal 1: Redis
 redis-server
+
+# Terminal 2: Celery worker
 celery -A backend.celery_app:celery_app worker --loglevel=info
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 3: Backend API
+uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Health endpoints:
@@ -91,7 +132,7 @@ Health endpoints:
 - `GET /readyz`
 - `GET /api/config`
 
-## Local Development: Frontend
+### Frontend
 
 ```bash
 cd frontend
@@ -106,6 +147,8 @@ Frontend env:
 VITE_API_BASE_URL=http://localhost:8000
 VITE_APP_TITLE=AI Subtitle Tool
 ```
+
+## Local Development: Backend
 
 ## Testing
 
@@ -244,12 +287,53 @@ Frontend example: [frontend/.env.example](frontend/.env.example)
 - `VITE_API_BASE_URL`
 - `VITE_APP_TITLE`
 
+## Translation & OpenAI Configuration
+
+### Transcribe Mode (Original Language Only)
+
+To generate subtitles in the original language only (no translation):
+
+1. **No OpenAI API Key needed**
+2. Leave `OPENAI_API_KEY` empty or unset in `.env`
+3. Upload with single target language (e.g., "Original")
+4. System will transcribe video to text without translation
+
+### Translate Mode (Requires OpenAI API Key)
+
+To generate subtitles in multiple languages (original + translations):
+
+1. **Get OpenAI API Key** from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+2. Set in `backend/.env`:
+   ```ini
+   OPENAI_API_KEY=sk-...
+   OPENAI_MODEL=gpt-4o-mini
+   TRANSLATE_MODEL=gpt-4o-mini
+   ```
+3. Upload with multiple target languages (e.g., "Traditional Chinese, English")
+4. System will transcribe AND translate subtitles
+
+### Configuration Check
+
+Call `/api/config` to check current status:
+
+```bash
+curl http://localhost:8000/api/config | jq .
+```
+
+Response includes:
+- `translationEnabled`: true if `OPENAI_API_KEY` is set
+- `openaiConfigured`: true if API key is valid
+- `availableModes`: list of available modes (`["transcribe"]` or `["transcribe", "translate"]`)
+
+If translation is not configured, uploading with multiple languages will fail with a clear error message.
+
 ## Known Limitations
 
 - End-to-end media processing still depends on local `ffmpeg`, Redis, and a running Celery worker.
 - Real transcription and translation are mocked in tests; the default suite does not call external APIs.
 - Batch ZIP names include the sanitized original filename, task id, and language suffix to avoid collisions when multiple target languages are generated.
 - Batch ZIP includes VTT subtitles generated from SRT using the same conversion path as single-file VTT downloads.
+- **S3 storage is experimental**; local file storage is the default and fully supported.
 
 ## Portfolio Highlights
 

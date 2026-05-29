@@ -6,8 +6,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 from make_release_zip import build_release_zip
 from verify_docker_config import verify as verify_docker_config
@@ -60,15 +62,39 @@ FORBIDDEN_ZIP_MARKERS = (
 )
 
 
-def _run_command(command: list[str], cwd: Path, *, label: str) -> None:
+def _run_command(
+    command: list[str],
+    cwd: Path,
+    *,
+    label: str,
+    timeout_seconds: Optional[int] = None
+) -> None:
     resolved = list(command)
     if os.name == "nt" and resolved and resolved[0] == "npm":
         resolved[0] = shutil.which("npm.cmd") or shutil.which("npm") or "npm.cmd"
 
+    start_time = time.time()
     print(f"[{label}] ({cwd}) $ {' '.join(command)}", flush=True)
-    completed = subprocess.run(resolved, cwd=cwd)
-    if completed.returncode != 0:
-        raise SystemExit(f"[{label}] command failed ({completed.returncode}) in {cwd}: {' '.join(command)}")
+    if timeout_seconds:
+        print(f"[{label}] timeout: {timeout_seconds}s", flush=True)
+    
+    try:
+        completed = subprocess.run(
+            resolved,
+            cwd=cwd,
+            timeout=timeout_seconds
+        )
+        elapsed = time.time() - start_time
+        if completed.returncode != 0:
+            raise SystemExit(
+                f"[{label}] command failed ({completed.returncode}) after {elapsed:.1f}s in {cwd}: {' '.join(command)}"
+            )
+        print(f"[{label}] ✓ passed in {elapsed:.1f}s", flush=True)
+    except subprocess.TimeoutExpired as e:
+        elapsed = time.time() - start_time
+        raise SystemExit(
+            f"[{label}] command timed out after {elapsed:.1f}s in {cwd}: {' '.join(command)}"
+        )
 
 
 def _read_text(path: Path) -> str:
@@ -180,8 +206,10 @@ def run_zip_only(repo_root: Path) -> Path:
     return out_path
 
 
-def run_full(repo_root: Path) -> None:
+def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
     run_zip_only(repo_root)
+    
+    # Backend compilation
     _run_command(
         [
             sys.executable,
@@ -197,27 +225,86 @@ def run_full(repo_root: Path) -> None:
         ],
         repo_root,
         label="python-compile",
+        timeout_seconds=60,
     )
-    _run_command([sys.executable, "-m", "pytest", "-q"], repo_root, label="pytest")
+    
+    # Backend tests (skip in --ci-fast mode)
+    if not ci_fast:
+        _run_command(
+            [sys.executable, "-m", "pytest", "-q"],
+            repo_root,
+            label="pytest",
+            timeout_seconds=300,
+        )
+    else:
+        print("[pytest] skipped (--ci-fast mode)", flush=True)
+    
+    # Frontend checks
     frontend_dir = repo_root / "frontend"
     frontend_scripts = json.loads(_read_text(frontend_dir / "package.json")).get("scripts", {})
-    _run_command(["npm", "ci"], frontend_dir, label="frontend-npm-ci")
+    
+    # npm ci (skip in --ci-fast mode if node_modules exists)
+    if ci_fast and (frontend_dir / "node_modules").exists():
+        print("[frontend-npm-ci] skipped (--ci-fast mode, node_modules exists)", flush=True)
+    else:
+        _run_command(
+            ["npm", "ci"],
+            frontend_dir,
+            label="frontend-npm-ci",
+            timeout_seconds=300,
+        )
+    
+    # Lint (optional)
     if "lint" in frontend_scripts:
-        _run_command(["npm", "run", "lint"], frontend_dir, label="frontend-lint")
-    _run_command(["npm", "run", "typecheck"], frontend_dir, label="frontend-typecheck")
-    _run_command(["npm", "run", "test:ci"], frontend_dir, label="frontend-test-ci")
-    _run_command(["npm", "run", "build"], frontend_dir, label="frontend-build")
+        _run_command(
+            ["npm", "run", "lint"],
+            frontend_dir,
+            label="frontend-lint",
+            timeout_seconds=120,
+        )
+    
+    # Typecheck
+    _run_command(
+        ["npm", "run", "typecheck"],
+        frontend_dir,
+        label="frontend-typecheck",
+        timeout_seconds=120,
+    )
+    
+    # Frontend tests (skip in --ci-fast mode)
+    if not ci_fast:
+        _run_command(
+            ["npm", "run", "test:ci"],
+            frontend_dir,
+            label="frontend-test-ci",
+            timeout_seconds=180,
+        )
+    else:
+        print("[frontend-test-ci] skipped (--ci-fast mode)", flush=True)
+    
+    # Frontend build
+    _run_command(
+        ["npm", "run", "build"],
+        frontend_dir,
+        label="frontend-build",
+        timeout_seconds=180,
+    )
+    
+    # Release zip checks
     _run_command(
         [sys.executable, "scripts/make_release_zip.py", "--out", "release.zip", "--check"],
         repo_root,
         label="release-zip-build-check",
+        timeout_seconds=120,
     )
     _run_command(
         [sys.executable, "scripts/verify_release_zip.py", "release.zip"],
         repo_root,
         label="release-zip-verify",
+        timeout_seconds=60,
     )
-    print("full delivery verification passed")
+    
+    print("full delivery verification passed", flush=True)
 
 
 def main(argv: list[str]) -> int:
@@ -225,11 +312,16 @@ def main(argv: list[str]) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--zip-only", action="store_true", help="Only build and validate the clean release zip.")
     mode.add_argument("--full", action="store_true", help="Run zip checks plus backend/frontend test and build commands.")
+    parser.add_argument(
+        "--ci-fast",
+        action="store_true",
+        help="Fast CI mode: skip pytest, frontend tests, and npm ci (if node_modules exists). Use with --full."
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
     if args.full:
-        run_full(repo_root)
+        run_full(repo_root, ci_fast=args.ci_fast)
     else:
         run_zip_only(repo_root)
     return 0

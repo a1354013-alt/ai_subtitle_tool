@@ -40,7 +40,22 @@ class LocalStorageBackend(StorageBackend):
         return None
 
 class S3StorageBackend(StorageBackend):
+    """
+    S3 Storage Backend (EXPERIMENTAL)
+    
+    This is an experimental feature and may change or break in future releases.
+    For production use, local storage is fully supported and recommended.
+    
+    Configuration environment variables:
+    - S3_BUCKET: Required to enable S3 backend
+    - S3_ENDPOINT: Custom endpoint URL (optional)
+    - S3_ACCESS_KEY: AWS/S3 access key
+    - S3_SECRET_KEY: AWS/S3 secret key
+    - S3_REGION: AWS region (default: us-east-1)
+    """
+    
     def __init__(self):
+        logger.warning("⚠️  S3 Storage Backend is EXPERIMENTAL and may change in future releases")
         try:
             import boto3
             from botocore.config import Config
@@ -55,7 +70,7 @@ class S3StorageBackend(StorageBackend):
             )
             self.bucket = os.getenv("S3_BUCKET")
         except ImportError:
-            logger.error("boto3 not installed. S3 storage will not work.")
+            logger.error("boto3 not installed. S3 storage will not work. Please install boto3 or use local storage.")
             self.s3 = None
 
     def upload_file(self, local_path: str, remote_path: str) -> bool:

@@ -52,6 +52,7 @@ CORS_ALLOW_CREDENTIALS = _get_bool("CORS_ALLOW_CREDENTIALS", False)
 
 MAX_UPLOAD_SIZE_MB = _get_int("MAX_UPLOAD_SIZE_MB", 2048)
 MAX_BATCH_FILES = _get_int("MAX_BATCH_FILES", 20)
+MAX_VIDEO_DURATION_MINUTES = _get_int("MAX_VIDEO_DURATION_MINUTES", 180)
 
 TRANSLATE_PROVIDER = (_getenv("TRANSLATE_PROVIDER", "openai") or "openai").strip().lower()
 TRANSLATE_MODEL = _getenv("TRANSLATE_MODEL", _getenv("OPENAI_MODEL", "gpt-4o-mini")) or "gpt-4o-mini"
@@ -64,6 +65,13 @@ FFMPEG_BINARY = _getenv("FFMPEG_BINARY", "ffmpeg") or "ffmpeg"
 FFPROBE_BINARY = _getenv("FFPROBE_BINARY", "ffprobe") or "ffprobe"
 
 STORAGE_BACKEND = (_getenv("STORAGE_BACKEND", "local") or "local").strip().lower()
+
+# Production guardrails
+DEMO_MODE = _get_bool("DEMO_MODE", ENVIRONMENT != "production")
+REQUIRE_AUTH_TOKEN = _get_bool("REQUIRE_AUTH_TOKEN", False)
+AUTH_TOKEN = _getenv("AUTH_TOKEN", "")
+TASK_CLEANUP_DAYS = _get_int("TASK_CLEANUP_DAYS", 7)
+RATE_LIMIT_PER_IP = _get_int("RATE_LIMIT_PER_IP", 100)  # requests per hour
 
 SUPPORTED_VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov")
 EDITABLE_SUBTITLE_FORMATS = ("srt", "ass")

@@ -7,4 +7,8 @@ class AppConfigResponse(BaseModel):
     supportedExtensions: list[str]
     batchUploadEnabled: bool
     subtitleFormats: list[str]
+    translationEnabled: bool
+    openaiConfigured: bool
+    defaultTargetLanguage: str
+    availableModes: list[str]
 

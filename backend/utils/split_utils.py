@@ -46,8 +46,9 @@ def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
         output_file = os.path.join(output_dir, f"seg_{segment_idx:03d}_{start:.0f}_{end:.0f}.mp4")
         
         # 使用 FFmpeg 切片（-c copy 無重新編碼）
+        from backend import settings
         command = [
-            "ffmpeg", "-y", "-ss", str(start), "-t", str(end - start),
+            settings.FFMPEG_BINARY, "-y", "-ss", str(start), "-t", str(end - start),
             "-i", video_path, "-c", "copy", output_file
         ]
         subprocess.run(command, check=True, capture_output=True)
@@ -77,7 +78,6 @@ def merge_segments_subtitles(segment_results):
     
     Args:
         segment_results: list of results from transcribe_segment_task
-        
     Returns:
         list of merged subtitle segments
     """

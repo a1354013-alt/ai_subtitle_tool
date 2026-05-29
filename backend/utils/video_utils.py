@@ -1,6 +1,7 @@
 import os
 import subprocess
 import re
+from backend import settings
 
 
 def get_hwaccel_params() -> list[str]:
@@ -13,12 +14,12 @@ def get_hwaccel_params() -> list[str]:
 
 def has_audio(video_path):
     """檢查影片是否有音軌"""
-    cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", video_path]
+    cmd = [settings.FFPROBE_BINARY, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", video_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     return len(result.stdout.strip()) > 0
 
 def get_video_duration(video_path):
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
+    cmd = [settings.FFPROBE_BINARY, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
     result = subprocess.run(cmd, capture_output=True, text=True)
     return float(result.stdout.strip())
 
@@ -33,7 +34,7 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
         raise RuntimeError("No audio stream found in video")
 
     cmd = [
-        "ffmpeg", "-i", input_path,
+        settings.FFMPEG_BINARY, "-i", input_path,
         "-af", f"silencedetect=noise={noise_threshold}dB:d={min_silence_duration}",
         "-f", "null", "-"
     ]
@@ -45,7 +46,7 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     
     # A) 致命級修復：確保一定會產出 output_path
     if not silence_starts:
-        subprocess.run(["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path], check=True)
+        subprocess.run([settings.FFMPEG_BINARY, "-y", "-i", input_path, "-c", "copy", output_path], check=True)
         return output_path
 
     if len(silence_starts) > len(silence_ends):
@@ -64,7 +65,7 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
 
     # A) 致命級修復：若 keep_segments 為空，至少 copy 一份
     if not keep_segments:
-        subprocess.run(["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path], check=True)
+        subprocess.run([settings.FFMPEG_BINARY, "-y", "-i", input_path, "-c", "copy", output_path], check=True)
         return output_path
 
     video_filters = ""
@@ -79,7 +80,7 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     filter_complex = f"{video_filters}{audio_filters}{concat_v}concat=n={len(keep_segments)}:v=1:a=0[outv];{concat_a}concat=n={len(keep_segments)}:v=0:a=1[outa]"
     
     cmd = [
-        "ffmpeg", "-y", "-i", input_path,
+        settings.FFMPEG_BINARY, "-y", "-i", input_path,
         "-filter_complex", filter_complex,
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
@@ -97,7 +98,7 @@ def burn_subtitles(video_path, subtitle_path, output_path):
     
     # 第一階段：快速燒錄 (aac)
     cmd_fast = [
-        "ffmpeg", "-y", "-i", video_path,
+        settings.FFMPEG_BINARY, "-y", "-i", video_path,
         "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
         *get_hwaccel_params(),
         output_path
@@ -109,7 +110,7 @@ def burn_subtitles(video_path, subtitle_path, output_path):
     except subprocess.CalledProcessError:
         # 第二階段：保守參數 Fallback
         cmd_fallback = [
-            "ffmpeg", "-y", "-i", video_path,
+            settings.FFMPEG_BINARY, "-y", "-i", video_path,
             "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
