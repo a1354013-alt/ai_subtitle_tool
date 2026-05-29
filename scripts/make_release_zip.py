@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import sys
 import zipfile
 from pathlib import Path
 
 
-EXCLUDED_DIR_NAMES = {
+EXCLUDED_DIR_NAMES = frozenset({
     ".git",
     ".github",
     "__pycache__",
@@ -32,17 +33,17 @@ EXCLUDED_DIR_NAMES = {
     ".venv",
     "venv",
     "env",
-}
+})
 
-EXCLUDED_RELATIVE_PATHS = {
+EXCLUDED_RELATIVE_PATHS = frozenset({
     "backend/uploads",
     "backend/outputs",
     "backend/tmp",
     "frontend/node_modules",
     "frontend/dist",
-}
+})
 
-EXCLUDED_GLOBS = {
+EXCLUDED_GLOBS = frozenset({
     "*.pyc",
     "*.pyo",
     "*.pyd",
@@ -54,14 +55,14 @@ EXCLUDED_GLOBS = {
     "*.key",
     "*.pem",
     "secrets.*",
-}
+})
 
-SENSITIVE_ENV_PATHS = {
+SENSITIVE_ENV_PATHS = frozenset({
     ".env",
     ".env.local",
     "backend/.env",
     "frontend/.env",
-}
+})
 
 
 def _is_env_file(rel_posix: str) -> bool:
@@ -98,21 +99,27 @@ def build_release_zip(repo_root: Path, out_path: Path) -> None:
         out_path.unlink()
 
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for abs_path in sorted(repo_root.rglob("*")):
-            if abs_path.is_dir():
-                continue
+        # Use os.walk instead of rglob to prune directories before descending
+        for dirpath, dirnames, filenames in os.walk(repo_root):
+            # Prune excluded directories in-place to prevent descending into them
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in EXCLUDED_DIR_NAMES
+            ]
+            
+            for filename in filenames:
+                abs_path = Path(dirpath) / filename
+                rel_path = abs_path.relative_to(repo_root)
+                rel_posix = rel_path.as_posix()
 
-            rel_path = abs_path.relative_to(repo_root)
-            rel_posix = rel_path.as_posix()
+                if out_rel is not None and rel_posix == out_rel:
+                    continue
+                if _is_env_file(rel_posix):
+                    continue
+                if _is_excluded(rel_posix):
+                    continue
 
-            if out_rel is not None and rel_posix == out_rel:
-                continue
-            if _is_env_file(rel_posix):
-                continue
-            if _is_excluded(rel_posix):
-                continue
-
-            archive.write(abs_path, rel_posix)
+                archive.write(abs_path, rel_posix)
 
 
 def _assert_release_zip_clean(out_path: Path) -> None:
