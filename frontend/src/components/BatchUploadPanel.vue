@@ -22,8 +22,17 @@
 
             <div class="col">
               <div class="label">Target Languages</div>
-              <input v-model="targetLangs" class="input" type="text" placeholder="Traditional Chinese" />
+              <input 
+                v-model="targetLangs" 
+                class="input" 
+                type="text" 
+                placeholder="Traditional Chinese"
+                :disabled="!config.translationEnabled || !config.openaiConfigured"
+              />
               <div class="help">Comma-separated languages.</div>
+              <div v-if="!config.translationEnabled || !config.openaiConfigured" class="help text-warning">
+                Translation is unavailable because OpenAI API Key is not configured.
+              </div>
             </div>
           </div>
 
@@ -354,4 +363,5 @@ onMounted(async () => {
 .text-success { color: #4caf50; }
 .text-danger { color: #f44336; }
 .text-muted { color: #888; }
+.text-warning { color: #ff9800; }
 </style>

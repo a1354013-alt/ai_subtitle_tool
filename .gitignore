@@ -1,14 +1,19 @@
 ```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Frontend build artifacts
+frontend/dist/
+
 # Dependencies
 node_modules/
 
-# Build artifacts
-frontend/.npm-cache/
-
-# IDE files
+# Editors
 .vscode/
 
-# Compressed files
-*.zip
-
+# Tests
+.tests/
 ```
