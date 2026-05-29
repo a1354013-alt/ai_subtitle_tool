@@ -27,6 +27,9 @@ REQUIRED_FILES = {
     "frontend/package.json",
     "requirements.txt",
     "scripts/verify_docker_config.py",
+    ".vscode/launch.json",
+    ".vscode/tasks.json",
+    ".vscode/extensions.json",
 }
 
 REQUIRED_ENV_REFERENCES = {

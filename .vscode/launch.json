@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch AI Subtitle Tool - Full Stack",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/dev_start.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            },
+            "preLaunchTask": "Bootstrap Development Environment"
+        }
+    ]
+}

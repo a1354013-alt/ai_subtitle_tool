@@ -1,19 +1,24 @@
 ```
-# Python
+# Compiled Python files
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 
-# Frontend build artifacts
-frontend/dist/
+# Logs
+*.log
 
-# Dependencies
-node_modules/
+# Temporary files
+*.tmp
 
-# Editors
+# Compressed files
+*.zip
+
+# Outputs directory
+backend/outputs/
+
+# NPM cache
+frontend/.npm-cache/
+
+# VSCode settings (but keep the directory structure)
 .vscode/
-
-# Tests
-.tests/
 ```

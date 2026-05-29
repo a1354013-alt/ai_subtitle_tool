@@ -1,0 +1,61 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "dev:bootstrap",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/dev_bootstrap.py",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "dev:start",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/dev_start.py",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "dev:verify",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/verify_delivery.py --full --ci-fast",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Bootstrap Development Environment",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/dev_bootstrap.py",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        }
+    ]
+}
