@@ -176,7 +176,7 @@ async def test_e2e_batch_upload_respects_translation_check(
         with open(sample_video_file, "rb") as f:
             r_batch = await client.post(
                 "/batch/upload",
-                files={"files": [("test.mp4", f, "video/mp4")]},
+                files=[("files", ("test.mp4", f, "video/mp4"))],
                 data={
                     "target_langs": "Traditional Chinese, English",
                     "burn_subtitles": "true",
