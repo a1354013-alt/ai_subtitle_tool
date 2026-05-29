@@ -32,6 +32,16 @@ REQUIRED_FILES = {
     ".vscode/extensions.json",
 }
 
+FORBIDDEN_GITIGNORE_PATTERNS = (
+    "```",
+)
+
+REQUIRED_GITIGNORE_PATTERNS = (
+    "!.vscode/launch.json",
+    "!.vscode/tasks.json",
+    "!.vscode/extensions.json",
+)
+
 REQUIRED_ENV_REFERENCES = {
     "README.md": ["backend/.env.example", "frontend/.env.example"],
     "DEPLOYMENT.md": ["backend/.env.example"],
@@ -111,6 +121,36 @@ def _iter_markdown_docs(repo_root: Path) -> list[Path]:
         for path in sorted(repo_root.rglob("*.md"))
         if not ignored_parts.intersection(path.relative_to(repo_root).parts)
     ]
+
+
+def _verify_gitignore(repo_root: Path) -> None:
+    """Verify .gitignore does not contain forbidden patterns and has required patterns."""
+    gitignore_path = repo_root / ".gitignore"
+    if not gitignore_path.exists():
+        raise SystemExit(".gitignore file is missing")
+    
+    content = _read_text(gitignore_path)
+    
+    # Check for forbidden patterns (markdown code fences)
+    for pattern in FORBIDDEN_GITIGNORE_PATTERNS:
+        if pattern in content:
+            raise SystemExit(f".gitignore contains forbidden pattern: {pattern}")
+    
+    # Check for required patterns
+    for pattern in REQUIRED_GITIGNORE_PATTERNS:
+        if pattern not in content:
+            raise SystemExit(f".gitignore missing required pattern: {pattern}")
+    
+    # Verify .vscode/ is not broadly ignored without exceptions
+    lines = content.splitlines()
+    vscode_broadly_ignored = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == ".vscode/" or stripped == ".vscode/*":
+            vscode_broadly_ignored = True
+    
+    if not vscode_broadly_ignored:
+        raise SystemExit(".gitignore must ignore .vscode/* but allow specific files via negation patterns")
 
 
 def _verify_required_files(repo_root: Path) -> None:
@@ -194,6 +234,7 @@ def _verify_zip_contents(out_path: Path) -> None:
 
 
 def run_zip_only(repo_root: Path) -> Path:
+    _verify_gitignore(repo_root)
     _verify_required_files(repo_root)
     _verify_docs(repo_root)
     _verify_frontend_scripts(repo_root)
