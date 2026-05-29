@@ -13,6 +13,7 @@ import sys
 import signal
 import time
 import argparse
+import threading
 from pathlib import Path
 from typing import Optional, List
 
@@ -98,10 +99,32 @@ class ProcessManager:
             
             self.processes[name] = process
             success(f"{name} started (PID: {process.pid})")
+            
+            # Start a thread to monitor and print output in real-time
+            thread = threading.Thread(target=self._stream_output, args=(name,), daemon=True)
+            thread.start()
+            
             return True
         except Exception as e:
             error(f"Failed to start {name}: {e}")
             return False
+    
+    def _stream_output(self, name: str):
+        """Stream output from a process in real-time."""
+        if name not in self.processes:
+            return
+        
+        process = self.processes[name]
+        try:
+            for line in process.stdout:
+                if line.strip():
+                    print(f"[{name}] {line.rstrip()}", flush=True)
+        except Exception:
+            pass
+        finally:
+            return_code = process.wait()
+            if return_code != 0 and not self.stopped:
+                error(f"{name} exited with code {return_code}")
     
     def monitor_process(self, name: str):
         """Monitor a single process and print its output."""
@@ -403,13 +426,16 @@ def main():
         env_vars={"VITE_API_BASE_URL": "http://127.0.0.1:8000"}
     )
     
-    # Start Celery worker
-    manager.add_process(
-        "WORKER",
-        [py_exe, "-m", "celery", "-A", "backend.celery_app:celery_app", "worker", "--loglevel=info"],
-        cwd=ROOT_DIR,
-        env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", **redis_env_vars}
-    )
+    # Start Celery worker only if Redis is available (not in eager mode)
+    if redis_available:
+        manager.add_process(
+            "WORKER",
+            [py_exe, "-m", "celery", "-A", "backend.celery_app:celery_app", "worker", "--loglevel=info"],
+            cwd=ROOT_DIR,
+            env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", **redis_env_vars}
+        )
+    else:
+        info("[DEV] Skipping Celery worker because eager mode is enabled.")
     
     print()
     print("=" * 70)
