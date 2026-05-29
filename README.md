@@ -26,40 +26,9 @@ flowchart LR
   W -->|read/write| S
 ```
 
-## Quick Start: One-Click Development (Recommended)
+## Quick Start
 
-### Method 1: VS Code F5 (Fastest)
-
-1. **Clone and open** the project in VS Code
-2. **Press F5** to launch the full development stack
-3. Wait for the terminal to show:
-   ```
-   [BACKEND] Application startup complete
-   [FRONTEND] VITE ready in ...
-   [WORKER] ready
-   ```
-4. Open [http://localhost:5173](http://localhost:5173)
-
-**What happens automatically:**
-- Python virtual environment created (`.venv/`)
-- Backend and frontend dependencies installed
-- `.env` file created from `.env.example`
-- Redis, backend API, and frontend dev server started in background
-- All subprocesses managed and stopped together with Ctrl+C
-
-### Method 2: Command Line
-
-```bash
-# One-time setup
-python scripts/dev_bootstrap.py
-
-# Start development stack
-python scripts/dev_start.py
-```
-
-Then open [http://localhost:5173](http://localhost:5173)
-
-### Method 3: Docker Compose (If Docker Available)
+### Option A: Docker Compose
 
 ```bash
 cp backend/.env.example backend/.env
@@ -73,20 +42,21 @@ Services:
 - Backend API: [http://localhost:9091](http://localhost:9091)
 - Backend health: [http://localhost:9091/healthz](http://localhost:9091/healthz)
 
-**Notes:**
-- `docker-compose.yml` uses `backend/.env.example` as the default backend env source
-- The frontend Docker image is built with `VITE_API_BASE_URL=http://localhost:9091`
-- Runtime artifacts mounted to `backend/uploads`, `backend/outputs`, `backend/tmp`
+### Option B: VS Code F5
 
-## Quick Start: Docker Compose (Legacy)
+1. Clone and open the project in VS Code.
+2. Press **F5** to launch the backend, frontend, and worker stack.
+3. Wait for the terminal messages:
+   ```
+   [BACKEND] Application startup complete
+   [FRONTEND] VITE ready in ...
+   [WORKER] ready
+   ```
+4. Open [http://localhost:5173](http://localhost:5173)
 
-## Local Development: Backend
+### Option C: Manual Local Development
 
-## Local Development: Frontend
-
-> **Note:** If using VS Code or `scripts/dev_start.py`, skip this section. It's for advanced users who prefer manual control.
-
-### Backend
+#### Backend
 
 Requirements:
 
@@ -134,7 +104,7 @@ Health endpoints:
 - `GET /readyz`
 - `GET /api/config`
 
-### Frontend
+#### Frontend
 
 ```bash
 cd frontend
@@ -149,10 +119,6 @@ Frontend env:
 VITE_API_BASE_URL=http://localhost:8000
 VITE_APP_TITLE=AI Subtitle Tool
 ```
-
-## Local Development: Backend
-
-## Local Development: Frontend
 
 ## Testing
 
@@ -180,6 +146,8 @@ Notes:
 - `npm test` starts Vitest watch mode for local development.
 - `npm run test:ci` is the CI-safe, non-watch command and must exit on its own.
 
+> Authentication and rate limiting settings are reserved for future production hardening and are not enforced in the current local demo build.
+
 Docker contract:
 
 ```bash
@@ -197,6 +165,9 @@ python benchmarks/run_benchmarks.py --smoke
 `--smoke` is CI-safe and does not download Whisper models. For local machine-specific measurements, see [benchmarks/performance_report.md](benchmarks/performance_report.md).
 
 ## Release Packaging
+
+- GitHub Actions workflow exists in the source repository but is excluded from release archives.
+
 
 Use the Python script as the single source of truth:
 
@@ -326,7 +297,7 @@ curl http://localhost:8000/api/config | jq .
 
 Response includes:
 - `translationEnabled`: true if `OPENAI_API_KEY` is set
-- `openaiConfigured`: true if API key is valid
+- `openaiConfigured`: true when `OPENAI_API_KEY` is present. Actual key validity is checked when translation is requested.
 - `availableModes`: list of available modes (`["transcribe"]` or `["transcribe", "translate"]`)
 
 If translation is not configured, uploading with multiple languages will fail with a clear error message.

@@ -4,6 +4,9 @@ from celery.schedules import crontab
 
 from . import settings
 
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
 celery_app = Celery(
     "video_tasks",
     broker=settings.CELERY_BROKER_URL,
@@ -41,6 +44,17 @@ celery_app.conf.update(
     },
 )
 
-if os.getenv("PYTEST_CURRENT_TEST") is not None or os.getenv("TESTING", "").lower() == "true":
-    celery_app.conf.task_always_eager = True
-    celery_app.conf.task_eager_propagates = True
+task_always_eager = (
+    _env_truthy("CELERY_TASK_ALWAYS_EAGER")
+    or _env_truthy("TESTING")
+    or bool(os.getenv("PYTEST_CURRENT_TEST"))
+)
+
+task_eager_propagates = (
+    _env_truthy("CELERY_TASK_EAGER_PROPAGATES")
+    or _env_truthy("TESTING")
+    or bool(os.getenv("PYTEST_CURRENT_TEST"))
+)
+
+celery_app.conf.task_always_eager = task_always_eager
+celery_app.conf.task_eager_propagates = task_eager_propagates

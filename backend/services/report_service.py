@@ -4,6 +4,10 @@ import subprocess
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+# Experimental report generation service.
+# This file is preserved for future feature work but is not exposed as a public API endpoint
+# in the current release. Users should not rely on PDF report generation as a shipped feature.
+
 logger = logging.getLogger(__name__)
 
 def generate_report_data(task_id: str, task_status_info: Dict[str, Any], history_entry: Optional[Any]) -> Dict[str, Any]:

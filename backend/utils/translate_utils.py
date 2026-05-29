@@ -30,6 +30,28 @@ def get_openai_client():
     return _openai_client
 
 
+def is_translation_request(target_lang: str, source_lang: str | None = None) -> bool:
+    """Return True when the target language requires translation.
+
+    Original/source/auto and source-equivalent target languages are not translated.
+    """
+    normalized = (target_lang or "").strip().lower()
+    if normalized in {"original", "source", "auto", ""}:
+        return False
+    if source_lang and normalized == source_lang.strip().lower():
+        return False
+    return True
+
+
+def should_translate(target_lang: str, source_lang: str | None = None, openai_enabled: bool = False) -> bool:
+    """Decide whether translation should run for a language.
+
+    Only translate when the target is not original/source/auto, the target differs from
+    the source, and OpenAI is configured.
+    """
+    return openai_enabled and is_translation_request(target_lang, source_lang)
+
+
 def is_retriable_exception(exception: Exception) -> bool:
     """
     P1.4 統一重試策略：單一判斷函式。

@@ -41,7 +41,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
     """
 
     # Lazy imports to keep this module importable in lightweight test environments.
-    from .utils.translate_utils import translate_segments, generate_bilingual_srt
+    from .utils.translate_utils import translate_segments, generate_bilingual_srt, should_translate
     from .utils.ass_utils import generate_ass
     from .utils.split_utils import merge_segments_subtitles
     from .utils.subtitle_video_utils import burn_subtitles
@@ -123,33 +123,46 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
 
         translations = {}
         translation_metadata = []
+        openai_enabled = bool(settings.OPENAI_API_KEY)
+
         for lang in target_langs:
             if is_task_canceled(upload_dir, business_id):
                 raise RuntimeError("Task canceled")
-            try:
-                lang_trans, _ = translate_segments(segments, "Auto", [lang])
-                translations[lang] = lang_trans[lang]
-                translation_metadata.append(
-                    {
-                        "language": lang,
-                        "translated": True,
-                        "fallback_reason": None,
-                    }
-                )
-            except Exception as e:
-                fallback_reason = f"translation provider unavailable: {e}"
-                msg = f"Translation to {lang} failed: {e}. Using original text."
-                warnings.append(msg)
+
+            if should_translate(lang, "Auto", openai_enabled):
+                try:
+                    lang_translations, _ = translate_segments(segments, "Auto", [lang])
+                    translations[lang] = lang_translations[lang]
+                    translation_metadata.append(
+                        {
+                            "language": lang,
+                            "translated": True,
+                            "fallback_reason": None,
+                        }
+                    )
+                except Exception as e:
+                    fallback_reason = f"translation provider unavailable: {e}"
+                    msg = f"Translation to {lang} failed: {e}. Using original text."
+                    warnings.append(msg)
+                    translations[lang] = [s.text for s in segments]
+                    translation_metadata.append(
+                        {
+                            "language": lang,
+                            "translated": False,
+                            "fallback_reason": fallback_reason,
+                        }
+                    )
+                    if update_state_func:
+                        update_state_func(state="PROGRESS", meta={"progress": 70, "status": msg})
+            else:
                 translations[lang] = [s.text for s in segments]
                 translation_metadata.append(
                     {
                         "language": lang,
                         "translated": False,
-                        "fallback_reason": fallback_reason,
+                        "fallback_reason": None,
                     }
                 )
-                if update_state_func:
-                    update_state_func(state="PROGRESS", meta={"progress": 70, "status": msg})
 
         if update_state_func:
             update_state_func(state="PROGRESS", meta={"progress": 85, "status": "Generating final subtitles..."})

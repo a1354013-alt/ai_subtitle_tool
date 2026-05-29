@@ -143,13 +143,15 @@ def _verify_gitignore(repo_root: Path) -> None:
     
     # Verify .vscode/ is not broadly ignored without exceptions
     lines = content.splitlines()
-    vscode_broadly_ignored = False
+    vscode_ignore_pattern = False
     for line in lines:
         stripped = line.strip()
-        if stripped == ".vscode/" or stripped == ".vscode/*":
-            vscode_broadly_ignored = True
+        if stripped == ".vscode/*":
+            vscode_ignore_pattern = True
+        if stripped == ".vscode/":
+            raise SystemExit("Do not ignore the entire .vscode/ directory. Use .vscode/* with explicit negations for workspace files.")
     
-    if not vscode_broadly_ignored:
+    if not vscode_ignore_pattern:
         raise SystemExit(".gitignore must ignore .vscode/* but allow specific files via negation patterns")
 
 
