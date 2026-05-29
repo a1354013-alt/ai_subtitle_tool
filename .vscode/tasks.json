@@ -4,7 +4,8 @@
         {
             "label": "dev:bootstrap",
             "type": "shell",
-            "command": "${workspaceFolder}/scripts/dev_bootstrap.py",
+            "command": "python",
+            "args": ["${workspaceFolder}/scripts/dev_bootstrap.py"],
             "problemMatcher": [],
             "group": {
                 "kind": "build",
@@ -18,7 +19,8 @@
         {
             "label": "dev:start",
             "type": "shell",
-            "command": "${workspaceFolder}/scripts/dev_start.py",
+            "command": "python",
+            "args": ["${workspaceFolder}/scripts/dev_start.py"],
             "problemMatcher": [],
             "group": {
                 "kind": "build",
@@ -32,7 +34,12 @@
         {
             "label": "dev:verify",
             "type": "shell",
-            "command": "${workspaceFolder}/scripts/verify_delivery.py --full --ci-fast",
+            "command": "python",
+            "args": [
+                "${workspaceFolder}/scripts/verify_delivery.py",
+                "--full",
+                "--ci-fast"
+            ],
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -46,7 +53,8 @@
         {
             "label": "Bootstrap Development Environment",
             "type": "shell",
-            "command": "${workspaceFolder}/scripts/dev_bootstrap.py",
+            "command": "python",
+            "args": ["${workspaceFolder}/scripts/dev_bootstrap.py"],
             "problemMatcher": [],
             "group": {
                 "kind": "build",
