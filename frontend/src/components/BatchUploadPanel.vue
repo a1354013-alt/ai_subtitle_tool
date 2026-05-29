@@ -122,6 +122,10 @@ const config = ref<AppConfig>({
   supportedExtensions: [".mp4", ".mkv", ".avi", ".mov"],
   batchUploadEnabled: true,
   subtitleFormats: ["srt", "ass", "vtt"],
+  translationEnabled: false,
+  openaiConfigured: false,
+  defaultTargetLanguage: "English",
+  availableModes: ["transcribe"],
 });
 const showDownloadZip = computed(() => (batchStatus.value?.completed ?? 0) > 0);
 const totalSizeText = computed(() =>

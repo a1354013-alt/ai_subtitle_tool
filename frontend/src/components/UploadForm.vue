@@ -15,8 +15,17 @@
 
           <div class="col">
             <div class="label">{{ $t('upload.targetLanguages') }}</div>
-            <input v-model="targetLangs" class="input" type="text" placeholder="Traditional Chinese" />
-            <div class="help">Comma-separated languages, e.g. <code class="mono">Traditional Chinese, English</code>.</div>
+            <input 
+              v-model="targetLangs" 
+              class="input" 
+              type="text" 
+              :placeholder="translationPlaceholder"
+              :disabled="!isTranslationAvailable"
+            />
+            <div v-if="!isTranslationAvailable" class="help text-warning">
+              {{ translationUnavailableMessage }}
+            </div>
+            <div v-else class="help">Comma-separated languages, e.g. <code class="mono">Traditional Chinese, English</code>.</div>
           </div>
         </div>
 
@@ -71,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, computed } from "vue";
 import { getAppConfig } from "@/api/config";
 import type { AppConfig } from "@/types/api";
 import type { SubtitleFormat } from "@/types/subtitle";
@@ -100,9 +109,31 @@ const config = ref<AppConfig>({
   supportedExtensions: [".mp4", ".mkv", ".avi", ".mov"],
   batchUploadEnabled: true,
   subtitleFormats: ["srt", "ass", "vtt"],
+  translationEnabled: false,
+  openaiConfigured: false,
+  defaultTargetLanguage: "English",
+  availableModes: ["transcribe"],
 });
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "(same origin)";
+
+const isTranslationAvailable = computed(() => {
+  return config.value.translationEnabled && config.value.openaiConfigured;
+});
+
+const translationPlaceholder = computed(() => {
+  if (isTranslationAvailable.value) {
+    return "Traditional Chinese";
+  }
+  return "OpenAI not configured - transcription only";
+});
+
+const translationUnavailableMessage = computed(() => {
+  if (!config.value.openaiConfigured) {
+    return "Translation is unavailable because OpenAI API Key is not configured.";
+  }
+  return "Translation is currently disabled.";
+});
 
 function validateSelectedFile(selected: File | null): string {
   if (!selected) return "";

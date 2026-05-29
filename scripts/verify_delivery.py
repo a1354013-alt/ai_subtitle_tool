@@ -135,7 +135,7 @@ def _verify_docs(repo_root: Path) -> None:
         "## Project Overview",
         "## Features",
         "## Architecture",
-        "## Quick Start: Docker Compose",
+        "## Quick Start: One-Click Development (Recommended)",
         "## Local Development: Backend",
         "## Local Development: Frontend",
         "## Testing",
