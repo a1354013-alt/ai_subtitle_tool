@@ -1,0 +1,2 @@
+# Back-compat shim; prefer `requirements.optional-diarization.txt`.
+-r requirements.optional-diarization.txt

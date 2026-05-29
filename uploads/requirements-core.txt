@@ -1,0 +1,2 @@
+# Back-compat shim; single source of truth is `requirements.lock.txt`.
+-r requirements.lock.txt

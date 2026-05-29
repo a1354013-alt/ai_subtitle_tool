@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python3 scripts/make_release_zip.py --out release.zip --check
+

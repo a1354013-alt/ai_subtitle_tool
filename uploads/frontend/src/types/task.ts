@@ -1,0 +1,23 @@
+export type TaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE" | "CANCELED";
+
+export type TaskStatusResponse = {
+  task_id: string;
+  status: TaskStatus | string;
+  progress: number;
+  message?: string | null;
+  result_url?: string | null;
+  warnings: string[];
+  error_code?: string;
+  suggestion?: string;
+};
+
+export type UploadTaskResponse = TaskStatusResponse;
+
+export type RecentTask = {
+  task_id: string;
+  filename: string;
+  status: string;
+  created_at: string;
+  duration_seconds?: number | null;
+};
+
