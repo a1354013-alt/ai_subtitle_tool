@@ -19,6 +19,11 @@ export type AppConfig = {
   supportedExtensions: string[];
   batchUploadEnabled: boolean;
   subtitleFormats: string[];
+
+  translationEnabled: boolean;
+  openaiConfigured: boolean;
+  defaultTargetLanguage: string;
+  availableModes: string[];
 };
 
 export type BatchTaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE" | "CANCELED";

@@ -1,1 +1,14 @@
-Nothing needs to be added to .gitignore since the changes only include test Python files (.py) which are source code and should not be ignored.
+```
+# Dependencies
+node_modules/
+
+# Build artifacts
+frontend/.npm-cache/
+
+# IDE files
+.vscode/
+
+# Compressed files
+*.zip
+
+```

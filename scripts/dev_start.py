@@ -3,12 +3,16 @@
 Development stack starter script.
 Manages all subprocesses (backend, frontend, worker, Redis) in a single process.
 Handles graceful shutdown on Ctrl+C.
+
+Automatically runs bootstrap if prerequisites are missing.
+Automatically starts Redis via Docker or falls back to Celery eager mode.
 """
 import os
 import subprocess
 import sys
 import signal
 import time
+import argparse
 from pathlib import Path
 from typing import Optional, List
 
@@ -29,6 +33,10 @@ def success(msg: str):
 
 def error(msg: str):
     print(f"[✗] {msg}", flush=True, file=sys.stderr)
+
+
+def warn(msg: str):
+    print(f"[⚠] {msg}", flush=True)
 
 
 def get_python_exe() -> str:
@@ -192,6 +200,142 @@ def check_redis_running() -> bool:
         return False
 
 
+def check_docker_available() -> bool:
+    """Check if Docker is available."""
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except:
+        return False
+
+
+def start_redis_with_docker() -> bool:
+    """Start Redis using Docker if not already running."""
+    # Check if redis container already exists
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--filter", "name=redis-dev", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if "redis-dev" in result.stdout:
+            success("Redis container already running")
+            return True
+        
+        # Start new Redis container
+        info("Starting Redis container...")
+        subprocess.run(
+            ["docker", "run", "-d", "--name", "redis-dev", "-p", "6379:6379", "redis:7-alpine"],
+            capture_output=True,
+            timeout=30
+        )
+        time.sleep(2)  # Wait for Redis to start
+        return check_redis_running()
+    except Exception as e:
+        warn(f"Failed to start Redis via Docker: {e}")
+        return False
+
+
+def ensure_prerequisites():
+    """Ensure all prerequisites are met, running bootstrap if needed."""
+    needs_bootstrap = False
+    
+    # Check venv
+    if not VENV_DIR.exists():
+        error(f"Virtual environment not found at {VENV_DIR}")
+        needs_bootstrap = True
+    
+    # Check .env
+    if not ENV_FILE.exists():
+        error(f"Environment file not found at {ENV_FILE}")
+        needs_bootstrap = True
+    
+    # Check node_modules
+    if not (FRONTEND_DIR / "node_modules").exists():
+        error(f"Frontend dependencies not installed")
+        needs_bootstrap = True
+    
+    if needs_bootstrap:
+        info("Running bootstrap to set up missing prerequisites...")
+        bootstrap_script = ROOT_DIR / "scripts" / "dev_bootstrap.py"
+        result = subprocess.run([sys.executable, str(bootstrap_script)], cwd=ROOT_DIR)
+        if result.returncode != 0:
+            error("Bootstrap failed. Please fix the errors above and try again.")
+            sys.exit(1)
+        success("Bootstrap completed successfully")
+    
+    # Re-check after bootstrap
+    if not VENV_DIR.exists():
+        error(f"Virtual environment still not found after bootstrap")
+        sys.exit(1)
+    
+    if not (FRONTEND_DIR / "node_modules").exists():
+        error(f"Frontend dependencies still not installed after bootstrap")
+        sys.exit(1)
+
+
+def setup_redis_mode(redis_mode: str) -> tuple[bool, dict]:
+    """
+    Setup Redis based on mode. Returns (redis_available, env_vars).
+    
+    Modes:
+    - "auto": Try Docker first, fallback to eager
+    - "docker": Use Docker for Redis
+    - "eager": Use Celery eager mode
+    - "external": Assume Redis is running externally
+    """
+    env_vars = {}
+    
+    if redis_mode == "eager":
+        info("Using Celery eager mode (no Redis required)")
+        env_vars["CELERY_TASK_ALWAYS_EAGER"] = "true"
+        env_vars["CELERY_TASK_EAGER_PROPAGATES"] = "true"
+        return False, env_vars
+    
+    if redis_mode == "external":
+        if check_redis_running():
+            success("Redis is running externally")
+            return True, env_vars
+        else:
+            error("Redis mode is 'external' but Redis is not running on localhost:6379")
+            sys.exit(1)
+    
+    if redis_mode == "docker":
+        if check_docker_available():
+            if start_redis_with_docker():
+                success("Redis started via Docker")
+                return True, env_vars
+            else:
+                error("Failed to start Redis via Docker")
+                sys.exit(1)
+        else:
+            error("Docker not available but --redis docker was specified")
+            sys.exit(1)
+    
+    # Auto mode: try Docker first, fallback to eager
+    if check_redis_running():
+        success("Redis is already running")
+        return True, env_vars
+    
+    if check_docker_available():
+        if start_redis_with_docker():
+            success("Redis started via Docker")
+            return True, env_vars
+        else:
+            warn("Failed to start Redis via Docker, falling back to eager mode")
+    
+    # Fallback to eager mode
+    info("[dev] Redis unavailable; using Celery eager dev mode.")
+    env_vars["CELERY_TASK_ALWAYS_EAGER"] = "true"
+    env_vars["CELERY_TASK_EAGER_PROPAGATES"] = "true"
+    return False, env_vars
+
+
 def check_port_available(port: int) -> bool:
     """Check if a port is available."""
     try:
@@ -205,34 +349,31 @@ def check_port_available(port: int) -> bool:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="AI Subtitle Tool - Development Stack Starter")
+    parser.add_argument(
+        "--redis",
+        choices=["auto", "docker", "eager", "external"],
+        default="auto",
+        help="Redis mode: auto (default), docker, eager, or external"
+    )
+    args = parser.parse_args()
+    
     print("=" * 70)
     print("AI Subtitle Tool - Development Stack Starter")
     print("=" * 70)
     print()
     
-    # Check prerequisites
-    if not check_prerequisites():
-        sys.exit(1)
+    # Ensure prerequisites (auto-run bootstrap if needed)
+    ensure_prerequisites()
+    
+    # Setup Redis
+    redis_available, redis_env_vars = setup_redis_mode(args.redis)
     
     print()
     info("Starting full development stack...")
     print()
     
     manager = ProcessManager()
-    
-    # Check if Redis is running
-    redis_running = check_redis_running()
-    if not redis_running:
-        warn("Redis not running on localhost:6379")
-        info("You can start Redis with: docker run -d -p 6379:6379 redis:7-alpine")
-        info("Or: redis-server")
-        print()
-        response = input("Start without Redis? (y/n): ").strip().lower()
-        if response != "y":
-            info("Aborted.")
-            sys.exit(1)
-    else:
-        success("Redis is running")
     
     # Check if ports are available
     if not check_port_available(8000):
@@ -246,18 +387,12 @@ def main():
     
     py_exe = get_python_exe()
     
-    # Start background services first
-    if redis_running:
-        info("Redis already running, skipping")
-    else:
-        info("Note: Redis should be running separately")
-    
     # Start backend
     manager.add_process(
         "BACKEND",
         [py_exe, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
         cwd=ROOT_DIR,
-        env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development"}
+        env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", **redis_env_vars}
     )
     
     # Start frontend
@@ -273,7 +408,7 @@ def main():
         "WORKER",
         [py_exe, "-m", "celery", "-A", "backend.celery_app:celery_app", "worker", "--loglevel=info"],
         cwd=ROOT_DIR,
-        env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development"}
+        env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", **redis_env_vars}
     )
     
     print()
@@ -285,6 +420,8 @@ def main():
     print("  Backend:  http://localhost:8000")
     print("  API Docs: http://localhost:8000/api/docs")
     print()
+    if not redis_available:
+        print("Note: Running in Celery eager mode (no Redis)")
     print("To stop: Press Ctrl+C")
     print("=" * 70)
     print()
@@ -301,10 +438,6 @@ def main():
         pass
     finally:
         manager.shutdown()
-
-
-def warn(msg: str):
-    print(f"[⚠] {msg}", flush=True)
 
 
 if __name__ == "__main__":

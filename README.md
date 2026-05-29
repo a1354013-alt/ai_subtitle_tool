@@ -80,7 +80,9 @@ Services:
 
 ## Quick Start: Docker Compose (Legacy)
 
-## Local Development: Manual Mode
+## Local Development: Backend
+
+## Local Development: Frontend
 
 > **Note:** If using VS Code or `scripts/dev_start.py`, skip this section. It's for advanced users who prefer manual control.
 
@@ -149,6 +151,8 @@ VITE_APP_TITLE=AI Subtitle Tool
 ```
 
 ## Local Development: Backend
+
+## Local Development: Frontend
 
 ## Testing
 
