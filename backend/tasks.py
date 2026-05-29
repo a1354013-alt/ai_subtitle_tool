@@ -301,17 +301,28 @@ def process_video_task(self, video_path: str, options: dict = None):
             logger.warning("Failed to remove task lock after exception: business_id=%s", business_id, exc_info=True)
         
         from .utils.error_handler import handle_known_error, get_error_response
+        from .utils.task_control_utils import build_task_failure_payload, write_task_error_artifact
+        
         error_code = handle_known_error(e)
         error_info = get_error_response(error_code)
+        
+        # Build stable failure payload and write to artifact for persistence
+        failure_payload = build_task_failure_payload(
+            error_code=error_code,
+            message=error_info["message"],
+            suggestion=error_info["suggestion"]
+        )
+        
+        # Write to artifact file as backup (survives Celery meta override)
+        upload_dir = settings.get_upload_dir()
+        write_task_error_artifact(business_id, upload_dir, failure_payload)
         
         self.update_state(
             state="FAILURE",
             meta={
                 "progress": 0,
                 "status": "FAILED",
-                "error_code": error_code,
-                "message": error_info["message"],
-                "suggestion": error_info["suggestion"]
+                **failure_payload
             }
         )
         raise
