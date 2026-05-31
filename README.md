@@ -26,7 +26,7 @@ flowchart LR
   W -->|read/write| S
 ```
 
-## Quick Start
+## Quick Start: One-Click Development (Recommended)
 
 ### Option A: Docker Compose
 
@@ -56,7 +56,7 @@ Services:
 
 ### Option C: Manual Local Development
 
-#### Backend
+## Local Development: Backend
 
 Requirements:
 
@@ -104,7 +104,7 @@ Health endpoints:
 - `GET /readyz`
 - `GET /api/config`
 
-#### Frontend
+## Local Development: Frontend
 
 ```bash
 cd frontend

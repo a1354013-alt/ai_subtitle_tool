@@ -1,4 +1,3 @@
-```
 # Python compiled files
 __pycache__/
 *.pyc
@@ -57,4 +56,12 @@ Thumbs.db
 .mypy_cache/
 # Pytest cache
 .pytest_cache/
-```
+
+# Runtime generated files
+backend/tmp/*
+backend/outputs/*
+uploads/**/batch_*.json
+
+# Keep folder placeholders
+!backend/tmp/.gitkeep
+!backend/outputs/.gitkeep
