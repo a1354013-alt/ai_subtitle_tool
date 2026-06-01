@@ -97,7 +97,7 @@ const props = withDefaults(
   { submitting: false }
 );
 
-const targetLangs = ref("Traditional Chinese");
+const targetLangs = ref("Original");
 const subtitleFormat = ref<SubtitleFormat>("ass");
 const burnSubtitles = ref(true);
 const removeSilence = ref(false);
@@ -111,7 +111,7 @@ const config = ref<AppConfig>({
   subtitleFormats: ["srt", "ass", "vtt"],
   translationEnabled: false,
   openaiConfigured: false,
-  defaultTargetLanguage: "English",
+  defaultTargetLanguage: "Original",
   availableModes: ["transcribe"],
 });
 
@@ -151,6 +151,12 @@ function validateSelectedFile(selected: File | null): string {
   return "";
 }
 
+function applyDefaultTargetLanguage() {
+  targetLangs.value = isTranslationAvailable.value
+    ? config.value.defaultTargetLanguage || "Traditional Chinese"
+    : "Original";
+}
+
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
   const selected = input.files?.[0] ?? null;
@@ -168,7 +174,7 @@ async function onSubmit() {
   if (!file.value || validationError.value) return;
   const fd = new FormData();
   fd.append("file", file.value);
-  fd.append("target_langs", targetLangs.value);
+  fd.append("target_langs", isTranslationAvailable.value ? targetLangs.value : "Original");
   fd.append("subtitle_format", subtitleFormat.value);
   fd.append("burn_subtitles", String(burnSubtitles.value));
   fd.append("remove_silence", String(removeSilence.value));
@@ -179,8 +185,10 @@ async function onSubmit() {
 onMounted(async () => {
   try {
     config.value = await getAppConfig();
+    applyDefaultTargetLanguage();
   } catch {
     // Keep built-in defaults when the config endpoint is temporarily unavailable.
+    applyDefaultTargetLanguage();
   }
 });
 </script>

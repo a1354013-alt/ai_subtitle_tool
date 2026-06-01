@@ -65,6 +65,10 @@ async function mountPanel() {
     supportedExtensions: [".mp4", ".mkv", ".avi", ".mov"],
     batchUploadEnabled: true,
     subtitleFormats: ["srt", "ass", "vtt"],
+    translationEnabled: false,
+    openaiConfigured: false,
+    defaultTargetLanguage: "Original",
+    availableModes: ["transcribe"],
   });
   const wrapper = mount(BatchUploadPanel);
   await flushPromises();
@@ -127,5 +131,23 @@ describe("BatchUploadPanel", () => {
 
     expect(wrapper.text()).toContain("Unsupported file format");
     expect(mockUploadBatch).not.toHaveBeenCalled();
+  });
+
+  it("submits Original when translation is unavailable", async () => {
+    mockUploadBatch.mockResolvedValueOnce({ batch_id: "batch-123", tasks: [] });
+    mockGetBatchStatus.mockResolvedValueOnce(makeBatchStatus("PENDING"));
+
+    const wrapper = await mountPanel();
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", {
+      configurable: true,
+      value: [new File(["video"], "demo.mp4", { type: "video/mp4" })],
+    });
+    await input.trigger("change");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = mockUploadBatch.mock.calls[0][0] as FormData;
+    expect(payload.get("target_langs")).toBe("Original");
   });
 });

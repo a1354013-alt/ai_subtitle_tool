@@ -108,10 +108,13 @@ Health endpoints:
 
 ```bash
 cd frontend
+nvm use
 npm ci
 cp .env.example .env
 npm run dev
 ```
+
+Node.js 20.x is required. Use `.nvmrc` or `nvm use` before running frontend commands; Node 22 may produce `EBADENGINE` warnings because `frontend/package.json` is pinned to Node 20.
 
 Frontend env:
 
@@ -133,8 +136,9 @@ Frontend:
 
 ```bash
 cd frontend
+nvm use
 npm ci
-npm audit
+npm audit --omit=dev
 npm run lint
 npm run typecheck
 npm run test:ci
@@ -145,6 +149,7 @@ Notes:
 
 - `npm test` starts Vitest watch mode for local development.
 - `npm run test:ci` is the CI-safe, non-watch command and must exit on its own.
+- Production audit must pass with 0 vulnerabilities. Full npm audit may include dev-only Vite/Vitest/esbuild tooling advisories and is tracked separately.
 
 > Authentication and rate limiting settings are reserved for future production hardening and are not enforced in the current local demo build.
 
@@ -183,7 +188,7 @@ python scripts/verify_delivery.py --full
 ```
 
 `--zip-only` validates docs, Docker/release inputs, and the clean release archive.
-`--full` additionally runs Python compile checks, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, then rebuilds and verifies `release.zip`.
+`--full` additionally runs Python compile checks, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, production `npm audit --omit=dev`, then rebuilds and verifies `release.zip`.
 
 PowerShell wrapper:
 

@@ -43,8 +43,9 @@ Run:
 
 ```bash
 cd frontend
+nvm use
 npm ci
-npm audit
+npm audit --omit=dev
 npm run typecheck
 npm run lint
 npm run test:ci
@@ -55,6 +56,8 @@ Notes:
 
 - `npm test` is for interactive watch mode during local development.
 - `npm run test:ci` is the stable non-watch command used by CI and `scripts/verify_delivery.py --full`.
+- Node.js 20.x is required. Use `.nvmrc` or `nvm use` before running frontend commands; Node 22 may produce `EBADENGINE` warnings.
+- Production audit must pass with 0 vulnerabilities. Full npm audit may include dev-only Vite/Vitest/esbuild tooling advisories and is tracked separately.
 
 Scope:
 

@@ -86,7 +86,7 @@ async def test_upload_contract_returns_uuid_and_pending(app_client):
         "/upload",
         files={"file": ("demo.mp4", b"not-a-real-video", "video/mp4")},
         data={
-            "target_langs": "English",  # Single language to avoid translation guardrail
+            "target_langs": "Original",
             "burn_subtitles": "true",
             "subtitle_format": "srt",
             "remove_silence": "false",

@@ -13,6 +13,7 @@ def batch_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
     monkeypatch.setenv("CORS_ALLOW_CREDENTIALS", "true")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     import backend.main as main
 
@@ -42,7 +43,7 @@ def test_batch_upload_basic(batch_app, monkeypatch: pytest.MonkeyPatch):
         response = client.post(
             "/batch/upload",
             files=files,
-            data={"target_langs": "English", "burn_subtitles": "false"},
+            data={"target_langs": "Original", "burn_subtitles": "false"},
         )
 
     assert response.status_code == 200
@@ -124,7 +125,7 @@ def test_batch_upload_partial_failure_keeps_valid_tasks(batch_app, monkeypatch: 
                 ("files", ("good.mp4", good_file, "video/mp4")),
                 ("files", ("bad.mp4", b"hello", "text/plain")),
             ],
-            data={"target_langs": "English", "burn_subtitles": "false", "subtitle_format": "srt"},
+            data={"target_langs": "Original", "burn_subtitles": "false", "subtitle_format": "srt"},
         )
 
     assert response.status_code == 200
@@ -223,3 +224,73 @@ def test_upload_and_batch_reject_unsafe_target_langs(batch_app, invalid_langs: s
     )
     assert batch_response.status_code == 400
     assert "Invalid language value" in batch_response.json()["detail"]
+
+
+def test_upload_allows_original_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *args, **kwargs: None)
+
+    response = client.post(
+        "/upload",
+        files={"file": ("demo.mp4", b"video", "video/mp4")},
+        data={"target_langs": "Original", "subtitle_format": "srt"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_upload_rejects_translation_target_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
+
+    response = client.post(
+        "/upload",
+        files={"file": ("demo.mp4", b"video", "video/mp4")},
+        data={"target_langs": "Traditional Chinese", "subtitle_format": "srt"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "OPENAI_API_KEY is required when translation targets are requested."
+
+
+def test_upload_rejects_mixed_original_and_translation_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
+
+    response = client.post(
+        "/upload",
+        files={"file": ("demo.mp4", b"video", "video/mp4")},
+        data={"target_langs": "Original, Traditional Chinese", "subtitle_format": "srt"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "OPENAI_API_KEY is required when translation targets are requested."
+
+
+def test_upload_allows_translation_target_with_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *args, **kwargs: None)
+
+    response = client.post(
+        "/upload",
+        files={"file": ("demo.mp4", b"video", "video/mp4")},
+        data={"target_langs": "Traditional Chinese", "subtitle_format": "srt"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_batch_rejects_translation_target_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
+
+    response = client.post(
+        "/batch/upload",
+        files=[("files", ("demo.mp4", b"video", "video/mp4"))],
+        data={"target_langs": "Traditional Chinese", "subtitle_format": "srt"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "OPENAI_API_KEY is required when translation targets are requested."

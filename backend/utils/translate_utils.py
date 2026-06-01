@@ -43,6 +43,11 @@ def is_translation_request(target_lang: str, source_lang: str | None = None) -> 
     return True
 
 
+def translation_targets_requested(target_langs: list[str], source_lang: str | None = "Auto") -> bool:
+    """Return True when any requested target requires translation."""
+    return any(is_translation_request(lang, source_lang) for lang in target_langs)
+
+
 def should_translate(target_lang: str, source_lang: str | None = None, openai_enabled: bool = False) -> bool:
     """Decide whether translation should run for a language.
 

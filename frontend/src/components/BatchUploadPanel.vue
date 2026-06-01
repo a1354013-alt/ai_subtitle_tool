@@ -26,7 +26,7 @@
                 v-model="targetLangs" 
                 class="input" 
                 type="text" 
-                placeholder="Traditional Chinese"
+                placeholder="Original"
                 :disabled="!config.translationEnabled || !config.openaiConfigured"
               />
               <div class="help">Comma-separated languages.</div>
@@ -120,7 +120,7 @@ const files = ref<File[]>([]);
 const submitting = ref(false);
 const batchId = ref<string | null>(null);
 const batchStatus = ref<BatchStatusResponse | null>(null);
-const targetLangs = ref("Traditional Chinese");
+const targetLangs = ref("Original");
 const subtitleFormat = ref("ass");
 const burnSubtitles = ref(true);
 const validationError = ref("");
@@ -133,7 +133,7 @@ const config = ref<AppConfig>({
   subtitleFormats: ["srt", "ass", "vtt"],
   translationEnabled: false,
   openaiConfigured: false,
-  defaultTargetLanguage: "English",
+  defaultTargetLanguage: "Original",
   availableModes: ["transcribe"],
 });
 const showDownloadZip = computed(() => (batchStatus.value?.completed ?? 0) > 0);
@@ -142,6 +142,8 @@ const totalSizeText = computed(() =>
 );
 
 let statusInterval: any = null;
+
+const isTranslationAvailable = computed(() => config.value.translationEnabled && config.value.openaiConfigured);
 
 function formatSupportedExtensions() {
   return config.value.supportedExtensions.join(", ");
@@ -170,6 +172,12 @@ function validateSelectedFiles(selectedFiles: File[]): string {
   return "";
 }
 
+function applyDefaultTargetLanguage() {
+  targetLangs.value = isTranslationAvailable.value
+    ? config.value.defaultTargetLanguage || "Traditional Chinese"
+    : "Original";
+}
+
 function onFilesChange(e: Event) {
   const input = e.target as HTMLInputElement;
   if (input.files) {
@@ -186,7 +194,7 @@ async function onSubmit() {
   
   const fd = new FormData();
   files.value.forEach((file) => fd.append("files", file));
-  fd.append("target_langs", targetLangs.value);
+  fd.append("target_langs", isTranslationAvailable.value ? targetLangs.value : "Original");
   fd.append("subtitle_format", subtitleFormat.value);
   fd.append("burn_subtitles", String(burnSubtitles.value));
   fd.append("parallel", "true");
@@ -305,8 +313,10 @@ onUnmounted(() => {
 onMounted(async () => {
   try {
     config.value = await getAppConfig();
+    applyDefaultTargetLanguage();
   } catch {
     // Keep the built-in defaults when config cannot be fetched.
+    applyDefaultTargetLanguage();
   }
 });
 </script>

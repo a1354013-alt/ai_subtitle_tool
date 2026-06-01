@@ -102,7 +102,7 @@ def _run_command(
             raise SystemExit(
                 f"[{label}] command failed ({completed.returncode}) after {elapsed:.1f}s in {cwd}: {' '.join(command)}"
             )
-        print(f"[{label}] ✓ passed in {elapsed:.1f}s", flush=True)
+        print(f"[{label}] passed in {elapsed:.1f}s", flush=True)
     except subprocess.TimeoutExpired as e:
         elapsed = time.time() - start_time
         raise SystemExit(
@@ -334,6 +334,15 @@ def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
         frontend_dir,
         label="frontend-build",
         timeout_seconds=180,
+    )
+
+    # Production dependency audit. Full audit may include tracked dev-only
+    # Vite/Vitest/esbuild advisories and is not a release gate.
+    _run_command(
+        ["npm", "audit", "--omit=dev"],
+        frontend_dir,
+        label="frontend-production-audit",
+        timeout_seconds=120,
     )
     
     # Release zip checks

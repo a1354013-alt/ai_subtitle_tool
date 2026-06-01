@@ -17,6 +17,7 @@ from .storage.task_history import TaskHistoryStore, duration_seconds_since
 from .utils.task_control_utils import is_task_canceled, mark_task_canceled
 from .utils.error_handler import handle_known_error, get_error_response
 from .utils.storage_utils import get_storage_backend
+from .utils.translate_utils import translation_targets_requested
 from .services.upload_validation import (
     normalize_lang_suffix,
     validate_batch_files,
@@ -53,6 +54,7 @@ app = FastAPI(
     redoc_url="/api/redoc",
 )
 logger = logging.getLogger(__name__)
+OPENAI_TRANSLATION_REQUIRED_MESSAGE = "OPENAI_API_KEY is required when translation targets are requested."
 
 
 @app.exception_handler(HTTPException)
@@ -74,6 +76,18 @@ class _TestingAsyncResult:
 
 def _is_test_environment() -> bool:
     return os.getenv("PYTEST_CURRENT_TEST") is not None or os.getenv("TESTING", "").lower() == "true"
+
+
+def _ensure_openai_configured_for_targets(target_langs: list[str]) -> None:
+    if translation_targets_requested(target_langs) and not settings.OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "openai_not_configured",
+                "message": OPENAI_TRANSLATION_REQUIRED_MESSAGE,
+                "suggestion": "Set OPENAI_API_KEY in your .env file to enable translation, or request only original language subtitles.",
+            },
+        )
 
 
 def configure_cors() -> None:
@@ -293,7 +307,7 @@ async def get_app_config():
         subtitleFormats=list(settings.SUBTITLE_FORMATS),
         translationEnabled=bool(settings.OPENAI_API_KEY),
         openaiConfigured=bool(settings.OPENAI_API_KEY),
-        defaultTargetLanguage="Traditional Chinese",
+        defaultTargetLanguage="Traditional Chinese" if settings.OPENAI_API_KEY else "Original",
         availableModes=["transcribe"] + (["translate"] if settings.OPENAI_API_KEY else []),
     )
 
@@ -390,16 +404,7 @@ async def upload_video(
     langs = validate_target_langs(target_langs)
     normalized_subtitle_format = validate_subtitle_format(subtitle_format)
 
-    # Check if translation is requested but not configured
-    if len(langs) > 1 and not settings.OPENAI_API_KEY:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error_code": "openai_not_configured",
-                "message": "Translation not available: OpenAI API Key is not configured.",
-                "suggestion": "Set OPENAI_API_KEY in your .env file to enable translation, or request only original language subtitles."
-            }
-        )
+    _ensure_openai_configured_for_targets(langs)
 
     task_id = str(uuid.uuid4())
     file_extension = os.path.splitext(safe_filename)[1]
@@ -643,16 +648,7 @@ async def batch_upload_videos(
     langs = validate_target_langs(target_langs)
     normalized_subtitle_format = validate_subtitle_format(subtitle_format)
     
-    # Check if translation is requested but not configured
-    if len(langs) > 1 and not settings.OPENAI_API_KEY:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error_code": "openai_not_configured",
-                "message": "Translation not available: OpenAI API Key is not configured.",
-                "suggestion": "Set OPENAI_API_KEY in your .env file to enable translation, or request only original language subtitles."
-            }
-        )
+    _ensure_openai_configured_for_targets(langs)
 
     tasks_info: list[BatchTaskResponse] = []
     enqueue_jobs: List[dict[str, Any]] = []

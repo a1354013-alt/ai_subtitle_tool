@@ -291,7 +291,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
             result = _run(
                 main.upload_video(
                     file=_UploadFileStub("video.mp4", b"dummy", "application/octet-stream"),
-                    target_langs="Traditional Chinese",
+                    target_langs="Original",
                     burn_subtitles=True,
                     subtitle_format="ass",
                     remove_silence=False,
@@ -305,6 +305,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
     def test_upload_filters_empty_target_langs(self):
         tmpdir = _make_tmpdir()
         main = _load_app_with_upload_dir(str(tmpdir))
+        main.settings.OPENAI_API_KEY = "sk-test"
 
         fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
         captured: dict = {}
@@ -381,7 +382,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
                 _run(
                     main.upload_video(
                         file=_UploadFileStub("video.mp4", b"dummy", "application/octet-stream"),
-                        target_langs="Traditional Chinese",
+                        target_langs="Original",
                         burn_subtitles=True,
                         subtitle_format="ass",
                         remove_silence=False,
@@ -394,6 +395,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
     def test_upload_preserves_http_exception_from_enqueue(self):
         tmpdir = _make_tmpdir()
         main = _load_app_with_upload_dir(str(tmpdir))
+        main.settings.OPENAI_API_KEY = "sk-test"
 
         fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
         with (

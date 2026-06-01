@@ -19,6 +19,10 @@ describe("UploadForm", () => {
       supportedExtensions: [".mp4"],
       batchUploadEnabled: true,
       subtitleFormats: ["srt", "ass", "vtt"],
+      translationEnabled: false,
+      openaiConfigured: false,
+      defaultTargetLanguage: "Original",
+      availableModes: ["transcribe"],
     });
   });
 
@@ -35,5 +39,21 @@ describe("UploadForm", () => {
 
     expect(wrapper.text()).toContain("large.mp4 exceeds the 1MB upload limit");
     expect(wrapper.emitted("submit")).toBeUndefined();
+  });
+
+  it("submits Original when translation is unavailable", async () => {
+    const wrapper = mount(UploadForm, { props: { submitting: false } });
+    await flushPromises();
+
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", {
+      configurable: true,
+      value: [new File(["video"], "demo.mp4", { type: "video/mp4" })],
+    });
+    await input.trigger("change");
+    await wrapper.get("form").trigger("submit.prevent");
+
+    const payload = wrapper.emitted("submit")?.[0]?.[0] as FormData;
+    expect(payload.get("target_langs")).toBe("Original");
   });
 });

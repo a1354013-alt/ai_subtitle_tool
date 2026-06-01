@@ -41,7 +41,12 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
     """
 
     # Lazy imports to keep this module importable in lightweight test environments.
-    from .utils.translate_utils import translate_segments, generate_bilingual_srt, should_translate
+    from .utils.translate_utils import (
+        translate_segments,
+        generate_bilingual_srt,
+        should_translate,
+        translation_targets_requested,
+    )
     from .utils.ass_utils import generate_ass
     from .utils.split_utils import merge_segments_subtitles
     from .utils.subtitle_video_utils import burn_subtitles
@@ -124,6 +129,8 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         translations = {}
         translation_metadata = []
         openai_enabled = bool(settings.OPENAI_API_KEY)
+        if translation_targets_requested(target_langs, "Auto") and not openai_enabled:
+            raise ValueError("OPENAI_API_KEY is required when translation targets are requested.")
 
         for lang in target_langs:
             if is_task_canceled(upload_dir, business_id):
