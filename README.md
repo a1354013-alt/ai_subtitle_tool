@@ -256,6 +256,22 @@ Important variables:
 - `S3_SECRET_KEY`
 - `S3_REGION`
 - `S3_BUCKET`
+- `REQUIRE_AUTH_TOKEN` (Reserved for future hardening; not enforced by middleware yet.)
+- `RATE_LIMIT_PER_IP` (Reserved for future hardening; not enforced by middleware yet.)
+
+Whisper model selection priority:
+
+1. Per-task `model_size` option, when supplied by the caller.
+2. `WHISPER_MODEL`, when set in the backend environment.
+3. Automatic duration-based selection when neither of the above is set.
+
+Storage backend selection is explicit:
+
+1. `STORAGE_BACKEND=local` always uses local file storage, even when S3 variables are present.
+2. `STORAGE_BACKEND=s3` enables S3 and requires `S3_BUCKET`.
+3. Any other `STORAGE_BACKEND` value fails fast with a configuration error.
+
+Do not rely on `S3_BUCKET` alone to enable S3 storage.
 
 Frontend example: [frontend/.env.example](frontend/.env.example)
 
@@ -272,6 +288,8 @@ To generate subtitles in the original language only (no translation):
 2. Leave `OPENAI_API_KEY` empty or unset in `.env`
 3. Upload with single target language (e.g., "Original")
 4. System will transcribe video to text without translation
+
+`/healthz` and `/readyz` do not fail solely because `OPENAI_API_KEY` is missing. The key is required only when translation is requested.
 
 ### Translate Mode (Requires OpenAI API Key)
 

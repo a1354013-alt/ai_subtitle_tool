@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ def _ensure_parent_dir(path: Path) -> None:
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     _ensure_parent_dir(db_path)
-    conn = sqlite3.connect(str(db_path), timeout=10, isolation_level=None)
+    conn = sqlite3.connect(str(db_path), timeout=10)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute(
@@ -35,6 +36,19 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     # Create indexes for performance
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_history_created_at ON task_history(created_at);")
     return conn
+
+
+@contextmanager
+def _connection(db_path: Path):
+    conn = _connect(db_path)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 @dataclass(frozen=True)
@@ -59,7 +73,7 @@ class TaskHistoryStore:
 
     def upsert_created(self, task_id: str, filename: str, status: str = "PENDING", created_at: Optional[str] = None) -> None:
         created_at = created_at or _utc_now_iso()
-        with _connect(self._db_path) as conn:
+        with _connection(self._db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO task_history(task_id, filename, status, created_at, duration_seconds)
@@ -73,7 +87,7 @@ class TaskHistoryStore:
             )
 
     def update_status(self, task_id: str, status: str, duration_seconds: Optional[float] = None) -> None:
-        with _connect(self._db_path) as conn:
+        with _connection(self._db_path) as conn:
             # Ensure the row exists (older tasks may not have been recorded).
             conn.execute(
                 """
@@ -93,7 +107,7 @@ class TaskHistoryStore:
 
     def list_recent(self, limit: int = 20) -> List[TaskHistoryEntry]:
         limit = max(1, min(int(limit), 100))
-        with _connect(self._db_path) as conn:
+        with _connection(self._db_path) as conn:
             rows = conn.execute(
                 """
                 SELECT task_id, filename, status, created_at, duration_seconds
@@ -106,7 +120,7 @@ class TaskHistoryStore:
         return [TaskHistoryEntry(*row) for row in rows]
 
     def get_created_at(self, task_id: str) -> Optional[str]:
-        with _connect(self._db_path) as conn:
+        with _connection(self._db_path) as conn:
             row = conn.execute(
                 "SELECT created_at FROM task_history WHERE task_id = ?;",
                 (task_id,),
@@ -116,7 +130,7 @@ class TaskHistoryStore:
     def cleanup_old_records(self, retention_seconds: int) -> int:
         """Delete records older than retention_seconds."""
         cutoff_time = datetime.fromtimestamp(time.time() - retention_seconds, tz=timezone.utc).isoformat()
-        with _connect(self._db_path) as conn:
+        with _connection(self._db_path) as conn:
             cursor = conn.execute(
                 "DELETE FROM task_history WHERE created_at < ?;",
                 (cutoff_time,),
@@ -134,4 +148,3 @@ def duration_seconds_since(created_at_iso: Optional[str]) -> Optional[float]:
         return max(0.0, time.time() - created.timestamp())
     except Exception:
         return None
-

@@ -18,14 +18,13 @@ def transcribe_video(video_path: str, output_srt_path: str, model_size=None):
         from moviepy.editor import VideoFileClip
 
         from .audio_utils import preprocess_audio
-        from .model_loader import get_model, get_model_by_duration
+        from .model_loader import get_model, resolve_model_size
 
         video = VideoFileClip(video_path)
         duration = video.duration
         video.close()
 
-        if model_size is None:
-            model_size = get_model_by_duration(duration)
+        model_size = resolve_model_size(duration, model_size)
 
         # 2) Extract audio to a temporary wav
         audio_path = f"{os.path.splitext(video_path)[0]}_temp.wav"
@@ -48,4 +47,3 @@ def transcribe_video(video_path: str, output_srt_path: str, model_size=None):
                 os.remove(audio_path)
             except OSError:
                 logger.warning("Failed to remove temp audio: %s", audio_path, exc_info=True)
-

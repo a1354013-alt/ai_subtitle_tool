@@ -267,14 +267,15 @@ def _validate_saved_video_file(file_path: str) -> None:
         if duration_result.returncode == 0:
             try:
                 duration_seconds = float(duration_result.stdout.strip())
+            except (ValueError, TypeError) as e:
+                logger.warning("Could not parse video duration: %s", e)
+            else:
                 max_seconds = settings.MAX_VIDEO_DURATION_MINUTES * 60
                 if duration_seconds > max_seconds:
                     raise ValueError(
                         f"Video duration ({duration_seconds / 60:.1f} min) exceeds "
                         f"demo limit ({settings.MAX_VIDEO_DURATION_MINUTES} min)"
                     )
-            except (ValueError, TypeError) as e:
-                logger.warning("Could not parse video duration: %s", e)
 
 
 @app.get("/healthz")
@@ -309,11 +310,11 @@ def check_system_dependencies():
                      ERROR_MESSAGES["ffmpeg_not_found"]["message"], 
                      ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"])
 
-    # 2. Check OpenAI API Key
+    # 2. Check OpenAI API Key (required only when translation is requested)
     if not settings.OPENAI_API_KEY:
-        logger.error("CRITICAL: %s. Suggestion: %s", 
-                     ERROR_MESSAGES["openai_api_key_missing"]["message"], 
-                     ERROR_MESSAGES["openai_api_key_missing"]["suggestion"])
+        logger.warning("%s. Suggestion: %s",
+                       ERROR_MESSAGES["openai_api_key_missing"]["message"],
+                       ERROR_MESSAGES["openai_api_key_missing"]["suggestion"])
 
     # 3. Check Redis (best effort on startup)
     try:

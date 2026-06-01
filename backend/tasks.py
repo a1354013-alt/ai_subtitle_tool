@@ -262,7 +262,7 @@ def process_video_task(self, video_path: str, options: dict = None):
     try:
         from .utils.video_utils import remove_silence
         from .utils.split_utils import split_video
-        from .utils.model_loader import get_model_by_duration
+        from .utils.model_loader import resolve_model_size
         from .utils.subtitle_utils import transcribe_video
         from .utils.task_control_utils import is_task_canceled
         from moviepy.editor import VideoFileClip
@@ -283,7 +283,7 @@ def process_video_task(self, video_path: str, options: dict = None):
         video = VideoFileClip(current_video)
         duration = video.duration
         video.close()
-        model_size = get_model_by_duration(duration)
+        model_size = resolve_model_size(duration, options.get("model_size"))
 
         if parallel and duration > 60:
             if chord is None:

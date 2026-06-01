@@ -61,7 +61,7 @@ Currently, the API does not require authentication. For production deployment:
 3. **Consider**: Rate limiting for public deployments
 
 ### Rate Limiting
-Not implemented by default. Consider:
+Not implemented by default. `RATE_LIMIT_PER_IP` is reserved for future hardening; not enforced by middleware yet. Consider:
 - Using `slowapi` for FastAPI rate limiting
 - Configuring nginx rate limiting
 - Setting up Redis-based rate limiting for distributed deployments
@@ -76,6 +76,12 @@ The following environment variables contain sensitive data:
 | `OPENAI_API_KEY` | OpenAI API access | Never commit to version control |
 | `REDIS_URL` | Redis connection | Use authentication in production |
 | `CORS_ALLOWED_ORIGINS` | CORS policy | Configure per environment |
+
+`OPENAI_API_KEY` is optional for transcription-only usage and required when translation is requested. Missing OpenAI configuration should be treated as a translation feature warning, not as a general service startup failure.
+
+`REQUIRE_AUTH_TOKEN` is reserved for future hardening; not enforced by middleware yet. Do not expose this service publicly assuming token auth is active unless separate auth is provided by a reverse proxy or deployment layer.
+
+`STORAGE_BACKEND` controls storage selection explicitly. `STORAGE_BACKEND=local` always uses local storage; `STORAGE_BACKEND=s3` requires `S3_BUCKET`. Setting `S3_BUCKET` alone does not enable S3.
 
 ### Best Practices
 1. Use `.env` files excluded from git (`.gitignore` includes `.env*`)

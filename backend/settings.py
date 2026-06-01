@@ -58,7 +58,7 @@ TRANSLATE_PROVIDER = (_getenv("TRANSLATE_PROVIDER", "openai") or "openai").strip
 TRANSLATE_MODEL = _getenv("TRANSLATE_MODEL", _getenv("OPENAI_MODEL", "gpt-4o-mini")) or "gpt-4o-mini"
 OPENAI_API_KEY = _getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = _getenv("OPENAI_MODEL", TRANSLATE_MODEL) or TRANSLATE_MODEL
-WHISPER_MODEL = _getenv("WHISPER_MODEL", "base") or "base"
+WHISPER_MODEL = _getenv("WHISPER_MODEL", "") or ""
 HF_TOKEN = _getenv("HF_TOKEN", "")
 
 FFMPEG_BINARY = _getenv("FFMPEG_BINARY", "ffmpeg") or "ffmpeg"
