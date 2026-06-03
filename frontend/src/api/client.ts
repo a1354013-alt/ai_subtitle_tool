@@ -19,6 +19,17 @@ export function buildApiUrl(path: string): string {
   return `${baseUrl}${normalized}`;
 }
 
+export function buildRequestHeaders(headers?: HeadersInit): HeadersInit | undefined {
+  const apiToken = (import.meta.env.VITE_API_TOKEN ?? "").trim();
+  if (!apiToken) return headers;
+
+  const merged = new Headers(headers);
+  if (!merged.has("X-API-Token")) {
+    merged.set("X-API-Token", apiToken);
+  }
+  return merged;
+}
+
 export async function apiRequest<T>(
   path: string,
   init: RequestInit & { timeoutMs?: number } = {}
@@ -34,6 +45,7 @@ export async function apiRequest<T>(
   try {
     const res = await fetch(url, {
       ...init,
+      headers: buildRequestHeaders(init.headers),
       signal: controller.signal,
     });
 

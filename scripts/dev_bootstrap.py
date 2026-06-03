@@ -84,7 +84,7 @@ def install_backend_deps():
         error("Python executable not found in venv")
         sys.exit(1)
     
-    requirements_file = ROOT_DIR / "requirements.txt"
+    requirements_file = ROOT_DIR / "requirements.lock.txt"
     if not requirements_file.exists():
         error(f"requirements.txt not found at {requirements_file}")
         sys.exit(1)
@@ -152,7 +152,14 @@ def create_env_file():
         return False
     
     info(f"Creating {ENV_FILE} from {ENV_EXAMPLE}...")
-    shutil.copy(ENV_EXAMPLE, ENV_FILE)
+    content = ENV_EXAMPLE.read_text(encoding="utf-8")
+    content = content.replace("UPLOAD_DIR=/app/uploads", "UPLOAD_DIR=backend/uploads")
+    content = content.replace("OUTPUT_DIR=/app/outputs", "OUTPUT_DIR=backend/outputs")
+    content = content.replace("TEMP_DIR=/app/tmp", "TEMP_DIR=backend/tmp")
+    content = content.replace("REDIS_URL=redis://redis:6379/0", "REDIS_URL=redis://localhost:6379/0")
+    content = content.replace("CELERY_BROKER_URL=redis://redis:6379/0", "CELERY_BROKER_URL=redis://localhost:6379/0")
+    content = content.replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://localhost:6379/1")
+    ENV_FILE.write_text(content, encoding="utf-8")
     success(f"Environment file created: {ENV_FILE}")
     return True
 

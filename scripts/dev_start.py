@@ -14,6 +14,7 @@ import signal
 import time
 import argparse
 import threading
+import shutil
 from pathlib import Path
 from typing import Optional, List
 
@@ -299,6 +300,12 @@ def ensure_prerequisites():
     
     if not (FRONTEND_DIR / "node_modules").exists():
         error(f"Frontend dependencies still not installed after bootstrap")
+        sys.exit(1)
+
+    missing_media_tools = [name for name in ("ffmpeg", "ffprobe") if shutil.which(name) is None]
+    if missing_media_tools:
+        error(f"Missing required media tools on PATH: {', '.join(missing_media_tools)}")
+        error("Install FFmpeg and ensure both ffmpeg and ffprobe are available before pressing F5.")
         sys.exit(1)
 
 

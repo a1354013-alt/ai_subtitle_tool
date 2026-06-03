@@ -102,18 +102,18 @@ describe("BatchUploadPanel", () => {
   it("shows download buttons for SUCCESS and uses shared batch URLs", async () => {
     const wrapper = await submitBatchWithStatus("SUCCESS");
 
-    expect(wrapper.text()).toContain("task.completed");
+    expect(wrapper.text()).toContain("Completed");
     const links = wrapper.findAll(".task-actions a");
     expect(links).toHaveLength(4);
-    expect(links[0].attributes("href")).toBe("/download/task-1");
-    expect(links[1].attributes("href")).toBe("/download/task-1?lang=English&format=srt");
-    expect(links[2].attributes("href")).toBe("/download/task-1?lang=English&format=ass");
-    expect(links[3].attributes("href")).toBe("/download/task-1?lang=English&format=vtt");
+    expect(links[0].attributes("href")).toBe("http://localhost:8000/download/task-1");
+    expect(links[1].attributes("href")).toBe("http://localhost:8000/download/task-1?lang=English&format=srt");
+    expect(links[2].attributes("href")).toBe("http://localhost:8000/download/task-1?lang=English&format=ass");
+    expect(links[3].attributes("href")).toBe("http://localhost:8000/download/task-1?lang=English&format=vtt");
   });
 
   it("shows failed styling for FAILURE", async () => {
     const failureWrapper = await submitBatchWithStatus("FAILURE");
-    expect(failureWrapper.text()).toContain("task.failed");
+    expect(failureWrapper.text()).toContain("Failed");
     expect(failureWrapper.find(".task-status .text-danger").exists()).toBe(true);
     expect(failureWrapper.text()).toContain("Boom");
   });

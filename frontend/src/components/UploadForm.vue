@@ -7,8 +7,7 @@
             <div class="label">{{ $t('upload.selectVideo') }}</div>
             <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" @change="onFileChange" />
             <div class="help">
-              Supported: {{ config.supportedExtensions.join(", ") }}. Max {{ config.maxUploadSizeMb }}MB.
-              Final validation is done by ffprobe.
+              {{ $t('upload.supportedHelp', { extensions: config.supportedExtensions.join(', '), maxMb: config.maxUploadSizeMb }) }}
             </div>
             <div v-if="validationError" class="task-error text-danger">{{ validationError }}</div>
           </div>
@@ -25,7 +24,9 @@
             <div v-if="!isTranslationAvailable" class="help text-warning">
               {{ translationUnavailableMessage }}
             </div>
-            <div v-else class="help">Comma-separated languages, e.g. <code class="mono">Traditional Chinese, English</code>.</div>
+            <div v-else class="help">
+              {{ $t('upload.commaSeparatedHelp', { example: 'Traditional Chinese, English' }) }}
+            </div>
           </div>
         </div>
 
@@ -42,7 +43,7 @@
             <div class="label">{{ $t('upload.burnSubtitles') }}</div>
             <label class="check">
               <input v-model="burnSubtitles" type="checkbox" />
-              <span>Burn subtitles into final.mp4</span>
+              <span>{{ $t('upload.burnIntoFinal') }}</span>
             </label>
           </div>
 
@@ -50,7 +51,7 @@
             <div class="label">{{ $t('upload.removeSilence') }}</div>
             <label class="check">
               <input v-model="removeSilence" type="checkbox" />
-              <span>Remove silent parts (may change timings)</span>
+              <span>{{ $t('upload.removeSilenceHelp') }}</span>
             </label>
           </div>
 
@@ -58,7 +59,7 @@
             <div class="label">{{ $t('upload.parallel') }}</div>
             <label class="check">
               <input v-model="parallel" type="checkbox" />
-              <span>Parallel segments (recommended for longer videos)</span>
+              <span>{{ $t('upload.parallelHelp') }}</span>
             </label>
           </div>
         </div>
@@ -67,11 +68,11 @@
 
         <div class="row" style="align-items: center; justify-content: space-between">
           <div class="pill">
-            <span>API Base URL</span>
+            <span>{{ $t('upload.apiBaseUrl') }}</span>
             <code class="mono">{{ apiBaseUrl }}</code>
           </div>
           <button class="btn primary" type="submit" :disabled="props.submitting || !file">
-            {{ props.submitting ? 'Uploading...' : $t('upload.generate') }}
+            {{ props.submitting ? $t('upload.uploading') : $t('upload.generate') }}
           </button>
         </div>
       </form>
@@ -81,6 +82,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { getAppConfig } from "@/api/config";
 import type { AppConfig } from "@/types/api";
 import type { SubtitleFormat } from "@/types/subtitle";
@@ -88,6 +90,7 @@ import type { SubtitleFormat } from "@/types/subtitle";
 const emit = defineEmits<{
   (e: "submit", payload: FormData): void;
 }>();
+const { t } = useI18n();
 
 const file = ref<File | null>(null);
 const props = withDefaults(
@@ -125,28 +128,28 @@ const translationPlaceholder = computed(() => {
   if (isTranslationAvailable.value) {
     return "Traditional Chinese";
   }
-  return "OpenAI not configured - transcription only";
+  return t("upload.translationOnlyPlaceholder");
 });
 
 const translationUnavailableMessage = computed(() => {
   if (!config.value.openaiConfigured) {
-    return "Translation is unavailable because OpenAI API Key is not configured.";
+    return t("batch.translationUnavailable");
   }
-  return "Translation is currently disabled.";
+  return t("upload.translationDisabled");
 });
 
 function validateSelectedFile(selected: File | null): string {
   if (!selected) return "";
   const extension = selected.name.includes(".") ? `.${selected.name.split(".").pop()!.toLowerCase()}` : "";
   if (!extension || !config.value.supportedExtensions.includes(extension)) {
-    return `Unsupported file format: ${selected.name}. Supported formats: ${config.value.supportedExtensions.join(", ")}.`;
+    return t("upload.unsupportedFile", { filename: selected.name, formats: config.value.supportedExtensions.join(", ") });
   }
   if (selected.size <= 0) {
-    return `Empty files cannot be uploaded: ${selected.name}.`;
+    return t("upload.emptyFile", { filename: selected.name });
   }
   const maxBytes = config.value.maxUploadSizeMb * 1024 * 1024;
   if (selected.size > maxBytes) {
-    return `${selected.name} exceeds the ${config.value.maxUploadSizeMb}MB upload limit.`;
+    return t("upload.fileTooLarge", { filename: selected.name, maxMb: config.value.maxUploadSizeMb });
   }
   return "";
 }

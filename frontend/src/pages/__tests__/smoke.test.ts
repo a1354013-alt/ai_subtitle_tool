@@ -24,12 +24,12 @@ describe("smoke", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("upload.title");
+    expect(wrapper.text()).toContain("Upload Video");
     expect(wrapper.find('input[type="file"]').exists()).toBe(true);
   });
 
   it("UploadForm renders", () => {
     const wrapper = mount(UploadForm, { props: { submitting: false } });
-    expect(wrapper.text()).toContain("upload.generate");
+    expect(wrapper.text()).toContain("Generate Subtitles");
   });
 });

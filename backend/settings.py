@@ -30,6 +30,17 @@ def _get_int(name: str, default: int, aliases: tuple[str, ...] = ()) -> int:
     return value if value > 0 else default
 
 
+def _get_non_negative_int(name: str, default: int, aliases: tuple[str, ...] = ()) -> int:
+    raw = _getenv(name, aliases=aliases)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
 BASE_DIR = Path(__file__).resolve().parent
 
 ENVIRONMENT = _getenv("ENVIRONMENT", "development", aliases=("APP_ENV",)) or "development"
@@ -63,8 +74,8 @@ HF_TOKEN = _getenv("HF_TOKEN", "")
 
 FFMPEG_BINARY = _getenv("FFMPEG_BINARY", "ffmpeg") or "ffmpeg"
 FFPROBE_BINARY = _getenv("FFPROBE_BINARY", "ffprobe") or "ffprobe"
-FFMPEG_TIMEOUT_SECONDS = _get_int("FFMPEG_TIMEOUT_SECONDS", 600)
-FFPROBE_TIMEOUT_SECONDS = _get_int("FFPROBE_TIMEOUT_SECONDS", 30)
+FFMPEG_TIMEOUT_SECONDS = _get_int("FFMPEG_TIMEOUT_SECONDS", 1800)
+FFPROBE_TIMEOUT_SECONDS = _get_int("FFPROBE_TIMEOUT_SECONDS", 60)
 
 STORAGE_BACKEND = (_getenv("STORAGE_BACKEND", "local") or "local").strip().lower()
 S3_UPLOAD_REQUIRED = _get_bool("S3_UPLOAD_REQUIRED", False)
@@ -74,7 +85,7 @@ DEMO_MODE = _get_bool("DEMO_MODE", ENVIRONMENT != "production")
 REQUIRE_AUTH_TOKEN = _get_bool("REQUIRE_AUTH_TOKEN", False)
 AUTH_TOKEN = _getenv("AUTH_TOKEN", "")
 TASK_CLEANUP_DAYS = _get_int("TASK_CLEANUP_DAYS", 7)
-RATE_LIMIT_PER_IP = _get_int("RATE_LIMIT_PER_IP", 100)  # requests per hour
+RATE_LIMIT_PER_IP = _get_non_negative_int("RATE_LIMIT_PER_IP", 100)  # requests per hour; 0 disables
 
 SUPPORTED_VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov")
 EDITABLE_SUBTITLE_FORMATS = ("srt", "ass")

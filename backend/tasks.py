@@ -1,7 +1,6 @@
 import logging
 import os
 import shutil
-import subprocess
 
 try:
     from celery import chord
@@ -27,6 +26,7 @@ from .pipeline_segments import (
 from . import settings
 from .services.upload_validation import normalize_lang_suffix
 from .utils.cleanup_utils import create_task_lock, remove_task_lock, cleanup_old_files as cleanup_old_files_impl
+from .utils.media_process import run_media_command
 from .utils.storage_utils import get_storage_backend
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                 audio_path = None
                 try:
                     audio_path = f"{base_path}_temp.wav"
-                    subprocess.run(
+                    run_media_command(
                         [
                             settings.FFMPEG_BINARY,
                             "-y",
@@ -118,7 +118,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                             audio_path,
                         ],
                         check=True,
-                        capture_output=True,
+                        timeout=settings.FFMPEG_TIMEOUT_SECONDS,
                     )
                     diarization_result, diarization_warning = diarize_audio(audio_path, hf_token)
                     if diarization_warning:

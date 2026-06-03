@@ -67,10 +67,10 @@ Requirements:
 Setup:
 
 ```bash
-python -m venv venv
-# Windows: venv\Scripts\activate
-# macOS/Linux: source venv/bin/activate
-pip install -r requirements.txt
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.lock.txt
 cp backend/.env.example backend/.env
 ```
 
@@ -80,9 +80,10 @@ Recommended local overrides inside `backend/.env`:
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
-UPLOAD_DIR=./backend/uploads
-OUTPUT_DIR=./backend/outputs
-TEMP_DIR=./backend/tmp
+UPLOAD_DIR=backend/uploads
+OUTPUT_DIR=backend/outputs
+TEMP_DIR=backend/tmp
+RATE_LIMIT_PER_IP=0
 ```
 
 Run the backend stack (in separate terminals):
@@ -151,7 +152,7 @@ Notes:
 - `npm run test:ci` is the CI-safe, non-watch command and must exit on its own.
 - Production audit uses `npm audit --omit=dev` and must pass with 0 vulnerabilities. Full dev audit advisories are tracked separately.
 
-> Authentication and rate limiting settings are reserved for future production hardening and are not enforced in the current local demo build.
+Auth and rate limiting are enforced by middleware when enabled. Local demo defaults keep auth off and set `RATE_LIMIT_PER_IP=0` to avoid blocking long polling; production should set `REQUIRE_AUTH_TOKEN=true`, `AUTH_TOKEN`, and a positive `RATE_LIMIT_PER_IP`.
 
 Docker contract:
 
@@ -263,8 +264,9 @@ Important variables:
 - `S3_BUCKET`
 - `REQUIRE_AUTH_TOKEN` enables token auth for non-health API routes. Send either `Authorization: Bearer <token>` or `X-API-Token: <token>`.
 - `AUTH_TOKEN` is required when `REQUIRE_AUTH_TOKEN=true`.
-- `RATE_LIMIT_PER_IP` limits requests per IP per hour. Set `0` to disable.
+- `RATE_LIMIT_PER_IP` limits requests per IP per hour. `0` disables the middleware limit for local development; use a positive integer in production.
 - `FFMPEG_TIMEOUT_SECONDS` / `FFPROBE_TIMEOUT_SECONDS` bound media subprocess runtime.
+- Frontend deployments can set `VITE_API_TOKEN` to send `X-API-Token` automatically on every API request.
 
 Whisper model selection priority:
 

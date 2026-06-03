@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import logging
@@ -27,7 +27,7 @@ def test_demo_duration_below_limit_passes(monkeypatch: pytest.MonkeyPatch, tmp_p
         SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="599", stderr=""),
     ]
-    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
+    monkeypatch.setattr(main, "run_media_command", lambda *a, **k: calls.pop(0))
 
     main._validate_saved_video_file(str(tmp_path / "video.mp4"))
 
@@ -42,7 +42,7 @@ def test_demo_duration_equal_limit_passes(monkeypatch: pytest.MonkeyPatch, tmp_p
         SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="600", stderr=""),
     ]
-    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
+    monkeypatch.setattr(main, "run_media_command", lambda *a, **k: calls.pop(0))
 
     main._validate_saved_video_file(str(tmp_path / "video.mp4"))
 
@@ -57,7 +57,7 @@ def test_demo_duration_over_limit_raises(monkeypatch: pytest.MonkeyPatch, tmp_pa
         SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="601", stderr=""),
     ]
-    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
+    monkeypatch.setattr(main, "run_media_command", lambda *a, **k: calls.pop(0))
 
     with pytest.raises(ValueError, match="exceeds demo limit"):
         main._validate_saved_video_file(str(tmp_path / "video.mp4"))
@@ -77,7 +77,7 @@ def test_demo_duration_parse_failure_warns_without_blocking(
         SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="not-a-number", stderr=""),
     ]
-    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
+    monkeypatch.setattr(main, "run_media_command", lambda *a, **k: calls.pop(0))
 
     with caplog.at_level(logging.WARNING):
         main._validate_saved_video_file(str(tmp_path / "video.mp4"))
@@ -92,9 +92,9 @@ def test_upload_validation_rejects_video_without_audio(monkeypatch: pytest.Monke
         SimpleNamespace(returncode=0, stdout="video\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="", stderr=""),
     ]
-    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
+    monkeypatch.setattr(main, "run_media_command", lambda *a, **k: calls.pop(0))
 
-    with pytest.raises(ValueError, match="沒有音軌"):
+    with pytest.raises(ValueError, match="audio stream"):
         main._validate_saved_video_file(str(tmp_path / "video.mp4"))
 
 
@@ -215,7 +215,7 @@ def test_task_history_store_closes_connections(tmp_path):
 async def test_readyz_does_not_require_openai_key(monkeypatch: pytest.MonkeyPatch, tmp_path):
     main = _reload_main(monkeypatch, tmp_path)
     monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
-    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(main, "run_media_command", lambda *a, **k: SimpleNamespace(returncode=0))
 
     class FakeRedisClient:
         def ping(self):

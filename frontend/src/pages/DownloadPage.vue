@@ -2,16 +2,16 @@
   <div>
     <PageHeader
       :title="$t('editor.download')"
-      subtitle="Download existing outputs. Rebuilding final.mp4 is explicit and only runs when you click the button."
+      :subtitle="$t('download.subtitle')"
     />
 
     <ErrorAlert v-if="res.error" :error="res.error" />
-    <LoadingBlock v-if="res.loading" :title="$t('common.loading')" description="Fetching available files." />
+    <LoadingBlock v-if="res.loading" :title="$t('common.loading')" :description="$t('download.fetchingFiles')" />
 
     <template v-else>
       <div class="row" style="align-items: center; justify-content: space-between; margin-bottom: 12px">
         <div class="pill">
-          <span>Task</span>
+          <span>{{ $t('download.task') }}</span>
           <code class="mono">{{ taskId }}</code>
         </div>
         <RouterLink class="btn" :to="{ name: 'task', params: { taskId } }">{{ $t('task.status') }}</RouterLink>
@@ -20,13 +20,12 @@
       <div v-if="manifest && isSuccessManifest" class="row" style="margin-bottom: 12px">
         <div class="col card">
           <div class="card-inner">
-            <div class="label">Language</div>
+            <div class="label">{{ $t('download.language') }}</div>
             <select class="select" v-model="selectedLang" @change="persistLang">
               <option v-for="f in files" :key="f.lang" :value="f.lang">{{ f.display_name }}</option>
             </select>
             <div class="help">
-              Subtitle downloads require an explicit <code class="mono">lang</code> + <code class="mono">format</code>.
-              The selector above controls which language is used.
+              {{ $t('download.languageHelp') }}
             </div>
           </div>
         </div>
@@ -34,25 +33,25 @@
 
       <EmptyState
         v-if="!manifest"
-        title="No manifest"
-        description="The results manifest is not available yet. Check task status first."
+        :title="$t('download.noManifestTitle')"
+        :description="$t('download.noManifestDescription')"
       >
-        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">Go to status</RouterLink>
+        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">{{ $t('download.goToStatus') }}</RouterLink>
       </EmptyState>
 
       <EmptyState
         v-else-if="!isSuccessManifest"
-        title="Results not ready"
-        description="The task has not completed yet, so downloads are not available. Go back to the status page and wait for SUCCESS."
+        :title="$t('download.notReadyTitle')"
+        :description="$t('download.notReadyDescription')"
       >
-        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">Go to status</RouterLink>
+        <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId } }">{{ $t('download.goToStatus') }}</RouterLink>
       </EmptyState>
 
       <DownloadList v-else :items="downloadItems" />
 
       <div v-if="fallbackMessages.length > 0" class="card" style="margin-top: 12px">
         <div class="card-inner">
-          <div class="label">Translation warnings</div>
+          <div class="label">{{ $t('download.translationWarnings') }}</div>
           <ul class="help warning-list">
             <li v-for="message in fallbackMessages" :key="message">{{ message }}</li>
           </ul>
@@ -61,21 +60,20 @@
 
       <div v-if="manifest && !manifest.has_video" class="card" style="margin-top: 12px">
         <div class="card-inner">
-          <div class="label">Note</div>
+          <div class="label">{{ $t('download.note') }}</div>
           <div class="help">
             <div>
-              <strong>final.mp4 is missing.</strong> This can happen if the task did not generate a final video, or if a subtitle was edited
-              and the backend deleted final.mp4 to avoid serving an outdated video.
+              <strong>{{ $t('download.missingFinalStrong') }}</strong> {{ $t('download.missingFinalDescription') }}
             </div>
             <div style="margin-top: 6px">
-              Editing subtitles only updates the subtitle file; it does not rebuild/burn the final video automatically.
+              {{ $t('download.editDoesNotRebuild') }}
             </div>
             <div v-if="manifest && isSuccessManifest" style="margin-top: 10px">
               <button class="btn primary" :disabled="rebuilding || !selectedLang" @click="onRebuildFinal">
                 {{ rebuilding ? $t('common.loading') : $t('editor.rebuild') }}
               </button>
               <div class="help" style="margin-top: 6px">
-                This enqueues a background rebuild using the selected language. Track progress on the status page.
+                {{ $t('download.rebuildHelp') }}
               </div>
             </div>
           </div>
@@ -94,6 +92,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { RouterLink, useRouter } from "vue-router";
 import PageHeader from "@/components/PageHeader.vue";
 import DownloadList from "@/components/DownloadList.vue";
@@ -107,6 +106,7 @@ import { usePreferencesStore } from "@/stores/preferences";
 import { rebuildFinalVideo } from "@/api/tasks";
 
 const props = defineProps<{ taskId: string }>();
+const { t } = useI18n();
 const taskId = computed(() => props.taskId);
 const router = useRouter();
 
@@ -119,7 +119,7 @@ const files = computed(() => manifest.value?.available_files ?? []);
 const fallbackMessages = computed(() =>
   files.value
     .filter((f) => f.translated === false)
-    .map((f) => `${f.display_name} used original text because translation failed: ${f.fallback_reason || "unknown reason"}`)
+    .map((f) => t("download.fallbackWarning", { language: f.display_name, reason: f.fallback_reason || t("download.unknownReason") }))
 );
 const isSuccessManifest = computed(() => {
   const s = manifest.value?.task_status;
@@ -167,8 +167,8 @@ const downloadItems = computed<DownloadItem[]>(() => {
 
   items.push({
     key: "video",
-    label: "Final Video (final.mp4)",
-    description: "Download the final video if it exists.",
+    label: t("download.finalVideoLabel"),
+    description: t("download.finalVideoDescription"),
     available: manifest.value.has_video,
     url: manifest.value.has_video ? buildDownloadUrl(taskId.value) : undefined,
   });
@@ -176,11 +176,12 @@ const downloadItems = computed<DownloadItem[]>(() => {
   const langInfo = files.value.find((f) => f.lang === selectedLang.value);
   const hasAss = Boolean(langInfo?.ass);
   const hasSrt = Boolean(langInfo?.srt);
+  const hasVtt = Boolean(langInfo?.vtt ?? langInfo?.srt);
 
   items.push({
     key: "ass",
     label: `Subtitle (ASS) - ${selectedLang.value}`,
-    description: langInfo?.translated === false ? "Translation failed; this subtitle uses original text." : undefined,
+    description: langInfo?.translated === false ? t("download.translationFailedDescription") : undefined,
     available: hasAss,
     url: hasAss ? buildDownloadUrl(taskId.value, "ass", selectedLang.value) : undefined,
   });
@@ -188,7 +189,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
   items.push({
     key: "srt",
     label: `Subtitle (SRT) - ${selectedLang.value}`,
-    description: langInfo?.translated === false ? "Translation failed; this subtitle uses original text." : undefined,
+    description: langInfo?.translated === false ? t("download.translationFailedDescription") : undefined,
     available: hasSrt,
     url: hasSrt ? buildDownloadUrl(taskId.value, "srt", selectedLang.value) : undefined,
   });
@@ -196,9 +197,9 @@ const downloadItems = computed<DownloadItem[]>(() => {
   items.push({
     key: "vtt",
     label: `Subtitle (VTT) - ${selectedLang.value}`,
-    description: "Generated on-the-fly from SRT.",
-    available: hasSrt,
-    url: hasSrt ? buildDownloadUrl(taskId.value, "vtt", selectedLang.value) : undefined,
+    description: t("download.vttDescription"),
+    available: hasVtt,
+    url: hasVtt ? buildDownloadUrl(taskId.value, "vtt", selectedLang.value) : undefined,
   });
 
   return items;

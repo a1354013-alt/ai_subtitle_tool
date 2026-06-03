@@ -119,6 +119,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { getBatchStatus, uploadBatch, downloadBatch } from "@/api/batch";
 import { getAppConfig } from "@/api/config";
 import { buildApiUrl } from "@/api/client";
@@ -126,6 +127,7 @@ import type { AppConfig, BatchStatusResponse, BatchTaskResponse } from "@/types/
 import type { APIError } from "@/types/api";
 
 const files = ref<File[]>([]);
+const { t } = useI18n();
 const submitting = ref(false);
 const batchId = ref<string | null>(null);
 const batchStatus = ref<BatchStatusResponse | null>(null);
@@ -160,22 +162,22 @@ function formatSupportedExtensions() {
 }
 
 function validateSelectedFiles(selectedFiles: File[]): string {
-  if (selectedFiles.length === 0) return "Select at least one file.";
+  if (selectedFiles.length === 0) return t("batch.selectAtLeastOne");
   if (selectedFiles.length > config.value.maxBatchFiles) {
-    return `You can upload up to ${config.value.maxBatchFiles} files at a time.`;
+    return t("batch.tooManyFiles", { maxFiles: config.value.maxBatchFiles });
   }
 
   const maxBytes = config.value.maxUploadSizeMb * 1024 * 1024;
   for (const file of selectedFiles) {
     const extension = file.name.includes(".") ? `.${file.name.split(".").pop()!.toLowerCase()}` : "";
     if (!extension || !config.value.supportedExtensions.includes(extension)) {
-      return `Unsupported file format: ${file.name}. Supported formats: ${formatSupportedExtensions()}.`;
+      return t("batch.unsupportedFile", { filename: file.name, formats: formatSupportedExtensions() });
     }
     if (file.size <= 0) {
-      return `Empty files cannot be uploaded: ${file.name}.`;
+      return t("batch.emptyFile", { filename: file.name });
     }
     if (file.size > maxBytes) {
-      return `${file.name} exceeds the ${config.value.maxUploadSizeMb}MB per-file limit.`;
+      return t("batch.fileTooLarge", { filename: file.name, maxMb: config.value.maxUploadSizeMb });
     }
   }
 
@@ -218,7 +220,7 @@ async function onSubmit() {
     const apiError = err as APIError;
     validationError.value = apiError.suggestion
       ? `${apiError.message} ${apiError.suggestion}`
-      : apiError.message || "Batch upload failed";
+      : apiError.message || t("batch.uploadFailed");
   } finally {
     submitting.value = false;
   }
@@ -246,7 +248,7 @@ async function fetchStatus() {
     }
   } catch (err) {
     const apiError = err as APIError;
-    pollingError.value = apiError.message || "Failed to fetch batch status";
+    pollingError.value = apiError.message || t("batch.fetchStatusFailed");
     if (apiError.status === 404 && statusInterval) {
       clearInterval(statusInterval);
       statusInterval = null;
@@ -294,7 +296,7 @@ function taskDownloadLinks(task: BatchTaskResponse) {
   if (downloadUrls.video) {
     links.push({
       key: `${task.task_id}-video`,
-      label: "Video",
+      label: t("batch.video"),
       href: buildApiUrl(downloadUrls.video),
     });
   }

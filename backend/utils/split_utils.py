@@ -1,8 +1,8 @@
 import os
-import subprocess
 import re
 
 from ..models.segments import SimpleSegment
+from backend.utils.media_process import run_media_command
 
 def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
     """
@@ -51,7 +51,7 @@ def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
             settings.FFMPEG_BINARY, "-y", "-ss", str(start), "-t", str(end - start),
             "-i", video_path, "-c", "copy", output_file
         ]
-        subprocess.run(command, check=True, capture_output=True)
+        run_media_command(command, check=True, timeout=settings.FFMPEG_TIMEOUT_SECONDS)
         
         segments.append({
             "path": output_file,

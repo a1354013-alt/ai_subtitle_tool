@@ -1,40 +1,48 @@
-import os
-import subprocess
 import logging
+
 from backend import settings
+from backend.utils.media_process import MediaProcessError, run_media_command
 
 logger = logging.getLogger(__name__)
 
+
 def preprocess_audio(video_path: str, output_audio_path: str):
-    """
-    使用 FFmpeg 提取音訊並進行降噪處理
-    """
-    # 提取音訊並應用 lowpass/highpass 濾鏡進行基礎降噪，並標準化音量
-    # afftdn 是 FFmpeg 的 FFT 降噪濾鏡
+    """Extract mono 16 kHz audio with denoise filters and a basic fallback."""
     command = [
-        settings.FFMPEG_BINARY, "-y", "-i", video_path,
-        "-vn", # 不處理影片
-        "-af", "afftdn,highpass=f=200,lowpass=f=3000,loudnorm", 
-        "-ar", "16000", # Whisper 建議採樣率
-        "-ac", "1",     # 單聲道
-        output_audio_path
+        settings.FFMPEG_BINARY,
+        "-y",
+        "-i",
+        video_path,
+        "-vn",
+        "-af",
+        "afftdn,highpass=f=200,lowpass=f=3000,loudnorm",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        output_audio_path,
     ]
-    
+
     try:
-        subprocess.run(command, check=True, capture_output=True)
+        run_media_command(command, check=True, timeout=settings.FFMPEG_TIMEOUT_SECONDS)
         return output_audio_path
-    except subprocess.CalledProcessError as e:
-        stderr = ""
+    except MediaProcessError as e:
+        logger.warning("Audio preprocessing failed; falling back to basic ffmpeg. stderr=%s", e.stderr)
+        fallback_command = [
+            settings.FFMPEG_BINARY,
+            "-y",
+            "-i",
+            video_path,
+            "-vn",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            output_audio_path,
+        ]
         try:
-            stderr = (e.stderr or b"").decode(errors="replace")
-        except Exception:
-            stderr = "<decode_failed>"
-        logger.warning("Audio preprocessing failed; falling back to basic ffmpeg. stderr=%s", stderr)
-        # 如果降噪失敗，嘗試僅提取原始音訊
-        fallback_command = [settings.FFMPEG_BINARY, "-y", "-i", video_path, "-vn", "-ar", "16000", "-ac", "1", output_audio_path]
-        try:
-            subprocess.run(fallback_command, check=True, capture_output=True)
-        except subprocess.CalledProcessError:
+            run_media_command(fallback_command, check=True, timeout=settings.FFMPEG_TIMEOUT_SECONDS)
+        except MediaProcessError:
             logger.exception("Audio preprocessing fallback ffmpeg failed")
             raise
         return output_audio_path

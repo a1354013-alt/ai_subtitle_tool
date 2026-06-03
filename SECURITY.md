@@ -54,17 +54,14 @@ CORS_ALLOW_CREDENTIALS=false  # Must be false when using wildcard
 ## API Security
 
 ### Authentication
-Currently, the API does not require authentication. For production deployment:
+Local demo defaults keep API authentication disabled. When `REQUIRE_AUTH_TOKEN=true`, middleware enforces token authentication for non-health API routes. For production deployment:
 
-1. **Recommended**: Add API key authentication via middleware
+1. **Recommended**: Set `REQUIRE_AUTH_TOKEN=true` and a strong `AUTH_TOKEN`
 2. **Alternative**: Deploy behind reverse proxy with authentication
-3. **Consider**: Rate limiting for public deployments
+3. **Frontend**: Set `VITE_API_TOKEN` so browser requests include `X-API-Token`
 
 ### Rate Limiting
-`RATE_LIMIT_PER_IP` is enforced by middleware for non-health API routes as a per-IP hourly limit. Set it to `0` to disable for local development. Consider:
-- Using `slowapi` for FastAPI rate limiting
-- Configuring nginx rate limiting
-- Setting up Redis-based rate limiting for distributed deployments
+`RATE_LIMIT_PER_IP` is enforced by middleware for non-health API routes as a per-IP hourly limit. Set it to `0` to disable for local development, and use a positive integer for production. Consider reverse-proxy or Redis-based limiting for distributed deployments.
 
 ## Environment Variables
 
@@ -76,10 +73,12 @@ The following environment variables contain sensitive data:
 | `OPENAI_API_KEY` | OpenAI API access | Never commit to version control |
 | `REDIS_URL` | Redis connection | Use authentication in production |
 | `CORS_ALLOWED_ORIGINS` | CORS policy | Configure per environment |
+| `AUTH_TOKEN` | API token auth | Required when `REQUIRE_AUTH_TOKEN=true` |
+| `VITE_API_TOKEN` | Frontend API token header | Build/runtime secret; do not commit real values |
 
 `OPENAI_API_KEY` is optional for transcription-only usage and required when translation is requested. Missing OpenAI configuration should be treated as a translation feature warning, not as a general service startup failure.
 
-When `REQUIRE_AUTH_TOKEN=true`, non-health API routes require either `Authorization: Bearer <token>` or `X-API-Token: <token>`. `/healthz`, `/readyz`, `/api/docs`, `/api/redoc`, and `/openapi.json` are excluded for diagnostics and documentation.
+When `REQUIRE_AUTH_TOKEN=true`, non-health API routes require either `Authorization: Bearer <token>` or `X-API-Token: <token>`. `/healthz`, `/readyz`, `/api/docs`, `/api/redoc`, and `/openapi.json` are excluded for diagnostics and documentation. The frontend sends `X-API-Token` automatically when `VITE_API_TOKEN` is set.
 
 `STORAGE_BACKEND` controls storage selection explicitly. `STORAGE_BACKEND=local` always uses local storage; `STORAGE_BACKEND=s3` requires `S3_BUCKET`. Setting `S3_BUCKET` alone does not enable S3.
 

@@ -1,7 +1,6 @@
 import logging
 import os
 import shutil
-import subprocess
 import uuid
 import json
 import time
@@ -18,6 +17,7 @@ from .models.status import TaskStatus as TaskStatusEnum
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
 from .utils.task_control_utils import is_task_canceled, mark_task_canceled, read_task_error_artifact
 from .utils.error_handler import handle_known_error, get_error_response
+from .utils.media_process import MediaProcessError, run_media_command
 from .utils.storage_utils import get_storage_backend
 from .utils.translate_utils import translation_targets_requested
 from .services.upload_validation import (
@@ -279,7 +279,7 @@ def _validate_uploaded_video_file(file: UploadFile) -> str:
 
 
 def _validate_saved_video_file(file_path: str) -> None:
-    ffprobe_result = subprocess.run(
+    ffprobe_result = run_media_command(
         [
             settings.FFPROBE_BINARY,
             "-v",
@@ -292,14 +292,12 @@ def _validate_saved_video_file(file_path: str) -> None:
             "csv=p=0",
             file_path,
         ],
-        capture_output=True,
-        text=True,
         timeout=settings.FFPROBE_TIMEOUT_SECONDS,
     )
     if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
         raise ValueError("Not a valid video file")
 
-    audio_result = subprocess.run(
+    audio_result = run_media_command(
         [
             settings.FFPROBE_BINARY,
             "-v",
@@ -312,16 +310,14 @@ def _validate_saved_video_file(file_path: str) -> None:
             "csv=p=0",
             file_path,
         ],
-        capture_output=True,
-        text=True,
         timeout=settings.FFPROBE_TIMEOUT_SECONDS,
     )
     if audio_result.returncode != 0 or "audio" not in (audio_result.stdout or ""):
-        raise ValueError("影片沒有音軌，無法轉錄字幕。")
+        raise ValueError("Video file does not contain an audio stream")
     
     # Check video duration if in demo mode
     if settings.DEMO_MODE and settings.MAX_VIDEO_DURATION_MINUTES > 0:
-        duration_result = subprocess.run(
+        duration_result = run_media_command(
             [
                 settings.FFPROBE_BINARY,
                 "-v",
@@ -332,9 +328,7 @@ def _validate_saved_video_file(file_path: str) -> None:
                 "default=noprint_wrappers=1:nokey=1",
                 file_path,
             ],
-            capture_output=True,
-            text=True,
-                timeout=settings.FFPROBE_TIMEOUT_SECONDS,
+            timeout=settings.FFPROBE_TIMEOUT_SECONDS,
         )
         if duration_result.returncode == 0:
             try:
@@ -382,8 +376,8 @@ def check_system_dependencies():
     
     # 1. Check ffmpeg
     try:
-        subprocess.run([settings.FFMPEG_BINARY, "-version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        run_media_command([settings.FFMPEG_BINARY, "-version"], timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
+    except (MediaProcessError, FileNotFoundError):
         logger.error("CRITICAL: %s. Suggestion: %s", 
                      ERROR_MESSAGES["ffmpeg_not_found"]["message"], 
                      ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"])
@@ -442,7 +436,7 @@ async def readyz():
         
     # ffmpeg check
     try:
-        subprocess.run([settings.FFMPEG_BINARY, "-version"], capture_output=True, check=True)
+        run_media_command([settings.FFMPEG_BINARY, "-version"], timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
     except Exception:
         errors.append({
             "code": "ffmpeg_not_found",
@@ -934,6 +928,7 @@ def _scan_task_artifacts(task_id: str) -> tuple[bool, list[FileInfo]]:
             display_name=lang_suffix.replace("_", " "),
             ass=exts["ass"],
             srt=exts["srt"],
+            vtt=exts["srt"],
         )
         for lang_suffix, exts in sorted(lang_map.items(), key=lambda kv: kv[0].lower())
     ]
@@ -1036,6 +1031,7 @@ async def get_results_manifest(task_id: str):
                 display_name=file_info.display_name,
                 ass=file_info.ass,
                 srt=file_info.srt,
+                vtt=file_info.vtt,
                 translated=translation_info.translated if translation_info else None,
                 fallback_reason=translation_info.fallback_reason if translation_info else None,
             )

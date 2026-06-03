@@ -68,7 +68,7 @@ async def test_e2e_upload_config_translation_check(
     # Stub subprocess for ffprobe
     def _fake_run(*args, **kwargs):
         return SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr="")
-    monkeypatch.setattr(main.subprocess, "run", _fake_run)
+    monkeypatch.setattr(main, "run_media_command", _fake_run)
     monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *a, **k: None)
     
     transport = httpx.ASGITransport(app=main.app)
@@ -123,7 +123,7 @@ async def test_e2e_single_language_works_without_openai(
     
     def _fake_run(*args, **kwargs):
         return SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr="")
-    monkeypatch.setattr(main.subprocess, "run", _fake_run)
+    monkeypatch.setattr(main, "run_media_command", _fake_run)
     monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *a, **k: None)
     
     transport = httpx.ASGITransport(app=main.app)
@@ -167,7 +167,7 @@ async def test_e2e_batch_upload_respects_translation_check(
     
     def _fake_run(*args, **kwargs):
         return SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr="")
-    monkeypatch.setattr(main.subprocess, "run", _fake_run)
+    monkeypatch.setattr(main, "run_media_command", _fake_run)
     monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *a, **k: None)
     
     transport = httpx.ASGITransport(app=main.app)
@@ -210,7 +210,7 @@ async def test_e2e_upload_invalid_video_rejected(
     def _fake_run(*args, **kwargs):
         # Simulate ffprobe saying "not a video"
         return SimpleNamespace(returncode=1, stdout="", stderr="not a video")
-    monkeypatch.setattr(main.subprocess, "run", _fake_run)
+    monkeypatch.setattr(main, "run_media_command", _fake_run)
     
     transport = httpx.ASGITransport(app=main.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:

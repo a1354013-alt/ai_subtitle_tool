@@ -14,7 +14,8 @@ This repo aims for a small but reliable test suite that validates:
 Run:
 
 ```bash
-pytest
+python -m pip install -r requirements.lock.txt
+TESTING=true PYTHONPATH=. python -m pytest -q
 ```
 
 Scope:
@@ -34,6 +35,7 @@ Notes:
 
 - Integration tests stub Celery/ffprobe interactions so they are deterministic and do not require a running Redis/worker.
 - Full end-to-end video processing is intentionally excluded from unit/CI tests due to runtime cost; it is covered by manual smoke checks.
+- Celery is a locked backend dependency; use `requirements.lock.txt` so backend tests do not depend on packages that happen to be installed globally.
 
 ---
 

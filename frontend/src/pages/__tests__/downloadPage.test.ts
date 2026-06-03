@@ -153,7 +153,7 @@ describe("DownloadPage", () => {
     });
 
     await flush();
-    const rebuildButton = wrapper.findAll("button").find((button) => button.text().includes("editor.rebuild"));
+    const rebuildButton = wrapper.findAll("button").find((button) => button.text().includes("Rebuild"));
     expect(rebuildButton).toBeTruthy();
     await rebuildButton!.trigger("click");
     await flush();

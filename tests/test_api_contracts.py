@@ -35,7 +35,7 @@ async def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     def _fake_run(*args, **kwargs):
         return SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr="")
 
-    monkeypatch.setattr(main.subprocess, "run", _fake_run)
+    monkeypatch.setattr(main, "run_media_command", _fake_run)
 
     # Stub enqueue to avoid requiring a running worker/redis.
     monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *a, **k: None)
@@ -83,13 +83,27 @@ async def test_auth_token_middleware_enforces_non_health_routes(app_client, monk
 async def test_rate_limit_middleware_returns_429(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
     main._RATE_LIMIT_BUCKETS.clear()
-    monkeypatch.setattr(main.settings, "RATE_LIMIT_PER_IP", 1)
+    monkeypatch.setattr(main.settings, "RATE_LIMIT_PER_IP", 2)
 
     first = await client.get("/api/config")
     second = await client.get("/api/config")
+    third = await client.get("/api/config")
 
     assert first.status_code == 200
-    assert second.status_code == 429
+    assert second.status_code == 200
+    assert third.status_code == 429
+    main._RATE_LIMIT_BUCKETS.clear()
+
+
+@pytest.mark.anyio
+async def test_rate_limit_middleware_disabled_at_zero(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    main._RATE_LIMIT_BUCKETS.clear()
+    monkeypatch.setattr(main.settings, "RATE_LIMIT_PER_IP", 0)
+
+    responses = [await client.get("/api/config") for _ in range(5)]
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200, 200]
     main._RATE_LIMIT_BUCKETS.clear()
 
 
@@ -342,6 +356,7 @@ async def test_results_manifest_contract_and_orphan_detection(app_client, monkey
             "display_name": "Traditional Chinese",
             "ass": True,
             "srt": True,
+            "vtt": True,
             "translated": False,
             "fallback_reason": "provider unavailable",
         }
@@ -390,6 +405,27 @@ async def test_subtitle_get_put_and_download_vtt(app_client, monkeypatch: pytest
     assert r3.status_code == 200
     assert r3.headers["content-type"].startswith("text/vtt")
     assert "WEBVTT" in r3.text
+
+
+@pytest.mark.anyio
+async def test_results_manifest_marks_vtt_available_only_when_srt_exists(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "33333333-3333-3333-3333-333333333333"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}_English.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+    (upload_dir / f"{task_id}_Japanese.ass").write_text("[Script Info]\n", encoding="utf-8")
+
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("SUCCESS"))
+
+    response = await client.get(f"/results/{task_id}")
+    assert response.status_code == 200
+    by_lang = {item["lang"]: item for item in response.json()["available_files"]}
+
+    assert by_lang["English"]["srt"] is True
+    assert by_lang["English"]["vtt"] is True
+    assert by_lang["Japanese"]["srt"] is False
+    assert by_lang["Japanese"]["vtt"] is False
 
 
 @pytest.mark.anyio

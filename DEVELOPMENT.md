@@ -6,7 +6,7 @@
 2. Press F5.
 3. Select `Run Full Stack Dev`.
 
-The compound launch starts the FastAPI backend, Vite frontend, Celery worker, and checks Redis first. On Windows, the VS Code tasks call `scripts/start-dev.cmd`, which delegates to PowerShell.
+The `Run Full Stack Dev` launch runs `scripts/dev_start.py`. It creates or verifies `.venv`, installs backend dependencies from `requirements.lock.txt`, runs `npm ci`, creates local `.env` files when missing, checks ffmpeg/ffprobe, checks Redis, starts the FastAPI backend, starts the Vite frontend, and starts a Celery worker when Redis is available.
 
 ## First Run
 
@@ -16,7 +16,14 @@ Run:
 python scripts/dev_bootstrap.py
 ```
 
-The F5 tasks also create `backend/.env` from `backend/.env.example` when it is missing. Redis is checked on `127.0.0.1:6379`; if Docker is available, `docker compose up -d redis` is used.
+The first-run bootstrap uses `.venv` consistently. `backend/.env` is created from `backend/.env.example` with host-friendly defaults such as `REDIS_URL=redis://localhost:6379/0`, `UPLOAD_DIR=backend/uploads`, `OUTPUT_DIR=backend/outputs`, `TEMP_DIR=backend/tmp`, and `RATE_LIMIT_PER_IP=0`. Redis is checked on `127.0.0.1:6379`; if Docker is available, the dev scripts try to start Redis before falling back to explicit guidance or eager-mode development.
+
+Backend tests assume the locked backend dependencies are installed:
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements.lock.txt
+$env:TESTING="true"; $env:PYTHONPATH="."; .venv\Scripts\python -m pytest -q
+```
 
 ## Stop Services
 
@@ -33,3 +40,4 @@ scripts/stop-dev.ps1
 - Frontend port 5173 is occupied: stop the process using the port or let Vite choose another port.
 - Backend port 8000 is occupied: stop the existing backend before F5.
 - `OPENAI_API_KEY` is not set: transcription for `Original` works, but translation targets are rejected until a key is configured.
+- Production auth: set `REQUIRE_AUTH_TOKEN=true` and `AUTH_TOKEN`; frontend builds can set `VITE_API_TOKEN` so API requests include `X-API-Token`.

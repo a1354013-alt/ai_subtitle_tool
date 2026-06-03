@@ -18,7 +18,7 @@ def batch_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import backend.main as main
 
     importlib.reload(main)
-    monkeypatch.setattr(main.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr=""))
+    monkeypatch.setattr(main, "run_media_command", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr=""))
     client = TestClient(main.app)
     return client, main
 

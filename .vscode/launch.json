@@ -45,7 +45,7 @@
       "preLaunchTask": "dev:ensure-env"
     },
     {
-      "name": "Launch AI Subtitle Tool - Full Stack",
+      "name": "Run Full Stack Dev",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/dev_start.py",
@@ -55,14 +55,6 @@
         "PYTHONUNBUFFERED": "1"
       },
       "preLaunchTask": "dev:ensure-env"
-    }
-  ],
-  "compounds": [
-    {
-      "name": "Run Full Stack Dev",
-      "configurations": ["Backend API", "Celery Worker", "Frontend Vite"],
-      "preLaunchTask": "dev:ensure-redis",
-      "stopAll": true
     }
   ]
 }

@@ -10,6 +10,7 @@ class FileInfo(BaseModel):
     display_name: str
     ass: bool
     srt: bool
+    vtt: bool = False
     translated: Optional[bool] = None
     fallback_reason: Optional[str] = None
 

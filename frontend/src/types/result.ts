@@ -3,6 +3,7 @@ export type FileInfo = {
   display_name: string;
   ass: boolean;
   srt: boolean;
+  vtt?: boolean;
   translated?: boolean | null;
   fallback_reason?: string | null;
 };
