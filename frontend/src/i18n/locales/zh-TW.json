@@ -1,23 +1,35 @@
 {
   "navbar": {
     "home": "首頁",
-    "tasks": "任務清單",
+    "tasks": "任務",
     "editor": "編輯器",
     "language": "語言",
-    "workflow": "上傳 → 處理 → 編輯字幕 → 下載"
+    "workflow": "上傳 -> 處理 -> 編輯字幕 -> 下載"
   },
   "upload": {
     "title": "上傳影片",
-    "selectVideo": "選擇影片檔案",
-    "generate": "開始生成字幕",
+    "selectVideo": "選擇影片檔",
+    "generate": "產生字幕",
     "targetLanguages": "目標語言",
     "subtitleFormat": "字幕格式",
-    "burnSubtitles": "內嵌字幕",
+    "burnSubtitles": "燒錄字幕",
     "removeSilence": "移除靜音",
     "parallel": "平行處理"
   },
   "batch": {
-    "downloadZip": "下載批次壓縮檔 (ZIP)"
+    "selectVideos": "選擇多個影片",
+    "supportedHelp": "支援：{extensions}。每個檔案上限 {maxMb}MB，每批最多 {maxFiles} 個檔案。",
+    "totalSelectedSize": "已選總大小：{size}",
+    "commaSeparatedLanguages": "多個語言請用逗號分隔。",
+    "translationUnavailable": "尚未設定 OpenAI API Key，因此翻譯功能不可用。",
+    "burnIntoFinal": "將字幕燒錄到 final.mp4",
+    "removeSilenceHelp": "轉錄前移除較長的靜音片段。",
+    "uploading": "上傳中...",
+    "startProcess": "開始批次處理",
+    "batchId": "批次 ID",
+    "total": "總數",
+    "pending": "等待中",
+    "downloadZip": "下載批次 ZIP"
   },
   "task": {
     "status": "任務狀態",
@@ -26,15 +38,31 @@
     "failed": "失敗",
     "progress": "進度"
   },
+  "recent": {
+    "subtitle": "後端記錄的最近 20 筆任務。",
+    "loading": "正在讀取最近任務紀錄。",
+    "emptyTitle": "沒有最近任務",
+    "emptyDescription": "目前還沒有任務紀錄。請上傳影片建立任務。",
+    "searchPlaceholder": "依任務 ID 或檔名搜尋...",
+    "taskId": "任務 ID",
+    "filename": "檔名",
+    "created": "建立時間",
+    "duration": "耗時",
+    "links": "連結",
+    "outputsUnavailable": "完成前無法使用成果",
+    "notes": "備註：檔名會在上傳時記錄。若後端曾升級，較舊任務可能只顯示任務 ID。"
+  },
   "editor": {
     "title": "字幕編輯器",
     "save": "儲存",
-    "rebuild": "重新生成影片",
+    "rebuild": "重新產生",
     "download": "下載字幕"
   },
   "download": {
     "title": "下載",
-    "button": "下載"
+    "button": "下載",
+    "finalVideoNoteTitle": "最終影片字幕語言",
+    "finalVideoLanguageNote": "產生多語言字幕時，final.mp4 只會燒錄第一個選定語言；其他語言仍可下載字幕檔。"
   },
   "common": {
     "loading": "載入中...",

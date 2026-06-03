@@ -61,7 +61,7 @@ Currently, the API does not require authentication. For production deployment:
 3. **Consider**: Rate limiting for public deployments
 
 ### Rate Limiting
-Not implemented by default. `RATE_LIMIT_PER_IP` is reserved for future hardening; not enforced by middleware yet. Consider:
+`RATE_LIMIT_PER_IP` is enforced by middleware for non-health API routes as a per-IP hourly limit. Set it to `0` to disable for local development. Consider:
 - Using `slowapi` for FastAPI rate limiting
 - Configuring nginx rate limiting
 - Setting up Redis-based rate limiting for distributed deployments
@@ -79,7 +79,7 @@ The following environment variables contain sensitive data:
 
 `OPENAI_API_KEY` is optional for transcription-only usage and required when translation is requested. Missing OpenAI configuration should be treated as a translation feature warning, not as a general service startup failure.
 
-`REQUIRE_AUTH_TOKEN` is reserved for future hardening; not enforced by middleware yet. Do not expose this service publicly assuming token auth is active unless separate auth is provided by a reverse proxy or deployment layer.
+When `REQUIRE_AUTH_TOKEN=true`, non-health API routes require either `Authorization: Bearer <token>` or `X-API-Token: <token>`. `/healthz`, `/readyz`, `/api/docs`, `/api/redoc`, and `/openapi.json` are excluded for diagnostics and documentation.
 
 `STORAGE_BACKEND` controls storage selection explicitly. `STORAGE_BACKEND=local` always uses local storage; `STORAGE_BACKEND=s3` requires `S3_BUCKET`. Setting `S3_BUCKET` alone does not enable S3.
 
@@ -118,7 +118,7 @@ Current frontend audit status:
 
 - Production audit must pass with 0 vulnerabilities.
 - `npm audit fix` has been applied to remove the prior high-severity `js-cookie` issue.
-- Full npm audit may include dev-only `vite` / `vitest` / `esbuild` tooling advisories and is tracked separately.
+- Production audit uses `npm audit --omit=dev`. Full dev audit advisories are tracked separately.
 - Runtime impact is limited because the reported issue targets the Vite development server, not the production build output.
 - Recommended follow-up: schedule a dedicated compatibility pass to upgrade `vite`, `@vitejs/plugin-vue`, and `vitest` together, then re-run frontend lint/typecheck/test/build and CI on Node 20.
 

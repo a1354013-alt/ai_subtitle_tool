@@ -24,6 +24,7 @@ def test_demo_duration_below_limit_passes(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     calls = [
         SimpleNamespace(returncode=0, stdout="video\n", stderr=""),
+        SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="599", stderr=""),
     ]
     monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
@@ -38,6 +39,7 @@ def test_demo_duration_equal_limit_passes(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     calls = [
         SimpleNamespace(returncode=0, stdout="video\n", stderr=""),
+        SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="600", stderr=""),
     ]
     monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
@@ -52,6 +54,7 @@ def test_demo_duration_over_limit_raises(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     calls = [
         SimpleNamespace(returncode=0, stdout="video\n", stderr=""),
+        SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="601", stderr=""),
     ]
     monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
@@ -71,6 +74,7 @@ def test_demo_duration_parse_failure_warns_without_blocking(
 
     calls = [
         SimpleNamespace(returncode=0, stdout="video\n", stderr=""),
+        SimpleNamespace(returncode=0, stdout="audio\n", stderr=""),
         SimpleNamespace(returncode=0, stdout="not-a-number", stderr=""),
     ]
     monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
@@ -79,6 +83,34 @@ def test_demo_duration_parse_failure_warns_without_blocking(
         main._validate_saved_video_file(str(tmp_path / "video.mp4"))
 
     assert "Could not parse video duration" in caplog.text
+
+
+def test_upload_validation_rejects_video_without_audio(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    main = _reload_main(monkeypatch, tmp_path)
+    monkeypatch.setattr(main.settings, "DEMO_MODE", False)
+    calls = [
+        SimpleNamespace(returncode=0, stdout="video\n", stderr=""),
+        SimpleNamespace(returncode=0, stdout="", stderr=""),
+    ]
+    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: calls.pop(0))
+
+    with pytest.raises(ValueError, match="沒有音軌"):
+        main._validate_saved_video_file(str(tmp_path / "video.mp4"))
+
+
+def test_import_model_loader_does_not_require_heavy_modules(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
+    module = importlib.reload(importlib.import_module("backend.utils.model_loader"))
+    assert module.resolve_model_size(30, requested_model_size="tiny") == "tiny"
+
+
+def test_import_translate_policy_does_not_require_openai_or_tenacity(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setitem(sys.modules, "openai", None)
+    monkeypatch.setitem(sys.modules, "tenacity", None)
+    module = importlib.reload(importlib.import_module("backend.utils.translate_policy"))
+    assert module.translation_targets_requested(["Original"]) is False
+    assert module.translation_targets_requested(["Japanese"]) is True
 
 
 def test_model_size_priority_options_then_env_then_duration(monkeypatch: pytest.MonkeyPatch):

@@ -4,6 +4,18 @@ import re
 from backend import settings
 
 
+def _run_media_command(cmd: list[str], *, timeout: int, check: bool = False) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=check)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Media command timed out after {timeout}s: {cmd[0]}") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        if len(stderr) > 500:
+            stderr = stderr[:500] + "..."
+        raise RuntimeError(f"Media command failed: {stderr or exc}") from exc
+
+
 def get_hwaccel_params() -> list[str]:
     """Return stable ffmpeg encoder arguments with a safe CPU fallback.
 
@@ -15,12 +27,12 @@ def get_hwaccel_params() -> list[str]:
 def has_audio(video_path):
     """檢查影片是否有音軌"""
     cmd = [settings.FFPROBE_BINARY, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", video_path]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_media_command(cmd, timeout=settings.FFPROBE_TIMEOUT_SECONDS)
     return len(result.stdout.strip()) > 0
 
 def get_video_duration(video_path):
     cmd = [settings.FFPROBE_BINARY, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_media_command(cmd, timeout=settings.FFPROBE_TIMEOUT_SECONDS)
     return float(result.stdout.strip())
 
 def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_duration=0.5):
@@ -38,7 +50,7 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
         "-af", f"silencedetect=noise={noise_threshold}dB:d={min_silence_duration}",
         "-f", "null", "-"
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_media_command(cmd, timeout=settings.FFMPEG_TIMEOUT_SECONDS)
     output = result.stderr
 
     silence_starts = [float(x) for x in re.findall(r"silence_start: ([\d\.]+)", output)]
@@ -46,7 +58,11 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
     
     # A) 致命級修復：確保一定會產出 output_path
     if not silence_starts:
-        subprocess.run([settings.FFMPEG_BINARY, "-y", "-i", input_path, "-c", "copy", output_path], check=True)
+        _run_media_command(
+            [settings.FFMPEG_BINARY, "-y", "-i", input_path, "-c", "copy", output_path],
+            timeout=settings.FFMPEG_TIMEOUT_SECONDS,
+            check=True,
+        )
         return output_path
 
     if len(silence_starts) > len(silence_ends):
@@ -65,7 +81,11 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
 
     # A) 致命級修復：若 keep_segments 為空，至少 copy 一份
     if not keep_segments:
-        subprocess.run([settings.FFMPEG_BINARY, "-y", "-i", input_path, "-c", "copy", output_path], check=True)
+        _run_media_command(
+            [settings.FFMPEG_BINARY, "-y", "-i", input_path, "-c", "copy", output_path],
+            timeout=settings.FFMPEG_TIMEOUT_SECONDS,
+            check=True,
+        )
         return output_path
 
     video_filters = ""
@@ -86,7 +106,7 @@ def remove_silence(input_path, output_path, noise_threshold=-30, min_silence_dur
         "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
         output_path
     ]
-    subprocess.run(cmd, check=True)
+    _run_media_command(cmd, timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
     return output_path
 
 def burn_subtitles(video_path, subtitle_path, output_path):
@@ -94,7 +114,7 @@ def burn_subtitles(video_path, subtitle_path, output_path):
     燒錄字幕到影片中。
     實作兩階段策略：先嘗試快速燒錄，失敗則使用保守參數 Fallback。
     """
-    abs_subtitle_path = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:")
+    abs_subtitle_path = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:").replace("'", r"\'")
     
     # 第一階段：快速燒錄 (aac)
     cmd_fast = [
@@ -105,9 +125,9 @@ def burn_subtitles(video_path, subtitle_path, output_path):
     ]
     
     try:
-        subprocess.run(cmd_fast, check=True)
+        _run_media_command(cmd_fast, timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
         return output_path
-    except subprocess.CalledProcessError:
+    except RuntimeError:
         # 第二階段：保守參數 Fallback
         cmd_fallback = [
             settings.FFMPEG_BINARY, "-y", "-i", video_path,
@@ -116,5 +136,5 @@ def burn_subtitles(video_path, subtitle_path, output_path):
             "-c:a", "aac", "-b:a", "128k",
             output_path
         ]
-        subprocess.run(cmd_fallback, check=True)
+        _run_media_command(cmd_fallback, timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
         return output_path

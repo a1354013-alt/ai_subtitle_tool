@@ -283,7 +283,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
         tmpdir = _make_tmpdir()
         main = _load_app_with_upload_dir(str(tmpdir))
 
-        fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
+        fake_ffprobe = MagicMock(returncode=0, stdout="video\naudio\n", stderr="")
         with (
             patch("subprocess.run", return_value=fake_ffprobe),
             patch.object(main, "_enqueue_process_video_task", return_value=None),
@@ -307,7 +307,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
         main = _load_app_with_upload_dir(str(tmpdir))
         main.settings.OPENAI_API_KEY = "sk-test"
 
-        fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
+        fake_ffprobe = MagicMock(returncode=0, stdout="video\naudio\n", stderr="")
         captured: dict = {}
 
         def _capture_enqueue(_file_path: str, options: dict, _task_id: str) -> None:
@@ -334,7 +334,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
         tmpdir = _make_tmpdir()
         main = _load_app_with_upload_dir(str(tmpdir))
 
-        fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
+        fake_ffprobe = MagicMock(returncode=0, stdout="video\naudio\n", stderr="")
         with (
             patch("subprocess.run", return_value=fake_ffprobe),
             patch.object(main, "_enqueue_process_video_task", return_value=None),
@@ -397,7 +397,7 @@ class TestUploadMimeAndFfprobe(unittest.TestCase):
         main = _load_app_with_upload_dir(str(tmpdir))
         main.settings.OPENAI_API_KEY = "sk-test"
 
-        fake_ffprobe = MagicMock(returncode=0, stdout="video\n", stderr="")
+        fake_ffprobe = MagicMock(returncode=0, stdout="video\naudio\n", stderr="")
         with (
             patch("subprocess.run", return_value=fake_ffprobe),
             patch.object(main, "_enqueue_process_video_task", side_effect=main.HTTPException(status_code=503, detail="no worker")),
@@ -481,7 +481,7 @@ class TestPathTraversalAndManifest(unittest.TestCase):
         main = _load_app_with_upload_dir(str(tmpdir))
         task_id = str(uuid.uuid4())
 
-        # Even if files exist, non-success statuses should not expose them as available outputs.
+        # Local artifacts are exposed even if Celery metadata is missing or non-success.
         fake_files = [f"{task_id}_Traditional_Chinese.srt"]
 
         class _FakeAsyncResult:
@@ -496,7 +496,7 @@ class TestPathTraversalAndManifest(unittest.TestCase):
             manifest = _run(main.get_results_manifest(task_id=task_id))
 
         self.assertEqual(manifest.task_status, "PENDING")
-        self.assertEqual(manifest.available_files, [])
+        self.assertEqual([f.lang for f in manifest.available_files], ["Traditional_Chinese"])
         self.assertTrue(manifest.orphaned_files_detected)
 
 
@@ -635,6 +635,13 @@ class TestDiarizationObservability(unittest.TestCase):
         self.assertIn("pyannote", warning.lower())
 
 
+class TestAssEscaping(unittest.TestCase):
+    def test_ass_text_escapes_braces_and_preserves_newlines(self):
+        from backend.utils.ass_utils import escape_ass_text
+
+        self.assertEqual(escape_ass_text("hello {world}\nnext"), r"hello \{world\}\Nnext")
+
+
 class TestCleanupOldFiles(unittest.TestCase):
     def test_cleanup_respects_valid_lock(self):
         import backend.utils.cleanup_utils as cu
@@ -714,3 +721,21 @@ class TestCleanupOldFiles(unittest.TestCase):
         rmtree_paths = [str(c.args[0]) for c in rmtree_mock.call_args_list]
         self.assertTrue(any(p.endswith(old_file) for p in removed_paths))
         self.assertTrue(any(p.endswith(old_dir) for p in rmtree_paths))
+
+    def test_cleanup_never_deletes_metadata_entries(self):
+        import backend.utils.cleanup_utils as cu
+
+        entries = ["task_history.sqlite3", "task_history.sqlite3-wal", "task_history.sqlite3-shm", "batches"]
+        with (
+            patch.object(cu.os, "listdir", return_value=entries),
+            patch.object(cu.os.path, "exists", return_value=True),
+            patch.object(cu.os.path, "getmtime", return_value=time.time() - (25 * 3600)),
+            patch.object(cu.os.path, "isdir", return_value=True),
+            patch.object(cu.os.path, "isfile", return_value=True),
+            patch.object(cu.os, "remove") as remove_mock,
+            patch.object(cu.shutil, "rmtree") as rmtree_mock,
+        ):
+            cu.cleanup_old_files(upload_dir="X")
+
+        remove_mock.assert_not_called()
+        rmtree_mock.assert_not_called()

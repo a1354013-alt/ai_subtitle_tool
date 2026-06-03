@@ -149,7 +149,7 @@ Notes:
 
 - `npm test` starts Vitest watch mode for local development.
 - `npm run test:ci` is the CI-safe, non-watch command and must exit on its own.
-- Production audit must pass with 0 vulnerabilities. Full npm audit may include dev-only Vite/Vitest/esbuild tooling advisories and is tracked separately.
+- Production audit uses `npm audit --omit=dev` and must pass with 0 vulnerabilities. Full dev audit advisories are tracked separately.
 
 > Authentication and rate limiting settings are reserved for future production hardening and are not enforced in the current local demo build.
 
@@ -261,8 +261,10 @@ Important variables:
 - `S3_SECRET_KEY`
 - `S3_REGION`
 - `S3_BUCKET`
-- `REQUIRE_AUTH_TOKEN` (Reserved for future hardening; not enforced by middleware yet.)
-- `RATE_LIMIT_PER_IP` (Reserved for future hardening; not enforced by middleware yet.)
+- `REQUIRE_AUTH_TOKEN` enables token auth for non-health API routes. Send either `Authorization: Bearer <token>` or `X-API-Token: <token>`.
+- `AUTH_TOKEN` is required when `REQUIRE_AUTH_TOKEN=true`.
+- `RATE_LIMIT_PER_IP` limits requests per IP per hour. Set `0` to disable.
+- `FFMPEG_TIMEOUT_SECONDS` / `FFPROBE_TIMEOUT_SECONDS` bound media subprocess runtime.
 
 Whisper model selection priority:
 
@@ -344,4 +346,9 @@ Batch ZIP naming:
 - Subtitle files use `{safe_original_filename}_{task_id}_{language}.srt`
 - Subtitle files use `{safe_original_filename}_{task_id}_{language}.ass`
 - Subtitle files use `{safe_original_filename}_{task_id}_{language}.vtt`
+- `final.mp4` burns only the first selected subtitle language. Other generated languages remain available as subtitle downloads.
+
+## VS Code development
+
+Open the repository root in VS Code, press F5, and select `Run Full Stack Dev`. See `DEVELOPMENT.md` for first-run setup, Redis behavior, and stop commands.
 - Final video uses `{safe_original_filename}_{task_id}.mp4`

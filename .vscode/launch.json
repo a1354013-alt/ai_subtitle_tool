@@ -1,17 +1,68 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Launch AI Subtitle Tool - Full Stack",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/scripts/dev_start.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONUNBUFFERED": "1"
-            },
-            "preLaunchTask": "Bootstrap Development Environment"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend API",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["backend.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "ENVIRONMENT": "development"
+      },
+      "preLaunchTask": "dev:ensure-env"
+    },
+    {
+      "name": "Celery Worker",
+      "type": "python",
+      "request": "launch",
+      "module": "celery",
+      "args": ["-A", "backend.celery_app:celery_app", "worker", "--loglevel=info"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "ENVIRONMENT": "development"
+      },
+      "preLaunchTask": "dev:ensure-redis"
+    },
+    {
+      "name": "Frontend Vite",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/frontend",
+      "console": "integratedTerminal",
+      "env": {
+        "VITE_API_BASE_URL": "http://127.0.0.1:8000"
+      },
+      "preLaunchTask": "dev:ensure-env"
+    },
+    {
+      "name": "Launch AI Subtitle Tool - Full Stack",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/dev_start.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "preLaunchTask": "dev:ensure-env"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Run Full Stack Dev",
+      "configurations": ["Backend API", "Celery Worker", "Frontend Vite"],
+      "preLaunchTask": "dev:ensure-redis",
+      "stopAll": true
+    }
+  ]
 }

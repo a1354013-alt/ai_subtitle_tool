@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import uuid
 import json
+import time
+from collections import deque
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -14,7 +16,7 @@ from fastapi.responses import JSONResponse, Response
 
 from .models.status import TaskStatus as TaskStatusEnum
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
-from .utils.task_control_utils import is_task_canceled, mark_task_canceled
+from .utils.task_control_utils import is_task_canceled, mark_task_canceled, read_task_error_artifact
 from .utils.error_handler import handle_known_error, get_error_response
 from .utils.storage_utils import get_storage_backend
 from .utils.translate_utils import translation_targets_requested
@@ -29,7 +31,7 @@ from .services.upload_validation import (
     validate_upload_size,
 )
 from . import settings
-from .batch_manager import BatchManager
+from .batch_manager import BatchManager, InvalidBatchIdError
 from .core.paths import validate_path_traversal
 from .schemas.batch import BatchStatusResponse, BatchTaskResponse, BatchUploadResponse
 from .schemas.config import AppConfigResponse
@@ -55,6 +57,8 @@ app = FastAPI(
 )
 logger = logging.getLogger(__name__)
 OPENAI_TRANSLATION_REQUIRED_MESSAGE = "OPENAI_API_KEY is required when translation targets are requested."
+_RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
+AUTH_EXEMPT_PATHS = {"/healthz", "/readyz", "/openapi.json", "/api/docs", "/api/redoc"}
 
 
 @app.exception_handler(HTTPException)
@@ -113,6 +117,31 @@ def configure_cors() -> None:
 
 configure_cors()
 
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    path = request.url.path
+    if path not in AUTH_EXEMPT_PATHS:
+        if settings.REQUIRE_AUTH_TOKEN:
+            configured = (settings.AUTH_TOKEN or "").strip()
+            auth_header = request.headers.get("Authorization", "")
+            bearer = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+            header_token = request.headers.get("X-API-Token", "").strip()
+            if not configured or (bearer != configured and header_token != configured):
+                return JSONResponse(status_code=401, content={"detail": "Invalid or missing API token"})
+
+        if settings.RATE_LIMIT_PER_IP > 0:
+            client_ip = request.client.host if request.client else "unknown"
+            now = time.time()
+            bucket = _RATE_LIMIT_BUCKETS.setdefault(client_ip, deque())
+            while bucket and now - bucket[0] >= 3600:
+                bucket.popleft()
+            if len(bucket) >= settings.RATE_LIMIT_PER_IP:
+                return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+            bucket.append(now)
+
+    return await call_next(request)
+
 UPLOAD_DIR = settings.get_upload_dir()
 OUTPUT_DIR = settings.get_output_dir()
 TEMP_DIR = settings.get_temp_dir()
@@ -159,6 +188,13 @@ def _coerce_failure_payload(value: Any) -> dict[str, str]:
     }
 
 
+def _failure_payload_from_artifact(task_id: str) -> Optional[dict[str, str]]:
+    payload = read_task_error_artifact(task_id, UPLOAD_DIR)
+    if payload is None:
+        return None
+    return _coerce_failure_payload(payload)
+
+
 def _task_has_local_artifacts(task_id: str) -> bool:
     task_prefix = f"{task_id}_"
     for path in Path(UPLOAD_DIR).glob(f"{task_id}*"):
@@ -202,10 +238,11 @@ def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> 
     logger.warning("process_video_task has no apply_async; skipping enqueue for task_id=%s", task_id)
 
 
-def _enqueue_rebuild_final_task(task_id: str, lang_suffix: str, subtitle_format: str) -> None:
+def _enqueue_rebuild_final_task(task_id: str, lang_suffix: str, subtitle_format: str) -> str:
+    rebuild_task_id = f"rebuild_{task_id}_{int(time.time() * 1000)}"
     if _is_test_environment():
         logger.info("Skipping Celery rebuild enqueue in test environment for task_id=%s", task_id)
-        return
+        return rebuild_task_id
 
     try:
         from .tasks import rebuild_final_video_task
@@ -216,11 +253,12 @@ def _enqueue_rebuild_final_task(task_id: str, lang_suffix: str, subtitle_format:
     if hasattr(rebuild_final_video_task, "apply_async"):
         # Rebuild tasks are usually fast and user-triggered, so we put them in high_priority
         rebuild_final_video_task.apply_async(
-            args=[task_id, lang_suffix, subtitle_format], task_id=task_id, queue="high_priority"
+            args=[task_id, lang_suffix, subtitle_format], task_id=rebuild_task_id, queue="high_priority"
         )
-        return
+        return rebuild_task_id
 
     logger.warning("rebuild_final_video_task has no apply_async; skipping enqueue for task_id=%s", task_id)
+    return rebuild_task_id
 
 
 def _get_async_result(task_id: str):
@@ -256,10 +294,30 @@ def _validate_saved_video_file(file_path: str) -> None:
         ],
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=settings.FFPROBE_TIMEOUT_SECONDS,
     )
     if ffprobe_result.returncode != 0 or "video" not in (ffprobe_result.stdout or ""):
         raise ValueError("Not a valid video file")
+
+    audio_result = subprocess.run(
+        [
+            settings.FFPROBE_BINARY,
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+            file_path,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=settings.FFPROBE_TIMEOUT_SECONDS,
+    )
+    if audio_result.returncode != 0 or "audio" not in (audio_result.stdout or ""):
+        raise ValueError("影片沒有音軌，無法轉錄字幕。")
     
     # Check video duration if in demo mode
     if settings.DEMO_MODE and settings.MAX_VIDEO_DURATION_MINUTES > 0:
@@ -276,7 +334,7 @@ def _validate_saved_video_file(file_path: str) -> None:
             ],
             capture_output=True,
             text=True,
-            timeout=5,
+                timeout=settings.FFPROBE_TIMEOUT_SECONDS,
         )
         if duration_result.returncode == 0:
             try:
@@ -315,6 +373,12 @@ async def get_app_config():
 def check_system_dependencies():
     """Check critical dependencies on startup."""
     from .utils.error_messages import ERROR_MESSAGES
+
+    if settings.ENVIRONMENT.lower() == "production":
+        if settings.REQUIRE_AUTH_TOKEN and not settings.AUTH_TOKEN:
+            raise RuntimeError("REQUIRE_AUTH_TOKEN=true requires AUTH_TOKEN in production.")
+        if not settings.REQUIRE_AUTH_TOKEN:
+            logger.warning("Production is running without REQUIRE_AUTH_TOKEN=true.")
     
     # 1. Check ffmpeg
     try:
@@ -543,6 +607,8 @@ async def get_status(task_id: str):
             failure_payload = _coerce_failure_payload(task_result.info)
         elif isinstance(task_result.result, dict) and task_result.result.get("error_code"):
             failure_payload = _coerce_failure_payload(task_result.result)
+        elif _failure_payload_from_artifact(task_id):
+            failure_payload = _failure_payload_from_artifact(task_id) or {}
         else:
             fallback_value = task_result.result if task_result.result is not None else task_result.info
             failure_payload = _coerce_failure_payload(fallback_value)
@@ -551,7 +617,13 @@ async def get_status(task_id: str):
         suggestion = failure_payload["suggestion"]
         status = TaskStatusEnum.FAILURE
     elif status == "PENDING":
-        if TASK_HISTORY.get_created_at(task_id) is None and not _task_has_local_artifacts(task_id):
+        artifact_payload = _failure_payload_from_artifact(task_id)
+        if artifact_payload:
+            error_code = artifact_payload["error_code"]
+            message = artifact_payload["message"]
+            suggestion = artifact_payload["suggestion"]
+            status = TaskStatusEnum.FAILURE
+        elif TASK_HISTORY.get_created_at(task_id) is None and not _task_has_local_artifacts(task_id):
             error_info = get_error_response("task_not_found")
             raise HTTPException(
                 status_code=404,
@@ -561,11 +633,25 @@ async def get_status(task_id: str):
                     "suggestion": error_info["suggestion"],
                 },
             )
-        message = "Waiting for worker..."
-        status = TaskStatusEnum.PENDING
+        else:
+            message = "Waiting for worker..."
+            status = TaskStatusEnum.PENDING
+    elif status == "REVOKED":
+        failure_payload = _failure_payload_from_artifact(task_id) or _coerce_failure_payload("Task was revoked")
+        error_code = failure_payload["error_code"]
+        message = failure_payload["message"]
+        suggestion = failure_payload["suggestion"]
+        status = TaskStatusEnum.FAILURE
     else:
         # Any other Celery states are surfaced as PROCESSING for stability.
-        status = TaskStatusEnum.PROCESSING
+        artifact_payload = _failure_payload_from_artifact(task_id)
+        if artifact_payload:
+            error_code = artifact_payload["error_code"]
+            message = artifact_payload["message"]
+            suggestion = artifact_payload["suggestion"]
+            status = TaskStatusEnum.FAILURE
+        else:
+            status = TaskStatusEnum.PROCESSING
 
     # Best-effort status tracking for "Recent Tasks"
     try:
@@ -620,8 +706,8 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
     if subtitle_format not in ("ass", "srt"):
         raise HTTPException(status_code=400, detail="format must be 'ass' or 'srt'")
 
-    _enqueue_rebuild_final_task(task_id=task_id, lang_suffix=lang_suffix, subtitle_format=subtitle_format)
-    return {"status": "queued", "task_id": task_id}
+    rebuild_task_id = _enqueue_rebuild_final_task(task_id=task_id, lang_suffix=lang_suffix, subtitle_format=subtitle_format)
+    return {"status": "queued", "task_id": task_id, "rebuild_task_id": rebuild_task_id}
 
 
 @app.get("/tasks/recent", response_model=list[RecentTask])
@@ -721,7 +807,10 @@ async def batch_upload_videos(
 
 @app.get("/batch/{batch_id}/status", response_model=BatchStatusResponse)
 async def get_batch_status(batch_id: str):
-    batch = BATCH_MANAGER.get_batch(batch_id)
+    try:
+        batch = BATCH_MANAGER.get_batch(batch_id)
+    except InvalidBatchIdError:
+        raise HTTPException(status_code=400, detail="Invalid batch_id format") from None
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
     
@@ -817,9 +906,44 @@ def _translation_info_from_result(result: Any) -> dict[str, TranslationInfo]:
         )
     return translations
 
+
+def _scan_task_artifacts(task_id: str) -> tuple[bool, list[FileInfo]]:
+    final_video_path = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4"), UPLOAD_DIR)
+    has_video = os.path.exists(final_video_path)
+
+    lang_map: dict[str, dict[str, bool]] = {}
+    try:
+        files = sorted(f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_"))
+    except OSError:
+        logger.warning("Failed to list upload dir for results manifest", exc_info=True)
+        files = []
+
+    for filename in files:
+        if not filename.endswith((".ass", ".srt")):
+            continue
+        parts = filename.replace(f"{task_id}_", "", 1).rsplit(".", 1)
+        if len(parts) != 2:
+            continue
+        lang_suffix, ext = parts[0], parts[1]
+        lang_map.setdefault(lang_suffix, {"ass": False, "srt": False})
+        lang_map[lang_suffix][ext] = True
+
+    return has_video, [
+        FileInfo(
+            lang=lang_suffix,
+            display_name=lang_suffix.replace("_", " "),
+            ass=exts["ass"],
+            srt=exts["srt"],
+        )
+        for lang_suffix, exts in sorted(lang_map.items(), key=lambda kv: kv[0].lower())
+    ]
+
 @app.get("/batch/{batch_id}/download")
 async def download_batch_zip(batch_id: str):
-    batch = BATCH_MANAGER.get_batch(batch_id)
+    try:
+        batch = BATCH_MANAGER.get_batch(batch_id)
+    except InvalidBatchIdError:
+        raise HTTPException(status_code=400, detail="Invalid batch_id format") from None
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
     
@@ -900,71 +1024,34 @@ async def get_results_manifest(task_id: str):
     else:
         task_status = TaskStatusEnum.PROCESSING if status == "PROGRESS" else TaskStatusEnum(status) if status in TaskStatusEnum._value2member_map_ else TaskStatusEnum.PROCESSING
 
-    # Detect orphaned files without exposing them as valid outputs.
-    orphaned_files_detected = False
-    try:
-        for f in os.listdir(UPLOAD_DIR):
-            if f.startswith(f"{task_id}_"):
-                orphaned_files_detected = True
-                break
-    except OSError:
-        logger.warning("Failed to list upload dir for orphan detection", exc_info=True)
-
-    if task_status != TaskStatusEnum.SUCCESS:
-        return TaskResultManifest(
-            task_id=task_id,
-            task_status=task_status,
-            has_video=False,
-            subtitle_languages=[],
-            available_files=[],
-            warnings=warnings,
-            translations=[],
-            is_partial=False,
-            orphaned_files_detected=orphaned_files_detected,
-        )
-
-    final_video_path = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_final.mp4"), UPLOAD_DIR)
-    has_video = os.path.exists(final_video_path)
-
-    files = sorted([f for f in os.listdir(UPLOAD_DIR) if f.startswith(f"{task_id}_")])
-    lang_map: dict[str, dict[str, bool]] = {}
-    for f in files:
-        if not f.endswith((".ass", ".srt")):
-            continue
-        parts = f.replace(f"{task_id}_", "", 1).rsplit(".", 1)
-        if len(parts) != 2:
-            continue
-        lang_suffix, ext = parts[0], parts[1]
-        lang_map.setdefault(lang_suffix, {"ass": False, "srt": False})
-        if ext in ("ass", "srt"):
-            lang_map[lang_suffix][ext] = True
-
-    available_files: List[FileInfo] = []
+    has_video, available_files = _scan_task_artifacts(task_id)
     translations_by_lang = _translation_info_from_result(task_result.result)
-    for lang_suffix, exts in sorted(lang_map.items(), key=lambda kv: kv[0].lower()):
-        display_name = lang_suffix.replace("_", " ")
+    enriched_files: List[FileInfo] = []
+    for file_info in available_files:
+        lang_suffix = file_info.lang
         translation_info = translations_by_lang.get(lang_suffix)
-        available_files.append(
+        enriched_files.append(
             FileInfo(
                 lang=lang_suffix,
-                display_name=display_name,
-                ass=exts["ass"],
-                srt=exts["srt"],
+                display_name=file_info.display_name,
+                ass=file_info.ass,
+                srt=file_info.srt,
                 translated=translation_info.translated if translation_info else None,
                 fallback_reason=translation_info.fallback_reason if translation_info else None,
             )
         )
 
+    artifacts_exist = has_video or bool(enriched_files)
     return TaskResultManifest(
         task_id=task_id,
         task_status=task_status,
         has_video=has_video,
-        subtitle_languages=[f.display_name for f in available_files],
-        available_files=available_files,
+        subtitle_languages=[f.display_name for f in enriched_files],
+        available_files=enriched_files,
         warnings=warnings,
         translations=list(translations_by_lang.values()),
-        is_partial=(len(available_files) == 0),
-        orphaned_files_detected=False,
+        is_partial=(task_status == TaskStatusEnum.SUCCESS and not artifacts_exist),
+        orphaned_files_detected=(task_status != TaskStatusEnum.SUCCESS and artifacts_exist),
     )
 
 

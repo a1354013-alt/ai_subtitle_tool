@@ -8,6 +8,12 @@ from typing import Iterable, Optional
 from .. import settings
 
 logger = logging.getLogger(__name__)
+METADATA_ENTRY_NAMES = {
+    "task_history.sqlite3",
+    "task_history.sqlite3-wal",
+    "task_history.sqlite3-shm",
+    "batches",
+}
 
 
 def _default_upload_dir() -> str:
@@ -134,6 +140,8 @@ def cleanup_old_files(
 
     # 3) cleanup old entries
     for filename in _iter_upload_entries(upload_dir):
+        if filename in METADATA_ENTRY_NAMES:
+            continue
         if filename.endswith(".lock"):
             continue
 

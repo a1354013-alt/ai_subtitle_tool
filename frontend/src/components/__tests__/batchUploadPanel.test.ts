@@ -102,7 +102,7 @@ describe("BatchUploadPanel", () => {
   it("shows download buttons for SUCCESS and uses shared batch URLs", async () => {
     const wrapper = await submitBatchWithStatus("SUCCESS");
 
-    expect(wrapper.text()).toContain("Completed");
+    expect(wrapper.text()).toContain("task.completed");
     const links = wrapper.findAll(".task-actions a");
     expect(links).toHaveLength(4);
     expect(links[0].attributes("href")).toBe("/download/task-1");
@@ -113,7 +113,7 @@ describe("BatchUploadPanel", () => {
 
   it("shows failed styling for FAILURE", async () => {
     const failureWrapper = await submitBatchWithStatus("FAILURE");
-    expect(failureWrapper.text()).toContain("Failed");
+    expect(failureWrapper.text()).toContain("task.failed");
     expect(failureWrapper.find(".task-status .text-danger").exists()).toBe(true);
     expect(failureWrapper.text()).toContain("Boom");
   });
@@ -149,5 +149,27 @@ describe("BatchUploadPanel", () => {
 
     const payload = mockUploadBatch.mock.calls[0][0] as FormData;
     expect(payload.get("target_langs")).toBe("Original");
+  });
+
+  it("submits remove_silence option for batch uploads", async () => {
+    mockUploadBatch.mockResolvedValueOnce({ batch_id: "batch-123", tasks: [] });
+    mockGetBatchStatus.mockResolvedValueOnce(makeBatchStatus("PENDING"));
+
+    const wrapper = await mountPanel();
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", {
+      configurable: true,
+      value: [new File(["video"], "demo.mp4", { type: "video/mp4" })],
+    });
+    await input.trigger("change");
+
+    const checkbox = wrapper.findAll('input[type="checkbox"]').at(1);
+    expect(checkbox).toBeTruthy();
+    await checkbox!.setValue(true);
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = mockUploadBatch.mock.calls[0][0] as FormData;
+    expect(payload.get("remove_silence")).toBe("true");
   });
 });

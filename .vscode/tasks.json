@@ -1,69 +1,70 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "dev:bootstrap",
-            "type": "shell",
-            "command": "python",
-            "args": ["${workspaceFolder}/scripts/dev_bootstrap.py"],
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": false
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            }
-        },
-        {
-            "label": "dev:start",
-            "type": "shell",
-            "command": "python",
-            "args": ["${workspaceFolder}/scripts/dev_start.py"],
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": false
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            }
-        },
-        {
-            "label": "dev:verify",
-            "type": "shell",
-            "command": "python",
-            "args": [
-                "${workspaceFolder}/scripts/verify_delivery.py",
-                "--full",
-                "--ci-fast"
-            ],
-            "problemMatcher": [],
-            "group": {
-                "kind": "test",
-                "isDefault": false
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            }
-        },
-        {
-            "label": "Bootstrap Development Environment",
-            "type": "shell",
-            "command": "python",
-            "args": ["${workspaceFolder}/scripts/dev_bootstrap.py"],
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared"
-            }
-        }
-    ]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev:ensure-env",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/start-dev.cmd",
+      "args": ["ensure-env"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "dev:ensure-redis",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/start-dev.cmd",
+      "args": ["ensure-redis"],
+      "dependsOn": ["dev:ensure-env"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "dev:backend",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/start-dev.cmd",
+      "args": ["backend"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "dev:celery",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/start-dev.cmd",
+      "args": ["celery"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "dev:frontend",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/start-dev.cmd",
+      "args": ["frontend"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "dev:start",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/start-dev.cmd",
+      "args": ["full"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "dev:stop",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/stop-dev.ps1",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "dev:verify",
+      "type": "shell",
+      "command": "python",
+      "args": ["${workspaceFolder}/scripts/verify_delivery.py", "--full", "--ci-fast"],
+      "problemMatcher": [],
+      "group": { "kind": "test", "isDefault": false },
+      "presentation": { "reveal": "always", "panel": "shared" }
+    }
+  ]
 }

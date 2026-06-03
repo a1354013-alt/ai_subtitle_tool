@@ -81,6 +81,13 @@
           </div>
         </div>
       </div>
+
+      <div v-if="manifest && isSuccessManifest" class="card" style="margin-top: 12px">
+        <div class="card-inner">
+          <div class="label">{{ $t('download.finalVideoNoteTitle') }}</div>
+          <div class="help">{{ $t('download.finalVideoLanguageNote') }}</div>
+        </div>
+      </div>
     </template>
   </div>
 </template>

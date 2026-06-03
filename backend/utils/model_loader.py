@@ -1,9 +1,6 @@
 import logging
 import threading
 
-import torch
-from faster_whisper import WhisperModel
-
 logger = logging.getLogger(__name__)
 
 
@@ -17,6 +14,9 @@ class ModelLoader:
     def get_faster_whisper_model(cls, model_size="base"):
         with cls._lock:
             if model_size not in cls._instances:
+                import torch
+                from faster_whisper import WhisperModel
+
                 logger.info("Loading Faster-Whisper model: %s", model_size)
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 compute_type = "float16" if device == "cuda" else "int8"

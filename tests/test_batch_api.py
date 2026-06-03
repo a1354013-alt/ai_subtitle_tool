@@ -18,7 +18,7 @@ def batch_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import backend.main as main
 
     importlib.reload(main)
-    monkeypatch.setattr(main.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="video\n", stderr=""))
+    monkeypatch.setattr(main.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr=""))
     client = TestClient(main.app)
     return client, main
 
@@ -109,6 +109,17 @@ def test_batch_manager_preserves_failed_task_status(batch_app):
     assert data["failed"] == 1
     assert data["tasks"][0]["status"] == "FAILURE"
     assert data["tasks"][0]["error"] == "Unsupported format"
+
+
+@pytest.mark.parametrize("batch_id", ["../xxx", "batch_../../x", "batch_x/y", "", "batch_zzzzzzzz", "batch_1234567g"])
+def test_batch_status_rejects_invalid_batch_id(batch_app, batch_id: str):
+    client, _main = batch_app
+
+    response = client.get(f"/batch/{batch_id}/status")
+
+    assert response.status_code in {400, 404}
+    if response.status_code == 400:
+        assert response.json()["detail"] == "Invalid batch_id format"
 
 
 def test_batch_upload_partial_failure_keeps_valid_tasks(batch_app, monkeypatch: pytest.MonkeyPatch):

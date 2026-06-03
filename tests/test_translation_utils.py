@@ -112,3 +112,33 @@ def test_finalize_pipeline_rejects_translation_target_without_openai_key(monkeyp
         )
 
     assert translate_called["called"] is False
+
+
+def test_storage_upload_optional_failure_becomes_warning(monkeypatch):
+    import backend.tasks as tasks
+
+    class FailingStorage:
+        def upload_file(self, *_args, **_kwargs):
+            return False
+
+    warnings: list[str] = []
+    monkeypatch.setattr(tasks.settings, "STORAGE_BACKEND", "s3")
+    monkeypatch.setattr(tasks.settings, "S3_UPLOAD_REQUIRED", False)
+
+    tasks._record_storage_upload(FailingStorage(), "local", "remote", warnings)
+
+    assert warnings == ["Object storage upload failed for remote"]
+
+
+def test_storage_upload_required_failure_raises(monkeypatch):
+    import backend.tasks as tasks
+
+    class FailingStorage:
+        def upload_file(self, *_args, **_kwargs):
+            return False
+
+    monkeypatch.setattr(tasks.settings, "STORAGE_BACKEND", "s3")
+    monkeypatch.setattr(tasks.settings, "S3_UPLOAD_REQUIRED", True)
+
+    with pytest.raises(RuntimeError, match="Object storage upload failed"):
+        tasks._record_storage_upload(FailingStorage(), "local", "remote", [])

@@ -4,7 +4,7 @@
     "tasks": "Tasks",
     "editor": "Editor",
     "language": "Language",
-    "workflow": "Upload → Process → Edit subtitles → Download"
+    "workflow": "Upload -> Process -> Edit subtitles -> Download"
   },
   "upload": {
     "title": "Upload Video",
@@ -17,6 +17,18 @@
     "parallel": "Parallel"
   },
   "batch": {
+    "selectVideos": "Select Videos",
+    "supportedHelp": "Supported: {extensions}. Max {maxMb}MB per file, up to {maxFiles} files per batch.",
+    "totalSelectedSize": "Total selected size: {size}",
+    "commaSeparatedLanguages": "Comma-separated languages.",
+    "translationUnavailable": "Translation is unavailable because OpenAI API Key is not configured.",
+    "burnIntoFinal": "Burn subtitles into final.mp4",
+    "removeSilenceHelp": "Remove long silent sections before transcription.",
+    "uploading": "Uploading...",
+    "startProcess": "Start Batch Process",
+    "batchId": "Batch ID",
+    "total": "Total",
+    "pending": "Pending",
     "downloadZip": "Download Batch ZIP"
   },
   "task": {
@@ -26,6 +38,20 @@
     "failed": "Failed",
     "progress": "Progress"
   },
+  "recent": {
+    "subtitle": "Last 20 tasks recorded by the backend.",
+    "loading": "Fetching recent task history.",
+    "emptyTitle": "No recent tasks",
+    "emptyDescription": "No tasks have been recorded yet. Upload a video to create a task.",
+    "searchPlaceholder": "Search by Task ID or filename...",
+    "taskId": "Task ID",
+    "filename": "Filename",
+    "created": "Created",
+    "duration": "Duration",
+    "links": "Links",
+    "outputsUnavailable": "Outputs unavailable until completion",
+    "notes": "Notes: filenames are recorded at upload time. If this backend was upgraded, older tasks may show only task id."
+  },
   "editor": {
     "title": "Subtitle Editor",
     "save": "Save",
@@ -34,7 +60,9 @@
   },
   "download": {
     "title": "Downloads",
-    "button": "Download"
+    "button": "Download",
+    "finalVideoNoteTitle": "Final video subtitle language",
+    "finalVideoLanguageNote": "When multiple subtitle languages are generated, final.mp4 burns only the first selected language. Other languages remain available as subtitle downloads."
   },
   "common": {
     "loading": "Loading...",

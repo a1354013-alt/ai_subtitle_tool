@@ -32,6 +32,16 @@ from .utils.storage_utils import get_storage_backend
 logger = logging.getLogger(__name__)
 
 
+def _record_storage_upload(storage, local_path: str, remote_path: str, warnings: list[str]) -> None:
+    ok = storage.upload_file(local_path, remote_path)
+    if ok:
+        return
+    message = f"Object storage upload failed for {remote_path}"
+    if settings.STORAGE_BACKEND == "s3" and settings.S3_UPLOAD_REQUIRED:
+        raise RuntimeError(message)
+    warnings.append(message)
+
+
 def finalize_pipeline(segment_results, video_path, options, update_state_func=None, segments_dir=None):
     """Finalize the pipeline after transcription (parallel or non-parallel).
 
@@ -213,14 +223,17 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         storage = get_storage_backend()
         try:
             # Upload final video
-            storage.upload_file(final_video_path, f"{business_id}_final.mp4")
+            _record_storage_upload(storage, final_video_path, f"{business_id}_final.mp4", warnings)
             # Upload subtitles
             for lang, path in result_files.items():
                 lang_suffix = normalize_lang_suffix(lang)
                 ext = os.path.splitext(path)[1]
-                storage.upload_file(path, f"{business_id}_{lang_suffix}{ext}")
+                _record_storage_upload(storage, path, f"{business_id}_{lang_suffix}{ext}", warnings)
         except Exception as e:
+            if settings.STORAGE_BACKEND == "s3" and settings.S3_UPLOAD_REQUIRED:
+                raise
             logger.warning("Failed to upload results to object storage: %s", e, exc_info=True)
+            warnings.append(f"Object storage upload failed: {e}")
 
         return {
             "status": "COMPLETED",

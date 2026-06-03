@@ -2,12 +2,18 @@ import json
 import os
 import uuid
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+BATCH_ID_PATTERN = re.compile(r"^batch_[a-f0-9]{8}$")
+
+
+class InvalidBatchIdError(ValueError):
+    pass
 
 class BatchTask(BaseModel):
     task_id: str
@@ -27,7 +33,14 @@ class BatchManager:
         self.batches_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_batch_path(self, batch_id: str) -> Path:
-        return self.batches_dir / f"{batch_id}.json"
+        if not BATCH_ID_PATTERN.fullmatch(batch_id or ""):
+            raise InvalidBatchIdError("Invalid batch_id format")
+
+        batches_root = self.batches_dir.resolve()
+        path = (batches_root / f"{batch_id}.json").resolve()
+        if batches_root not in path.parents:
+            raise InvalidBatchIdError("Invalid batch_id path")
+        return path
 
     @staticmethod
     def _normalize_status(status: str | None) -> str:

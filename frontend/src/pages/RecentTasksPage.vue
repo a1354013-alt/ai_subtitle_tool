@@ -1,14 +1,14 @@
 <template>
   <div>
-    <PageHeader :title="$t('navbar.tasks')" subtitle="Last 20 tasks recorded by the backend." />
+    <PageHeader :title="$t('navbar.tasks')" :subtitle="$t('recent.subtitle')" />
 
     <ErrorAlert v-if="error" :error="error" />
-    <LoadingBlock v-if="loading" :title="$t('common.loading')" description="Fetching recent task history." />
+    <LoadingBlock v-if="loading" :title="$t('common.loading')" :description="$t('recent.loading')" />
 
     <EmptyState
       v-else-if="!error && tasks.length === 0"
-      title="No recent tasks"
-      description="No tasks have been recorded yet. Upload a video to create a task."
+      :title="$t('recent.emptyTitle')"
+      :description="$t('recent.emptyDescription')"
     />
 
     <div v-else class="card">
@@ -18,7 +18,7 @@
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Search by Task ID or filename..."
+            :placeholder="$t('recent.searchPlaceholder')"
             class="search-input"
           />
           <select v-model="statusFilter" class="status-filter">
@@ -34,12 +34,12 @@
         <table class="table">
           <thead>
             <tr>
-              <th>Task ID</th>
-              <th>Filename</th>
+              <th>{{ $t('recent.taskId') }}</th>
+              <th>{{ $t('recent.filename') }}</th>
               <th>{{ $t('task.status') }}</th>
-              <th>Created</th>
-              <th>Duration</th>
-              <th>Links</th>
+              <th>{{ $t('recent.created') }}</th>
+              <th>{{ $t('recent.duration') }}</th>
+              <th>{{ $t('recent.links') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -51,14 +51,17 @@
               <td class="mono">{{ formatDuration(t.duration_seconds) }}</td>
               <td>
                 <RouterLink class="btn small" :to="{ name: 'task', params: { taskId: t.task_id } }">{{ $t('task.status') }}</RouterLink>
-                <RouterLink class="btn small" :to="{ name: 'subtitles', params: { taskId: t.task_id } }">{{ $t('editor.title') }}</RouterLink>
-                <RouterLink class="btn small" :to="{ name: 'downloads', params: { taskId: t.task_id } }">{{ $t('editor.download') }}</RouterLink>
+                <template v-if="isCompleted(t.status)">
+                  <RouterLink class="btn small" :to="{ name: 'subtitles', params: { taskId: t.task_id } }">{{ $t('editor.title') }}</RouterLink>
+                  <RouterLink class="btn small" :to="{ name: 'downloads', params: { taskId: t.task_id } }">{{ $t('editor.download') }}</RouterLink>
+                </template>
+                <span v-else class="disabled-action">{{ $t('recent.outputsUnavailable') }}</span>
               </td>
             </tr>
           </tbody>
         </table>
         <div class="help" style="margin-top: 10px">
-          Notes: filenames are recorded at upload time. If this backend was upgraded, older tasks may show only task id.
+          {{ $t('recent.notes') }}
         </div>
       </div>
     </div>
@@ -96,6 +99,10 @@ function formatDuration(seconds: number | null | undefined): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+}
+
+function isCompleted(status: string): boolean {
+  return ["SUCCESS", "COMPLETED"].includes(String(status || "").toUpperCase());
 }
 
 const filteredTasks = computed(() => {
@@ -191,5 +198,8 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.disabled-action {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+}
 </style>
-

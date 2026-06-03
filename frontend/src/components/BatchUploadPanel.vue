@@ -5,14 +5,13 @@
         <form @submit.prevent="onSubmit">
           <div class="row">
             <div class="col">
-              <div class="label">Select Videos</div>
+              <div class="label">{{ $t('batch.selectVideos') }}</div>
               <input class="input" type="file" accept=".mp4,.mkv,.avi,.mov" multiple @change="onFilesChange" />
               <div class="help">
-                Supported: {{ config.supportedExtensions.join(", ") }}. Max {{ config.maxUploadSizeMb }}MB per file,
-                up to {{ config.maxBatchFiles }} files per batch.
+                {{ $t('batch.supportedHelp', { extensions: config.supportedExtensions.join(', '), maxMb: config.maxUploadSizeMb, maxFiles: config.maxBatchFiles }) }}
               </div>
               <div v-if="validationError" class="task-error text-danger">{{ validationError }}</div>
-              <div v-else-if="totalSizeText" class="help">Total selected size: {{ totalSizeText }}</div>
+              <div v-else-if="totalSizeText" class="help">{{ $t('batch.totalSelectedSize', { size: totalSizeText }) }}</div>
               <div v-if="files.length > 0" class="file-list">
                 <div v-for="(f, i) in files" :key="i" class="file-item">
                   {{ f.name }} ({{ (f.size / 1024 / 1024).toFixed(1) }} MB)
@@ -21,7 +20,7 @@
             </div>
 
             <div class="col">
-              <div class="label">Target Languages</div>
+              <div class="label">{{ $t('upload.targetLanguages') }}</div>
               <input 
                 v-model="targetLangs" 
                 class="input" 
@@ -29,16 +28,16 @@
                 placeholder="Original"
                 :disabled="!config.translationEnabled || !config.openaiConfigured"
               />
-              <div class="help">Comma-separated languages.</div>
+              <div class="help">{{ $t('batch.commaSeparatedLanguages') }}</div>
               <div v-if="!config.translationEnabled || !config.openaiConfigured" class="help text-warning">
-                Translation is unavailable because OpenAI API Key is not configured.
+                {{ $t('batch.translationUnavailable') }}
               </div>
             </div>
           </div>
 
           <div class="row" style="margin-top: 12px">
             <div class="col">
-              <div class="label">Subtitle Format</div>
+              <div class="label">{{ $t('upload.subtitleFormat') }}</div>
               <select v-model="subtitleFormat" class="select">
                 <option value="ass">ass</option>
                 <option value="srt">srt</option>
@@ -46,10 +45,20 @@
             </div>
 
             <div class="col">
-              <div class="label">Burn Subtitles</div>
+              <div class="label">{{ $t('upload.burnSubtitles') }}</div>
               <label class="check">
                 <input v-model="burnSubtitles" type="checkbox" />
-                <span>Burn subtitles into final.mp4</span>
+                <span>{{ $t('batch.burnIntoFinal') }}</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top: 12px">
+            <div class="col">
+              <div class="label">{{ $t('upload.removeSilence') }}</div>
+              <label class="check">
+                <input v-model="removeSilence" type="checkbox" />
+                <span>{{ $t('batch.removeSilenceHelp') }}</span>
               </label>
             </div>
           </div>
@@ -58,7 +67,7 @@
 
           <div class="row" style="align-items: center; justify-content: flex-end">
             <button class="btn primary" type="submit" :disabled="submitting || files.length === 0 || !!validationError">
-              {{ submitting ? 'Uploading...' : 'Start Batch Process' }}
+              {{ submitting ? $t('batch.uploading') : $t('batch.startProcess') }}
             </button>
           </div>
         </form>
@@ -66,14 +75,14 @@
 
       <div v-else>
         <div class="batch-header">
-          <h3>Batch ID: {{ batchId }}</h3>
+          <h3>{{ $t('batch.batchId') }}: {{ batchId }}</h3>
           <div v-if="pollingError" class="task-error text-danger">{{ pollingError }}</div>
           <div class="batch-summary">
-            <span>Total: {{ batchStatus?.total || 0 }}</span> |
-            <span class="text-success">Completed: {{ batchStatus?.completed || 0 }}</span> |
-            <span class="text-danger">Failed: {{ batchStatus?.failed || 0 }}</span> |
-            <span>Processing: {{ batchStatus?.processing || 0 }}</span> |
-            <span>Pending: {{ batchStatus?.pending || 0 }}</span>
+            <span>{{ $t('batch.total') }}: {{ batchStatus?.total || 0 }}</span> |
+            <span class="text-success">{{ $t('task.completed') }}: {{ batchStatus?.completed || 0 }}</span> |
+            <span class="text-danger">{{ $t('task.failed') }}: {{ batchStatus?.failed || 0 }}</span> |
+            <span>{{ $t('task.processing') }}: {{ batchStatus?.processing || 0 }}</span> |
+            <span>{{ $t('batch.pending') }}: {{ batchStatus?.pending || 0 }}</span>
           </div>
           <button v-if="showDownloadZip" class="btn primary btn-sm" @click="downloadZip">
             {{ $t('batch.downloadZip') }}
@@ -123,6 +132,7 @@ const batchStatus = ref<BatchStatusResponse | null>(null);
 const targetLangs = ref("Original");
 const subtitleFormat = ref("ass");
 const burnSubtitles = ref(true);
+const removeSilence = ref(false);
 const validationError = ref("");
 const pollingError = ref("");
 const config = ref<AppConfig>({
@@ -197,6 +207,7 @@ async function onSubmit() {
   fd.append("target_langs", isTranslationAvailable.value ? targetLangs.value : "Original");
   fd.append("subtitle_format", subtitleFormat.value);
   fd.append("burn_subtitles", String(burnSubtitles.value));
+  fd.append("remove_silence", String(removeSilence.value));
   fd.append("parallel", "true");
 
   try {

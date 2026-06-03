@@ -63,8 +63,11 @@ HF_TOKEN = _getenv("HF_TOKEN", "")
 
 FFMPEG_BINARY = _getenv("FFMPEG_BINARY", "ffmpeg") or "ffmpeg"
 FFPROBE_BINARY = _getenv("FFPROBE_BINARY", "ffprobe") or "ffprobe"
+FFMPEG_TIMEOUT_SECONDS = _get_int("FFMPEG_TIMEOUT_SECONDS", 600)
+FFPROBE_TIMEOUT_SECONDS = _get_int("FFPROBE_TIMEOUT_SECONDS", 30)
 
 STORAGE_BACKEND = (_getenv("STORAGE_BACKEND", "local") or "local").strip().lower()
+S3_UPLOAD_REQUIRED = _get_bool("S3_UPLOAD_REQUIRED", False)
 
 # Production guardrails
 DEMO_MODE = _get_bool("DEMO_MODE", ENVIRONMENT != "production")

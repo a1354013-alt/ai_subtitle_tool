@@ -1,10 +1,10 @@
 {
   "navbar": {
     "home": "ホーム",
-    "tasks": "タスク一覧",
-    "editor": "エディタ",
+    "tasks": "タスク",
+    "editor": "エディター",
     "language": "言語",
-    "workflow": "アップロード → 処理 → 字幕編集 → ダウンロード"
+    "workflow": "アップロード -> 処理 -> 字幕編集 -> ダウンロード"
   },
   "upload": {
     "title": "動画をアップロード",
@@ -12,29 +12,57 @@
     "generate": "字幕を生成",
     "targetLanguages": "対象言語",
     "subtitleFormat": "字幕形式",
-    "burnSubtitles": "字幕を焼き付ける",
-    "removeSilence": "無音部分を削除",
+    "burnSubtitles": "字幕を焼き込む",
+    "removeSilence": "無音を削除",
     "parallel": "並列処理"
   },
   "batch": {
-    "downloadZip": "一括ZIPをダウンロード"
+    "selectVideos": "動画を選択",
+    "supportedHelp": "対応形式: {extensions}。1ファイル最大 {maxMb}MB、1バッチ最大 {maxFiles} ファイル。",
+    "totalSelectedSize": "選択サイズ合計: {size}",
+    "commaSeparatedLanguages": "言語はカンマ区切りで入力してください。",
+    "translationUnavailable": "OpenAI API Key が未設定のため、翻訳は利用できません。",
+    "burnIntoFinal": "字幕を final.mp4 に焼き込む",
+    "removeSilenceHelp": "文字起こし前に長い無音部分を削除します。",
+    "uploading": "アップロード中...",
+    "startProcess": "バッチ処理を開始",
+    "batchId": "バッチ ID",
+    "total": "合計",
+    "pending": "待機中",
+    "downloadZip": "バッチ ZIP をダウンロード"
   },
   "task": {
-    "status": "タスクステータス",
+    "status": "タスク状態",
     "processing": "処理中",
     "completed": "完了",
     "failed": "失敗",
     "progress": "進捗"
   },
+  "recent": {
+    "subtitle": "バックエンドに記録された直近 20 件のタスク。",
+    "loading": "最近のタスク履歴を取得しています。",
+    "emptyTitle": "最近のタスクはありません",
+    "emptyDescription": "まだタスクは記録されていません。動画をアップロードしてタスクを作成してください。",
+    "searchPlaceholder": "タスク ID またはファイル名で検索...",
+    "taskId": "タスク ID",
+    "filename": "ファイル名",
+    "created": "作成日時",
+    "duration": "所要時間",
+    "links": "リンク",
+    "outputsUnavailable": "完了するまで成果物は利用できません",
+    "notes": "注: ファイル名はアップロード時に記録されます。古いタスクではタスク ID のみ表示される場合があります。"
+  },
   "editor": {
-    "title": "字幕エディタ",
+    "title": "字幕エディター",
     "save": "保存",
-    "rebuild": "動画を再生成",
+    "rebuild": "再生成",
     "download": "字幕をダウンロード"
   },
   "download": {
     "title": "ダウンロード",
-    "button": "ダウンロード"
+    "button": "ダウンロード",
+    "finalVideoNoteTitle": "最終動画の字幕言語",
+    "finalVideoLanguageNote": "複数言語の字幕を生成した場合、final.mp4 に焼き込まれるのは最初に選択した言語のみです。他の言語は字幕ファイルとしてダウンロードできます。"
   },
   "common": {
     "loading": "読み込み中...",

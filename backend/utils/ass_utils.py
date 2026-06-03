@@ -1,6 +1,10 @@
 import os
 from datetime import timedelta
 
+
+def escape_ass_text(text: str) -> str:
+    return text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")
+
 def format_ass_timestamp(seconds: float):
     """將秒數轉換為 ASS 時間格式 (h:mm:ss.cc)"""
     td = timedelta(seconds=seconds)
@@ -41,7 +45,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for segment in segments:
         start = format_ass_timestamp(segment.start)
         end = format_ass_timestamp(segment.end)
-        text = segment.text.strip().replace("\n", "\\N")
+        text = escape_ass_text(segment.text.strip())
         events += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n"
         
     with open(output_path, "w", encoding="utf-8") as f:

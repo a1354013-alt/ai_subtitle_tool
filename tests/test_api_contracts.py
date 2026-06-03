@@ -33,7 +33,7 @@ async def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     # Stub ffprobe "video" validation to avoid needing real media bytes.
     def _fake_run(*args, **kwargs):
-        return SimpleNamespace(returncode=0, stdout="video\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="video\naudio\n", stderr="")
 
     monkeypatch.setattr(main.subprocess, "run", _fake_run)
 
@@ -63,6 +63,34 @@ async def test_app_config_contract(app_client):
     assert ".mp4" in body["supportedExtensions"]
     assert body["batchUploadEnabled"] is True
     assert body["subtitleFormats"] == ["srt", "ass", "vtt"]
+
+
+@pytest.mark.anyio
+async def test_auth_token_middleware_enforces_non_health_routes(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    monkeypatch.setattr(main.settings, "REQUIRE_AUTH_TOKEN", True)
+    monkeypatch.setattr(main.settings, "AUTH_TOKEN", "secret")
+
+    assert (await client.get("/healthz")).status_code == 200
+    unauthorized = await client.get("/api/config")
+    assert unauthorized.status_code == 401
+
+    authorized = await client.get("/api/config", headers={"X-API-Token": "secret"})
+    assert authorized.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_rate_limit_middleware_returns_429(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    main._RATE_LIMIT_BUCKETS.clear()
+    monkeypatch.setattr(main.settings, "RATE_LIMIT_PER_IP", 1)
+
+    first = await client.get("/api/config")
+    second = await client.get("/api/config")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    main._RATE_LIMIT_BUCKETS.clear()
 
 
 @pytest.mark.anyio
@@ -234,6 +262,26 @@ async def test_status_contract_failure_handles_non_dict_info_and_result_without_
 
 
 @pytest.mark.anyio
+async def test_status_failure_falls_back_to_error_artifact(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "99999999-9999-9999-9999-999999999995"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}_error.json").write_text(
+        '{"error_code":"ffmpeg_not_found","message":"artifact wins","suggestion":"Install ffmpeg"}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("FAILURE", info=None, result=None))
+
+    r = await client.get(f"/status/{task_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "FAILURE"
+    assert body["message"] == "artifact wins"
+
+
+@pytest.mark.anyio
 async def test_status_missing_task_returns_consistent_error_shape(app_client):
     client, _main, _tmp = app_client
     task_id = "12345678-1234-1234-1234-123456789012"
@@ -262,7 +310,7 @@ async def test_results_manifest_contract_and_orphan_detection(app_client, monkey
     assert r.status_code == 200
     body = r.json()
     assert body["task_status"] == "PENDING"
-    assert body["available_files"] == []
+    assert body["available_files"][0]["lang"] == "Traditional_Chinese"
     assert body["orphaned_files_detected"] is True
 
     # SUCCESS: enumerate available subtitle files.
@@ -354,12 +402,14 @@ async def test_rebuild_final_contract_enqueues(app_client, monkeypatch: pytest.M
         called["task_id"] = task_id
         called["lang_suffix"] = lang_suffix
         called["subtitle_format"] = subtitle_format
+        return f"rebuild_{task_id}_123"
 
     monkeypatch.setattr(main, "_enqueue_rebuild_final_task", _fake_enqueue)
     r = await client.post(f"/tasks/{task_id}/rebuild-final", params={"lang": "Traditional_Chinese", "format": "ass"})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "queued"
     assert called == {"task_id": task_id, "lang_suffix": "Traditional_Chinese", "subtitle_format": "ass"}
+    assert r.json()["rebuild_task_id"].startswith(f"rebuild_{task_id}_")
 
 
 @pytest.mark.anyio
