@@ -11,6 +11,7 @@ from pathlib import Path
 EXCLUDED_DIR_NAMES = frozenset({
     ".git",
     ".github",
+    ".vscode",
     "__pycache__",
     "node_modules",
     "dist",
@@ -41,6 +42,11 @@ EXCLUDED_RELATIVE_PATHS = frozenset({
     "backend/tmp",
     "frontend/node_modules",
     "frontend/dist",
+    "scripts/dev_bootstrap.py",
+    "scripts/dev_start.py",
+    "scripts/start-dev.cmd",
+    "scripts/start-dev.ps1",
+    "scripts/stop-dev.ps1",
 })
 
 EXCLUDED_GLOBS = frozenset({

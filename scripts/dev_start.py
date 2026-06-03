@@ -30,15 +30,15 @@ def info(msg: str):
 
 
 def success(msg: str):
-    print(f"[✓] {msg}", flush=True)
+    print(f"[OK] {msg}", flush=True)
 
 
 def error(msg: str):
-    print(f"[✗] {msg}", flush=True, file=sys.stderr)
+    print(f"[ERROR] {msg}", flush=True, file=sys.stderr)
 
 
 def warn(msg: str):
-    print(f"[⚠] {msg}", flush=True)
+    print(f"[WARN] {msg}", flush=True)
 
 
 def get_python_exe() -> str:
@@ -154,12 +154,7 @@ class ProcessManager:
             if process.poll() is None:  # Still running
                 info(f"Terminating {name} (PID: {process.pid})...")
                 try:
-                    if os.name == "nt":
-                        # Windows: use CTRL_C_EVENT
-                        os.kill(process.pid, signal.CTRL_C_EVENT)
-                    else:
-                        # Unix: use SIGTERM
-                        process.terminate()
+                    process.terminate()
                 except Exception as e:
                     error(f"Failed to terminate {name}: {e}")
         
@@ -171,10 +166,7 @@ class ProcessManager:
             if process.poll() is None:
                 info(f"Force killing {name} (PID: {process.pid})...")
                 try:
-                    if os.name == "nt":
-                        os.kill(process.pid, signal.SIGKILL)
-                    else:
-                        process.kill()
+                    process.kill()
                 except Exception as e:
                     error(f"Failed to kill {name}: {e}")
         

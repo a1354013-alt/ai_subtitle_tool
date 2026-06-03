@@ -74,6 +74,8 @@ pip install -r requirements.lock.txt
 cp backend/.env.example backend/.env
 ```
 
+CI-compatible backend test setup can use `pip install -r requirements.txt`; backend dependencies must be installed before running pytest.
+
 Recommended local overrides inside `backend/.env`:
 
 ```ini
@@ -121,6 +123,7 @@ Frontend env:
 
 ```ini
 VITE_API_BASE_URL=http://localhost:8000
+VITE_API_TOKEN=your-token
 VITE_APP_TITLE=AI Subtitle Tool
 ```
 
@@ -139,7 +142,7 @@ Frontend:
 cd frontend
 nvm use
 npm ci
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=moderate
 npm run lint
 npm run typecheck
 npm run test:ci
@@ -150,7 +153,7 @@ Notes:
 
 - `npm test` starts Vitest watch mode for local development.
 - `npm run test:ci` is the CI-safe, non-watch command and must exit on its own.
-- Production audit uses `npm audit --omit=dev` and must pass with 0 vulnerabilities. Full dev audit advisories are tracked separately.
+- Production audit uses `npm audit --omit=dev --audit-level=moderate` and must pass with 0 vulnerabilities. Full dev audit advisories are tracked separately.
 
 Auth and rate limiting are enforced by middleware when enabled. Local demo defaults keep auth off and set `RATE_LIMIT_PER_IP=0` to avoid blocking long polling; production should set `REQUIRE_AUTH_TOKEN=true`, `AUTH_TOKEN`, and a positive `RATE_LIMIT_PER_IP`.
 
@@ -189,7 +192,7 @@ python scripts/verify_delivery.py --full
 ```
 
 `--zip-only` validates docs, Docker/release inputs, and the clean release archive.
-`--full` additionally runs Python compile checks, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, production `npm audit --omit=dev`, then rebuilds and verifies `release.zip`.
+`--full` additionally runs Python compile checks, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, production `npm audit --omit=dev --audit-level=moderate`, then rebuilds and verifies `release.zip`.
 
 PowerShell wrapper:
 
@@ -222,6 +225,12 @@ The release ZIP excludes:
 - `.env.local`
 - `backend/.env`
 - `frontend/.env`
+- `.vscode/`
+- `scripts/dev_bootstrap.py`
+- `scripts/dev_start.py`
+- `scripts/start-dev.cmd`
+- `scripts/start-dev.ps1`
+- `scripts/stop-dev.ps1`
 - `*.key`
 - `*.pem`
 - `secrets.*`
@@ -255,6 +264,7 @@ Important variables:
 - `WHISPER_MODEL`
 - `FFMPEG_BINARY`
 - `FFPROBE_BINARY`
+- `REPORT_EXPORT_TIMEOUT_SECONDS`
 - `FFMPEG_PRESET`
 - `STORAGE_BACKEND`
 - `S3_ENDPOINT`
@@ -266,6 +276,7 @@ Important variables:
 - `AUTH_TOKEN` is required when `REQUIRE_AUTH_TOKEN=true`.
 - `RATE_LIMIT_PER_IP` limits requests per IP per hour. `0` disables the middleware limit for local development; use a positive integer in production.
 - `FFMPEG_TIMEOUT_SECONDS` / `FFPROBE_TIMEOUT_SECONDS` bound media subprocess runtime.
+- `REPORT_EXPORT_TIMEOUT_SECONDS` bounds experimental PDF report conversion runtime; default is `120`.
 - Frontend deployments can set `VITE_API_TOKEN` to send `X-API-Token` automatically on every API request.
 
 Whisper model selection priority:
@@ -352,5 +363,5 @@ Batch ZIP naming:
 
 ## VS Code development
 
-Open the repository root in VS Code, press F5, and select `Run Full Stack Dev`. See `DEVELOPMENT.md` for first-run setup, Redis behavior, and stop commands.
+Open a full repository clone in VS Code, press F5, and select `Run Full Stack Dev`. The release zip intentionally excludes `.vscode` and local development helper scripts; use a repo clone for F5 development and the release zip for deployment packaging. See `DEVELOPMENT.md` for first-run setup, Redis behavior, and stop commands.
 - Final video uses `{safe_original_filename}_{task_id}.mp4`

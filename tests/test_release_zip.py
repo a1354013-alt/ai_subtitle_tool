@@ -58,5 +58,11 @@ def test_release_zip_excludes_sensitive_and_generated_content(tmp_path: Path):
     assert not any(name.startswith("uploads/") or "/uploads/" in name for name in names)
     assert not any(name.startswith("outputs/") or "/outputs/" in name for name in names)
     assert not any(name == "frontend/dist" or name.startswith("frontend/dist/") for name in names)
+    assert not any(name == ".vscode" or name.startswith(".vscode/") for name in names)
+    assert "scripts/dev_bootstrap.py" not in names
+    assert "scripts/dev_start.py" not in names
+    assert "scripts/start-dev.cmd" not in names
+    assert "scripts/start-dev.ps1" not in names
+    assert "scripts/stop-dev.ps1" not in names
     assert "release.zip" not in names
     assert "release-check.zip" not in names

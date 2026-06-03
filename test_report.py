@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock
 
+from backend import settings
 from backend.services import report_service
 
 
@@ -32,3 +34,28 @@ def test_report_generation_and_markdown_rendering():
     assert "SUCCESS" in markdown
     assert "123.45s" in markdown
     assert "Test warning 1" in markdown
+
+
+def test_render_pdf_applies_timeout_and_preserves_stderr(monkeypatch):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=kwargs["timeout"],
+            stderr="converter stalled",
+    )
+
+    monkeypatch.setattr(report_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(settings, "REPORT_EXPORT_TIMEOUT_SECONDS", 3)
+
+    try:
+        report_service.render_pdf("# Demo")
+    except RuntimeError as exc:
+        assert "PDF conversion timed out after 3s" in str(exc)
+        assert "converter stalled" in str(exc)
+    else:
+        raise AssertionError("render_pdf should raise when conversion times out")
+
+    assert calls[0][1]["timeout"] == 3

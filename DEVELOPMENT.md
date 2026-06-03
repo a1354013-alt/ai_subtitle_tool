@@ -8,6 +8,8 @@
 
 The `Run Full Stack Dev` launch runs `scripts/dev_start.py`. It creates or verifies `.venv`, installs backend dependencies from `requirements.lock.txt`, runs `npm ci`, creates local `.env` files when missing, checks ffmpeg/ffprobe, checks Redis, starts the FastAPI backend, starts the Vite frontend, and starts a Celery worker when Redis is available.
 
+Use a full repository clone for F5 development. Release zips intentionally exclude `.vscode` and the local development helper scripts, so they are for deployment packaging rather than VS Code launch workflows.
+
 ## First Run
 
 Run:
@@ -24,6 +26,20 @@ Backend tests assume the locked backend dependencies are installed:
 .venv\Scripts\python -m pip install -r requirements.lock.txt
 $env:TESTING="true"; $env:PYTHONPATH="."; .venv\Scripts\python -m pytest -q
 ```
+
+CI-style setup may use:
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements.txt
+$env:TESTING="true"; $env:PYTHONPATH="."; .venv\Scripts\python -m pytest -q
+```
+
+Redis behavior in `scripts/dev_start.py --redis auto`:
+
+- Redis available on `127.0.0.1:6379`: backend, frontend, and Celery worker start.
+- Redis unavailable but Docker can start it: backend, frontend, and Celery worker start after Redis is available.
+- Redis unavailable and Docker unavailable: backend and frontend start in Celery eager dev mode; the worker is skipped.
+- Production and Docker deployments should run Redis plus a Celery worker instead of relying on eager mode.
 
 ## Stop Services
 

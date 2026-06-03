@@ -6,28 +6,36 @@ import en from "@/i18n/locales/en.json";
 import ja from "@/i18n/locales/ja.json";
 import zhTW from "@/i18n/locales/zh-TW.json";
 
-const i18nTestPlugin = {
-  install(app: App) {
-    app.use(
-      createI18n({
-        legacy: false,
-        locale: "en",
-        fallbackLocale: "en",
-        messages: {
-          en,
-          ja,
-          "zh-TW": zhTW,
-        },
-      })
-    );
-  },
+const globalFlags = globalThis as {
+  __I18N_TEST_PLUGIN_ADDED__?: boolean;
+  __VTU_AUTO_UNMOUNT__?: boolean;
 };
 
-config.global.plugins = [...(config.global.plugins || []), i18nTestPlugin];
+if (!globalFlags.__I18N_TEST_PLUGIN_ADDED__) {
+  const i18nTestPlugin = {
+    install(app: App) {
+      app.use(
+        createI18n({
+          legacy: false,
+          locale: "en",
+          fallbackLocale: "en",
+          messages: {
+            en,
+            ja,
+            "zh-TW": zhTW,
+          },
+        })
+      );
+    },
+  };
 
-if (!(globalThis as { __VTU_AUTO_UNMOUNT__?: boolean }).__VTU_AUTO_UNMOUNT__) {
+  config.global.plugins = [...(config.global.plugins || []), i18nTestPlugin];
+  globalFlags.__I18N_TEST_PLUGIN_ADDED__ = true;
+}
+
+if (!globalFlags.__VTU_AUTO_UNMOUNT__) {
   enableAutoUnmount(afterEach);
-  (globalThis as { __VTU_AUTO_UNMOUNT__?: boolean }).__VTU_AUTO_UNMOUNT__ = true;
+  globalFlags.__VTU_AUTO_UNMOUNT__ = true;
 }
 
 afterEach(() => {

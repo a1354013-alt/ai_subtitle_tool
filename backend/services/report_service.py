@@ -4,6 +4,8 @@ import subprocess
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from ..utils.media_process import summarize_stderr
+
 # Experimental report generation service.
 # This file is preserved for future feature work but is not exposed as a public API endpoint
 # in the current release. Users should not rely on PDF report generation as a shipped feature.
@@ -94,6 +96,8 @@ def render_pdf(markdown_content: str) -> bytes:
     將 Markdown 轉換為 PDF
     使用 manus-md-to-pdf 工具
     """
+    from .. import settings
+
     import uuid
     tmp_md = f"/tmp/{uuid.uuid4()}.md"
     tmp_pdf = f"/tmp/{uuid.uuid4()}.pdf"
@@ -103,7 +107,12 @@ def render_pdf(markdown_content: str) -> bytes:
             f.write(markdown_content)
         
         # 使用系統預裝的 manus-md-to-pdf 工具
-        result = subprocess.run(["manus-md-to-pdf", tmp_md, tmp_pdf], capture_output=True, text=True)
+        result = subprocess.run(
+            ["manus-md-to-pdf", tmp_md, tmp_pdf],
+            capture_output=True,
+            text=True,
+            timeout=settings.REPORT_EXPORT_TIMEOUT_SECONDS,
+        )
         
         if result.returncode == 0 and os.path.exists(tmp_pdf):
             with open(tmp_pdf, "rb") as f:
@@ -111,6 +120,12 @@ def render_pdf(markdown_content: str) -> bytes:
         else:
             logger.error(f"PDF conversion failed: {result.stderr}")
             raise RuntimeError(f"PDF conversion failed: {result.stderr}")
+    except subprocess.TimeoutExpired as e:
+        stderr = summarize_stderr(e.stderr)
+        detail = f" stderr={stderr}" if stderr else ""
+        message = f"PDF conversion timed out after {settings.REPORT_EXPORT_TIMEOUT_SECONDS}s{detail}"
+        logger.error(message)
+        raise RuntimeError(message) from e
     except Exception as e:
         logger.error(f"Error rendering PDF: {e}")
         raise

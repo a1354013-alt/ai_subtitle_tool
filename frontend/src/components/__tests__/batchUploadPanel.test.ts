@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BatchUploadPanel from "@/components/BatchUploadPanel.vue";
 import type { BatchStatusResponse } from "@/types/api";
 
@@ -99,10 +99,30 @@ describe("BatchUploadPanel", () => {
     mockGetAppConfig.mockReset();
   });
 
-  it("shows download buttons for SUCCESS and uses shared batch URLs", async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("shows download buttons for SUCCESS and uses same-origin batch URLs by default", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "");
+
     const wrapper = await submitBatchWithStatus("SUCCESS");
 
     expect(wrapper.text()).toContain("Completed");
+    const links = wrapper.findAll(".task-actions a");
+    expect(links).toHaveLength(4);
+    expect(links[0].attributes("href")).toBe("/download/task-1");
+    expect(links[1].attributes("href")).toBe("/download/task-1?lang=English&format=srt");
+    expect(links[2].attributes("href")).toBe("/download/task-1?lang=English&format=ass");
+    expect(links[3].attributes("href")).toBe("/download/task-1?lang=English&format=vtt");
+  });
+
+  it("uses configured API base URL for SUCCESS download buttons", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "http://localhost:8000");
+
+    const wrapper = await submitBatchWithStatus("SUCCESS");
+
     const links = wrapper.findAll(".task-actions a");
     expect(links).toHaveLength(4);
     expect(links[0].attributes("href")).toBe("http://localhost:8000/download/task-1");

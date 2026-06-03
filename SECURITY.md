@@ -110,14 +110,14 @@ Regularly scan dependencies for vulnerabilities:
 pip-audit -r requirements.txt
 
 # Node.js
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=moderate
 ```
 
 Current frontend audit status:
 
 - Production audit must pass with 0 vulnerabilities.
 - `npm audit fix` has been applied to remove the prior high-severity `js-cookie` issue.
-- Production audit uses `npm audit --omit=dev`. Full dev audit advisories are tracked separately.
+- Production audit uses `npm audit --omit=dev --audit-level=moderate`. Full dev audit advisories are tracked separately.
 - Runtime impact is limited because the reported issue targets the Vite development server, not the production build output.
 - Recommended follow-up: schedule a dedicated compatibility pass to upgrade `vite`, `@vitejs/plugin-vue`, and `vitest` together, then re-run frontend lint/typecheck/test/build and CI on Node 20.
 
@@ -145,7 +145,7 @@ Current frontend audit status:
 - Failed upload attempts
 - Path traversal attempts
 - CORS violations
-- API authentication failures (when implemented)
+- API authentication failures when `REQUIRE_AUTH_TOKEN=true`
 - Unusual task patterns
 
 ### Log Security

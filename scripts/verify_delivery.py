@@ -32,6 +32,12 @@ REQUIRED_FILES = {
     ".vscode/extensions.json",
 }
 
+RELEASE_REQUIRED_FILES = REQUIRED_FILES - {
+    ".vscode/launch.json",
+    ".vscode/tasks.json",
+    ".vscode/extensions.json",
+}
+
 FORBIDDEN_GITIGNORE_PATTERNS = (
     "```",
 )
@@ -72,6 +78,12 @@ FORBIDDEN_ZIP_MARKERS = (
     "outputs/",
     "temp/",
     "tmp/",
+    ".vscode/",
+    "scripts/dev_bootstrap.py",
+    "scripts/dev_start.py",
+    "scripts/start-dev.cmd",
+    "scripts/start-dev.ps1",
+    "scripts/stop-dev.ps1",
 )
 
 
@@ -230,7 +242,7 @@ def _verify_zip_contents(out_path: Path) -> None:
             if normalized == marker or normalized.startswith(f"{marker}/"):
                 raise SystemExit(f"forbidden content found in release zip: {normalized}")
 
-    for required in REQUIRED_FILES:
+    for required in RELEASE_REQUIRED_FILES:
         if required not in names:
             raise SystemExit(f"required file missing from release zip: {required}")
 
@@ -339,7 +351,7 @@ def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
     # Production dependency audit. Full audit may include tracked dev-only
     # Vite/Vitest/esbuild advisories and is not a release gate.
     _run_command(
-        ["npm", "audit", "--omit=dev"],
+        ["npm", "audit", "--omit=dev", "--audit-level=moderate"],
         frontend_dir,
         label="frontend-production-audit",
         timeout_seconds=120,

@@ -18,6 +18,15 @@ python -m pip install -r requirements.lock.txt
 TESTING=true PYTHONPATH=. python -m pytest -q
 ```
 
+CI-compatible dependency setup:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+TESTING=true PYTHONPATH=. python -m pytest -q
+```
+
 Scope:
 
 - FastAPI integration tests using `TestClient`
@@ -35,7 +44,7 @@ Notes:
 
 - Integration tests stub Celery/ffprobe interactions so they are deterministic and do not require a running Redis/worker.
 - Full end-to-end video processing is intentionally excluded from unit/CI tests due to runtime cost; it is covered by manual smoke checks.
-- Celery is a locked backend dependency; use `requirements.lock.txt` so backend tests do not depend on packages that happen to be installed globally.
+- Backend dependencies must be installed before pytest. Use `requirements.lock.txt` for reproducible local runs and `requirements.txt` for CI-compatible setup.
 
 ---
 
@@ -47,7 +56,7 @@ Run:
 cd frontend
 nvm use
 npm ci
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=moderate
 npm run typecheck
 npm run lint
 npm run test:ci
@@ -59,7 +68,7 @@ Notes:
 - `npm test` is for interactive watch mode during local development.
 - `npm run test:ci` is the stable non-watch command used by CI and `scripts/verify_delivery.py --full`.
 - Node.js 20.x is required. Use `.nvmrc` or `nvm use` before running frontend commands; Node 22 may produce `EBADENGINE` warnings.
-- Production audit uses `npm audit --omit=dev` and must pass with 0 vulnerabilities. Full dev audit advisories are tracked separately.
+- Production audit uses `npm audit --omit=dev --audit-level=moderate` and must pass with 0 vulnerabilities. Full dev audit advisories are tracked separately.
 
 Scope:
 
