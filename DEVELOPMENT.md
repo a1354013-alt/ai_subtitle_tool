@@ -8,6 +8,13 @@
 
 The `Run Full Stack Dev` launch runs `scripts/dev_start.py`. It creates or verifies `.venv`, installs backend dependencies from `requirements.lock.txt`, runs `npm ci`, creates local `.env` files when missing, checks ffmpeg/ffprobe, checks Redis, starts the FastAPI backend, starts the Vite frontend, and starts a Celery worker when Redis is available.
 
+Python 3.11 or 3.12 is required.
+Recommended: Python 3.11
+Supported: Python 3.11-3.12
+Unsupported: Python 3.13+
+
+Node.js 20.x is required.
+
 Use a full repository clone for F5 development. Release zips intentionally exclude `.vscode` and the local development helper scripts, so they are for deployment packaging rather than VS Code launch workflows.
 
 ## First Run
@@ -20,19 +27,45 @@ python scripts/dev_bootstrap.py
 
 The first-run bootstrap uses `.venv` consistently. `backend/.env` is created from `backend/.env.example` with host-friendly defaults such as `REDIS_URL=redis://localhost:6379/0`, `UPLOAD_DIR=backend/uploads`, `OUTPUT_DIR=backend/outputs`, `TEMP_DIR=backend/tmp`, and `RATE_LIMIT_PER_IP=0`. Redis is checked on `127.0.0.1:6379`; if Docker is available, the dev scripts try to start Redis before falling back to explicit guidance or eager-mode development.
 
+`scripts/dev_bootstrap.py` fails fast on unsupported Python versions with:
+
+```txt
+Python 3.11 or 3.12 is required. Current version: x.y.z
+```
+
 Backend tests assume the locked backend dependencies are installed:
 
 ```powershell
-.venv\Scripts\python -m pip install -r requirements.lock.txt
+python -m pip install -r requirements.lock.txt
 $env:TESTING="true"; $env:PYTHONPATH="."; .venv\Scripts\python -m pytest -q
 ```
 
-CI-style setup may use:
+Frontend dependencies:
 
 ```powershell
-.venv\Scripts\python -m pip install -r requirements.txt
-$env:TESTING="true"; $env:PYTHONPATH="."; .venv\Scripts\python -m pytest -q
+cd frontend
+npm ci
+cd ..
 ```
+
+Full delivery verification:
+
+```powershell
+python -m pip install -r requirements.lock.txt
+cd frontend
+npm ci
+cd ..
+python scripts/verify_delivery.py --full
+```
+
+Production dependency audit:
+
+```powershell
+cd frontend
+npm audit --omit=dev
+```
+
+Full `npm audit` may still report dev dependency advisories. Those are tracked separately and are not production runtime risks unless the vulnerable package becomes a runtime dependency.
 
 Redis behavior in `scripts/dev_start.py --redis auto`:
 
@@ -57,3 +90,4 @@ scripts/stop-dev.ps1
 - Backend port 8000 is occupied: stop the existing backend before F5.
 - `OPENAI_API_KEY` is not set: transcription for `Original` works, but translation targets are rejected until a key is configured.
 - Production auth: set `REQUIRE_AUTH_TOKEN=true` and `AUTH_TOKEN`; frontend builds can set `VITE_API_TOKEN` so API requests include `X-API-Token`.
+- `python scripts/verify_delivery.py --full --ci-fast` or `--smoke` prints a fast-mode banner and may skip expensive checks; it is not a full release verification.

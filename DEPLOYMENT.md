@@ -10,9 +10,14 @@ This document covers local development, Docker startup, and release packaging fo
 python -m venv venv
 # Windows: venv\Scripts\activate
 # macOS/Linux: source venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.lock.txt
 cp backend/.env.example backend/.env
 ```
+
+Python 3.11 or 3.12 is required.
+Recommended: Python 3.11
+Supported: Python 3.11-3.12
+Unsupported: Python 3.13+
 
 Recommended local overrides in `backend/.env`:
 
@@ -41,6 +46,8 @@ npm ci
 cp .env.example .env
 npm run dev
 ```
+
+Node.js 20.x is required.
 
 Default local frontend env:
 
@@ -88,10 +95,25 @@ Verification command:
 
 ```bash
 python scripts/verify_docker_config.py
+python -m pip install -r requirements.lock.txt
+cd frontend
+npm ci
+cd ..
 python scripts/verify_delivery.py --zip-only
 python scripts/verify_delivery.py --full
 python scripts/make_release_zip.py --out release.zip --check
 python scripts/verify_release_zip.py release.zip
 ```
 
-`python scripts/verify_delivery.py --full` is the pre-release closed-loop check. It runs backend compile/tests, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, then rebuilds and re-validates the release zip.
+`python scripts/verify_delivery.py --full` is the pre-release closed-loop check. It runs Python version validation, backend dependency preflight, backend compile/tests, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, `npm audit --omit=dev`, then rebuilds and re-validates the release zip.
+
+If backend dependencies are missing, verification stops before pytest and prints:
+
+```txt
+[backend-preflight] Missing backend dependencies: celery, pytest-timeout
+
+Please run:
+python -m pip install -r requirements.lock.txt
+```
+
+`python scripts/verify_delivery.py --full --ci-fast` and `--full --smoke` are fast-mode aliases. They print a warning banner and may skip expensive checks, so they are not full release verification.

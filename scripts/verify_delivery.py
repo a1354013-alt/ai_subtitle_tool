@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from make_release_zip import build_release_zip
+from runtime_requirements import is_supported_python_version, python_version_error_message
 from verify_docker_config import verify as verify_docker_config
 
 
@@ -86,6 +88,21 @@ FORBIDDEN_ZIP_MARKERS = (
     "scripts/stop-dev.ps1",
 )
 
+EXIT_PYTHON_VERSION_ERROR = 20
+EXIT_BACKEND_DEPENDENCY_ERROR = 21
+
+BACKEND_DEPENDENCY_MODULES = (
+    ("celery", "celery"),
+    ("pytest", "pytest"),
+    ("pytest-timeout", "pytest_timeout"),
+)
+
+
+class VerificationError(RuntimeError):
+    def __init__(self, message: str, *, exit_code: int = 1) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
 
 def _run_command(
     command: list[str],
@@ -124,6 +141,57 @@ def _run_command(
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _ensure_supported_python_version(version_info: tuple[int, int, int] | None = None) -> None:
+    current_version = version_info or (
+        sys.version_info.major,
+        sys.version_info.minor,
+        sys.version_info.micro,
+    )
+    if not is_supported_python_version(current_version):
+        raise VerificationError(
+            f"[python-preflight] {python_version_error_message(current_version)}",
+            exit_code=EXIT_PYTHON_VERSION_ERROR,
+        )
+
+
+def _find_missing_backend_dependencies() -> list[str]:
+    missing: list[str] = []
+    for package_name, module_name in BACKEND_DEPENDENCY_MODULES:
+        if importlib.util.find_spec(module_name) is None:
+            missing.append(package_name)
+    return missing
+
+
+def _verify_backend_dependency_preflight() -> None:
+    missing = _find_missing_backend_dependencies()
+    if missing:
+        formatted = ", ".join(missing)
+        raise VerificationError(
+            "[backend-preflight] Missing backend dependencies: "
+            f"{formatted}\n\n"
+            "Please run:\n"
+            "python -m pip install -r requirements.lock.txt",
+            exit_code=EXIT_BACKEND_DEPENDENCY_ERROR,
+        )
+
+
+def _print_fast_mode_banner(*, ci_fast: bool, frontend_node_modules_exists: bool) -> None:
+    if not ci_fast:
+        return
+
+    print("FAST MODE ENABLED:", flush=True)
+    print("Some expensive checks may be skipped.", flush=True)
+    print("This is not a full release verification.", flush=True)
+    print("[fast-mode] Requested with --full and --ci-fast/--smoke.", flush=True)
+    print("[fast-mode] Skipped checks:", flush=True)
+    print("[fast-mode] - backend pytest", flush=True)
+    print("[fast-mode] - frontend test:ci", flush=True)
+    if frontend_node_modules_exists:
+        print("[fast-mode] - frontend npm ci (existing node_modules detected)", flush=True)
+    else:
+        print("[fast-mode] - frontend npm ci will still run because node_modules is missing", flush=True)
 
 
 def _iter_markdown_docs(repo_root: Path) -> list[Path]:
@@ -266,6 +334,12 @@ def run_zip_only(repo_root: Path) -> Path:
 
 def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
     run_zip_only(repo_root)
+    _ensure_supported_python_version()
+    frontend_dir = repo_root / "frontend"
+    _print_fast_mode_banner(
+        ci_fast=ci_fast,
+        frontend_node_modules_exists=(frontend_dir / "node_modules").exists(),
+    )
     
     # Backend compilation
     _run_command(
@@ -288,6 +362,7 @@ def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
     
     # Backend tests (skip in --ci-fast mode)
     if not ci_fast:
+        _verify_backend_dependency_preflight()
         _run_command(
             [sys.executable, "-m", "pytest", "-q"],
             repo_root,
@@ -298,7 +373,6 @@ def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
         print("[pytest] skipped (--ci-fast mode)", flush=True)
     
     # Frontend checks
-    frontend_dir = repo_root / "frontend"
     frontend_scripts = json.loads(_read_text(frontend_dir / "package.json")).get("scripts", {})
     
     # npm ci (skip in --ci-fast mode if node_modules exists)
@@ -351,7 +425,7 @@ def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
     # Production dependency audit. Full audit may include tracked dev-only
     # Vite/Vitest/esbuild advisories and is not a release gate.
     _run_command(
-        ["npm", "audit", "--omit=dev", "--audit-level=moderate"],
+        ["npm", "audit", "--omit=dev"],
         frontend_dir,
         label="frontend-production-audit",
         timeout_seconds=120,
@@ -381,17 +455,25 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--full", action="store_true", help="Run zip checks plus backend/frontend test and build commands.")
     parser.add_argument(
         "--ci-fast",
+        "--smoke",
+        dest="ci_fast",
         action="store_true",
-        help="Fast CI mode: skip pytest, frontend tests, and npm ci (if node_modules exists). Use with --full."
+        help="Fast CI mode: skip pytest, frontend tests, and npm ci (if node_modules exists). Alias: --smoke. Use with --full."
     )
     args = parser.parse_args(argv)
+    if args.ci_fast and not args.full:
+        parser.error("--ci-fast/--smoke can only be used with --full")
 
     repo_root = Path(__file__).resolve().parents[1]
-    if args.full:
-        run_full(repo_root, ci_fast=args.ci_fast)
-    else:
-        run_zip_only(repo_root)
-    return 0
+    try:
+        if args.full:
+            run_full(repo_root, ci_fast=args.ci_fast)
+        else:
+            run_zip_only(repo_root)
+        return 0
+    except VerificationError as exc:
+        print(str(exc), file=sys.stderr, flush=True)
+        return exc.exit_code
 
 
 if __name__ == "__main__":

@@ -60,7 +60,10 @@ Services:
 
 Requirements:
 
-- Python 3.11
+- Python 3.11 or 3.12 is required.
+- Recommended: Python 3.11
+- Supported: Python 3.11-3.12
+- Unsupported: Python 3.13+
 - Redis (running separately)
 - `ffmpeg` and `ffprobe`
 
@@ -70,11 +73,17 @@ Setup:
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.lock.txt
+python -m pip install -r requirements.lock.txt
 cp backend/.env.example backend/.env
 ```
 
-CI-compatible backend test setup can use `pip install -r requirements.txt`; backend dependencies must be installed before running pytest.
+If you use an unsupported interpreter, bootstrap and delivery verification fail fast with:
+
+```txt
+Python 3.11 or 3.12 is required. Current version: x.y.z
+```
+
+Backend dependencies must be installed before running pytest or `scripts/verify_delivery.py --full`.
 
 Recommended local overrides inside `backend/.env`:
 
@@ -117,7 +126,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Node.js 20.x is required. Use `.nvmrc` or `nvm use` before running frontend commands; Node 22 may produce `EBADENGINE` warnings because `frontend/package.json` is pinned to Node 20.
+Node.js 20.x is required. Use `.nvmrc` or `nvm use` before running frontend commands. The frontend toolchain and `@types/node` are intentionally aligned to Node 20 for easier maintenance.
 
 Frontend env:
 
@@ -142,7 +151,7 @@ Frontend:
 cd frontend
 nvm use
 npm ci
-npm audit --omit=dev --audit-level=moderate
+npm audit --omit=dev
 npm run lint
 npm run typecheck
 npm run test:ci
@@ -153,7 +162,8 @@ Notes:
 
 - `npm test` starts Vitest watch mode for local development.
 - `npm run test:ci` is the CI-safe, non-watch command and must exit on its own.
-- Production audit uses `npm audit --omit=dev --audit-level=moderate` and must pass with 0 vulnerabilities. Full dev audit advisories are tracked separately.
+- Production audit uses `npm audit --omit=dev` and must pass with 0 vulnerabilities.
+- Full `npm audit` can still report dev dependency advisories; those are tracked separately. dev dependency advisories are not production runtime risks unless they move into runtime dependencies.
 
 Auth and rate limiting are enforced by middleware when enabled. Local demo defaults keep auth off and set `RATE_LIMIT_PER_IP=0` to avoid blocking long polling; production should set `REQUIRE_AUTH_TOKEN=true`, `AUTH_TOKEN`, and a positive `RATE_LIMIT_PER_IP`.
 
@@ -187,12 +197,34 @@ python scripts/make_release_zip.py --out release.zip --check
 End-to-end delivery verification:
 
 ```bash
+python -m pip install -r requirements.lock.txt
+cd frontend
+npm ci
+cd ..
 python scripts/verify_delivery.py --zip-only
 python scripts/verify_delivery.py --full
 ```
 
 `--zip-only` validates docs, Docker/release inputs, and the clean release archive.
-`--full` additionally runs Python compile checks, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, production `npm audit --omit=dev --audit-level=moderate`, then rebuilds and verifies `release.zip`.
+`--full` additionally runs Python compile checks, backend dependency preflight, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, production `npm audit --omit=dev`, then rebuilds and verifies `release.zip`.
+
+If backend dependencies are missing, `--full` stops before pytest with a clear preflight error such as:
+
+```txt
+[backend-preflight] Missing backend dependencies: celery, pytest-timeout
+
+Please run:
+python -m pip install -r requirements.lock.txt
+```
+
+Fast verification aliases:
+
+```bash
+python scripts/verify_delivery.py --full --ci-fast
+python scripts/verify_delivery.py --full --smoke
+```
+
+Fast mode prints an explicit warning banner and is not a full release verification.
 
 PowerShell wrapper:
 

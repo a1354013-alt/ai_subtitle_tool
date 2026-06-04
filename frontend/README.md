@@ -11,7 +11,7 @@ Main pages:
 
 ## Requirements
 
-- Node.js 18+ recommended
+- Node.js 20.x is required
 
 ## Install / Run
 
@@ -26,6 +26,7 @@ npm run dev
 Build:
 
 ```bash
+npm audit --omit=dev
 npm run build
 npm run preview
 ```
