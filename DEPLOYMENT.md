@@ -22,9 +22,9 @@ Unsupported: Python 3.13+
 Recommended local overrides in `backend/.env`:
 
 ```ini
-REDIS_URL=redis://localhost:6379/0
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/1
+REDIS_URL=redis://127.0.0.1:6379/0
+CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
 UPLOAD_DIR=./backend/uploads
 OUTPUT_DIR=./backend/outputs
 TEMP_DIR=./backend/tmp

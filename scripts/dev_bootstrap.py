@@ -134,9 +134,9 @@ def create_env_file() -> bool:
     content = content.replace("UPLOAD_DIR=/app/uploads", "UPLOAD_DIR=backend/uploads")
     content = content.replace("OUTPUT_DIR=/app/outputs", "OUTPUT_DIR=backend/outputs")
     content = content.replace("TEMP_DIR=/app/tmp", "TEMP_DIR=backend/tmp")
-    content = content.replace("REDIS_URL=redis://redis:6379/0", "REDIS_URL=redis://localhost:6379/0")
-    content = content.replace("CELERY_BROKER_URL=redis://redis:6379/0", "CELERY_BROKER_URL=redis://localhost:6379/0")
-    content = content.replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://localhost:6379/1")
+    content = content.replace("REDIS_URL=redis://redis:6379/0", "REDIS_URL=redis://127.0.0.1:6379/0")
+    content = content.replace("CELERY_BROKER_URL=redis://redis:6379/0", "CELERY_BROKER_URL=redis://127.0.0.1:6379/0")
+    content = content.replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1")
     ENV_FILE.write_text(content, encoding="utf-8")
     success(f"Environment file created: {ENV_FILE}")
     return True

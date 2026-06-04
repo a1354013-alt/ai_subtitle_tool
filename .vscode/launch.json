@@ -6,7 +6,7 @@
       "type": "python",
       "request": "launch",
       "module": "uvicorn",
-      "args": ["backend.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
+      "args": ["backend.main:app", "--host", "127.0.0.1", "--port", "8891", "--reload"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": false,

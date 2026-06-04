@@ -44,9 +44,9 @@ flowchart LR
 For local backend development, copy it to `backend/.env`.
 
 ```ini
-REDIS_URL=redis://localhost:6379/0
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/0
+REDIS_URL=redis://127.0.0.1:6379/0
+CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/0
 UPLOAD_DIR=./backend/uploads
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 CORS_ALLOW_CREDENTIALS=true

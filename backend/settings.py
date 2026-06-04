@@ -54,9 +54,9 @@ UPLOAD_DIR = Path(_getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")) or (BASE_DIR 
 OUTPUT_DIR = Path(_getenv("OUTPUT_DIR", str(BASE_DIR / "outputs")) or (BASE_DIR / "outputs")).resolve()
 TEMP_DIR = Path(_getenv("TEMP_DIR", str(BASE_DIR / "tmp")) or (BASE_DIR / "tmp")).resolve()
 
-REDIS_URL = _getenv("REDIS_URL", "redis://localhost:6379/0") or "redis://localhost:6379/0"
+REDIS_URL = _getenv("REDIS_URL", "redis://127.0.0.1:6379/0") or "redis://127.0.0.1:6379/0"
 CELERY_BROKER_URL = _getenv("CELERY_BROKER_URL", REDIS_URL, aliases=("REDIS_URL",)) or REDIS_URL
-CELERY_RESULT_BACKEND = _getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1") or "redis://localhost:6379/1"
+CELERY_RESULT_BACKEND = _getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/1") or "redis://127.0.0.1:6379/1"
 
 CORS_ORIGINS = _getenv("CORS_ORIGINS", "*", aliases=("CORS_ALLOWED_ORIGINS",)) or "*"
 CORS_ALLOW_CREDENTIALS = _get_bool("CORS_ALLOW_CREDENTIALS", False)

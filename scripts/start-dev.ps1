@@ -19,9 +19,9 @@ function Ensure-Env {
             $content = $content.Replace("UPLOAD_DIR=/app/uploads", "UPLOAD_DIR=backend/uploads")
             $content = $content.Replace("OUTPUT_DIR=/app/outputs", "OUTPUT_DIR=backend/outputs")
             $content = $content.Replace("TEMP_DIR=/app/tmp", "TEMP_DIR=backend/tmp")
-            $content = $content.Replace("REDIS_URL=redis://redis:6379/0", "REDIS_URL=redis://localhost:6379/0")
-            $content = $content.Replace("CELERY_BROKER_URL=redis://redis:6379/0", "CELERY_BROKER_URL=redis://localhost:6379/0")
-            $content = $content.Replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://localhost:6379/1")
+            $content = $content.Replace("REDIS_URL=redis://redis:6379/0", "REDIS_URL=redis://127.0.0.1:6379/0")
+            $content = $content.Replace("CELERY_BROKER_URL=redis://redis:6379/0", "CELERY_BROKER_URL=redis://127.0.0.1:6379/0")
+            $content = $content.Replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1")
             Set-Content -LiteralPath $BackendEnv -Value $content -Encoding UTF8
             Write-Host "Created backend\.env from backend\.env.example"
         } else {

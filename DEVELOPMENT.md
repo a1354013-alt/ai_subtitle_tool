@@ -25,7 +25,7 @@ Run:
 python scripts/dev_bootstrap.py
 ```
 
-The first-run bootstrap uses `.venv` consistently. `backend/.env` is created from `backend/.env.example` with host-friendly defaults such as `REDIS_URL=redis://localhost:6379/0`, `UPLOAD_DIR=backend/uploads`, `OUTPUT_DIR=backend/outputs`, `TEMP_DIR=backend/tmp`, and `RATE_LIMIT_PER_IP=0`. Redis is checked on `127.0.0.1:6379`; if Docker is available, the dev scripts try to start Redis before falling back to explicit guidance or eager-mode development.
+The first-run bootstrap uses `.venv` consistently. `backend/.env` is created from `backend/.env.example` with host-friendly defaults such as `REDIS_URL=redis://127.0.0.1:6379/0`, `UPLOAD_DIR=backend/uploads`, `OUTPUT_DIR=backend/outputs`, `TEMP_DIR=backend/tmp`, and `RATE_LIMIT_PER_IP=0`. Redis is checked on `127.0.0.1:6379`; if Docker is available, the dev scripts try to start Redis before falling back to explicit guidance or eager-mode development.
 
 `scripts/dev_bootstrap.py` fails fast on unsupported Python versions with:
 
