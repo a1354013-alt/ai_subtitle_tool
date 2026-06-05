@@ -53,6 +53,7 @@ Services:
    [WORKER] ready
    ```
 4. Open [http://localhost:5173](http://localhost:5173)
+5. Open the backend API docs at [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
 
 ### Option C: Manual Local Development
 
@@ -107,7 +108,7 @@ redis-server
 celery -A backend.celery_app:celery_app worker --loglevel=info
 
 # Terminal 3: Backend API
-uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn backend.main:app --host 127.0.0.1 --port 8891 --reload
 ```
 
 Health endpoints:
@@ -115,6 +116,7 @@ Health endpoints:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /api/config`
+- API docs: [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
 
 ## Local Development: Frontend
 
@@ -131,10 +133,12 @@ Node.js 20.x is required. Use `.nvmrc` or `nvm use` before running frontend comm
 Frontend env:
 
 ```ini
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://127.0.0.1:8891
 VITE_API_TOKEN=your-token
 VITE_APP_TITLE=AI Subtitle Tool
 ```
+
+Local frontend page: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
 ## Testing
 
@@ -291,8 +295,11 @@ Important variables:
 - `CELERY_BROKER_URL`
 - `CELERY_RESULT_BACKEND`
 - `OPENAI_API_KEY`
+- `LLM_PROVIDER`
 - `OPENAI_MODEL`
 - `TRANSLATE_MODEL`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_MODEL`
 - `WHISPER_MODEL`
 - `FFMPEG_BINARY`
 - `FFPROBE_BINARY`
@@ -362,7 +369,7 @@ To generate subtitles in multiple languages (original + translations):
 Call `/api/config` to check current status:
 
 ```bash
-curl http://localhost:8000/api/config | jq .
+curl http://127.0.0.1:8891/api/config
 ```
 
 Response includes:
@@ -395,5 +402,10 @@ Batch ZIP naming:
 
 ## VS Code development
 
-Open a full repository clone in VS Code, press F5, and select `Run Full Stack Dev`. The release zip intentionally excludes `.vscode` and local development helper scripts; use a repo clone for F5 development and the release zip for deployment packaging. See `DEVELOPMENT.md` for first-run setup, Redis behavior, and stop commands.
+Open a full repository clone in VS Code and press F5. The default launch is `Run Full Stack Dev`, which starts the backend API, Celery worker when Redis is available, and the Vite frontend. Local endpoints:
+
+- Backend API docs: [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
+- Frontend page: [http://127.0.0.1:5173](http://127.0.0.1:5173)
+
+The release zip intentionally excludes `.vscode` and local development helper scripts; use a repo clone for F5 development and the release zip for deployment packaging. See `DEVELOPMENT.md` for first-run setup, Redis behavior, and stop commands.
 - Final video uses `{safe_original_filename}_{task_id}.mp4`

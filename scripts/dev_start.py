@@ -23,6 +23,12 @@ BACKEND_DIR = ROOT_DIR / "backend"
 FRONTEND_DIR = ROOT_DIR / "frontend"
 VENV_DIR = ROOT_DIR / ".venv"
 ENV_FILE = BACKEND_DIR / ".env"
+BACKEND_HOST = "127.0.0.1"
+BACKEND_PORT = 8891
+FRONTEND_HOST = "127.0.0.1"
+FRONTEND_PORT = 5173
+BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
+FRONTEND_URL = f"http://{FRONTEND_HOST}:{FRONTEND_PORT}"
 
 
 def info(msg: str):
@@ -47,6 +53,74 @@ def get_python_exe() -> str:
         return str(VENV_DIR / "Scripts" / "python.exe")
     else:  # macOS/Linux
         return str(VENV_DIR / "bin" / "python")
+
+
+def get_npm_exe() -> str:
+    """Use the Windows command shim so subprocess can launch npm reliably."""
+    return shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+
+
+def _python_version(python_exe: str) -> tuple[int, int] | None:
+    try:
+        result = subprocess.run(
+            [python_exe, "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        major, minor = result.stdout.strip().split(".", 1)
+        return int(major), int(minor)
+    except ValueError:
+        return None
+
+
+def _supported_python(python_exe: str) -> bool:
+    version = _python_version(python_exe)
+    return version is not None and version[0] == 3 and version[1] in (11, 12)
+
+
+def get_bootstrap_python_exe() -> str:
+    """Choose a supported Python for bootstrap, even if the existing venv is stale."""
+    if _supported_python(sys.executable):
+        return sys.executable
+    if os.name == "nt":
+        for launcher_arg in ("-3.11", "-3.12"):
+            try:
+                result = subprocess.run(
+                    ["py", launcher_arg, "-c", "import sys; print(sys.executable)"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except Exception:
+                continue
+            if result.returncode == 0:
+                candidate = result.stdout.strip()
+                if candidate and _supported_python(candidate):
+                    return candidate
+    return sys.executable
+
+
+def backend_deps_available() -> bool:
+    """Return True when the venv can import the modules needed for F5 startup."""
+    py_exe = get_python_exe()
+    if not Path(py_exe).exists():
+        return False
+    if not _supported_python(py_exe):
+        return False
+    result = subprocess.run(
+        [py_exe, "-c", "import fastapi, uvicorn, celery, redis"],
+        cwd=ROOT_DIR,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
 
 
 class ProcessManager:
@@ -270,6 +344,11 @@ def ensure_prerequisites():
     if not ENV_FILE.exists():
         error(f"Environment file not found at {ENV_FILE}")
         needs_bootstrap = True
+
+    # Check backend dependencies
+    if not backend_deps_available():
+        error("Backend dependencies are missing from .venv")
+        needs_bootstrap = True
     
     # Check node_modules
     if not (FRONTEND_DIR / "node_modules").exists():
@@ -279,7 +358,8 @@ def ensure_prerequisites():
     if needs_bootstrap:
         info("Running bootstrap to set up missing prerequisites...")
         bootstrap_script = ROOT_DIR / "scripts" / "dev_bootstrap.py"
-        result = subprocess.run([sys.executable, str(bootstrap_script)], cwd=ROOT_DIR)
+        bootstrap_python = get_bootstrap_python_exe()
+        result = subprocess.run([bootstrap_python, str(bootstrap_script)], cwd=ROOT_DIR)
         if result.returncode != 0:
             error("Bootstrap failed. Please fix the errors above and try again.")
             sys.exit(1)
@@ -296,9 +376,8 @@ def ensure_prerequisites():
 
     missing_media_tools = [name for name in ("ffmpeg", "ffprobe") if shutil.which(name) is None]
     if missing_media_tools:
-        error(f"Missing required media tools on PATH: {', '.join(missing_media_tools)}")
-        error("Install FFmpeg and ensure both ffmpeg and ffprobe are available before pressing F5.")
-        sys.exit(1)
+        warn(f"Missing media tools on PATH: {', '.join(missing_media_tools)}")
+        warn("Backend and frontend startup will continue; video processing will fail until FFmpeg is installed.")
 
 
 def setup_redis_mode(redis_mode: str) -> tuple[bool, dict]:
@@ -398,12 +477,12 @@ def main():
     manager = ProcessManager()
     
     # Check if ports are available
-    if not check_port_available(8000):
-        error("Port 8000 is already in use. Is the backend already running?")
+    if not check_port_available(BACKEND_PORT):
+        error(f"Port {BACKEND_PORT} is already in use. Is the backend already running?")
         sys.exit(1)
     
-    if not check_port_available(5173):
-        warn("Port 5173 is already in use. Frontend may fail to start.")
+    if not check_port_available(FRONTEND_PORT):
+        warn(f"Port {FRONTEND_PORT} is already in use. Frontend may fail to start.")
     
     print()
     
@@ -412,17 +491,17 @@ def main():
     # Start backend
     manager.add_process(
         "BACKEND",
-        [py_exe, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"],
+        [py_exe, "-m", "uvicorn", "backend.main:app", "--host", BACKEND_HOST, "--port", str(BACKEND_PORT), "--reload"],
         cwd=ROOT_DIR,
-        env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", **redis_env_vars}
+        env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", "API_PORT": str(BACKEND_PORT), **redis_env_vars}
     )
     
     # Start frontend
     manager.add_process(
         "FRONTEND",
-        ["npm", "run", "dev"],
+        [get_npm_exe(), "run", "dev"],
         cwd=FRONTEND_DIR,
-        env_vars={"VITE_API_BASE_URL": "http://127.0.0.1:8000"}
+        env_vars={"VITE_API_BASE_URL": BACKEND_URL}
     )
     
     # Start Celery worker only if Redis is available (not in eager mode)
@@ -441,9 +520,9 @@ def main():
     success("Development stack is starting...")
     print()
     print("Services:")
-    print("  Frontend: http://localhost:5173")
-    print("  Backend:  http://localhost:8000")
-    print("  API Docs: http://localhost:8000/api/docs")
+    print(f"  Frontend: {FRONTEND_URL}")
+    print(f"  Backend:  {BACKEND_URL}")
+    print(f"  API Docs: {BACKEND_URL}/docs")
     print()
     if not redis_available:
         print("Note: Running in Celery eager mode (no Redis)")

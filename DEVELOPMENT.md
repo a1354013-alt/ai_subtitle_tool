@@ -4,9 +4,14 @@
 
 1. Open the repository root in VS Code.
 2. Press F5.
-3. Select `Run Full Stack Dev`.
+3. The default launch, `Run Full Stack Dev`, starts the backend API, Celery worker when Redis is available, and the Vite frontend.
 
 The `Run Full Stack Dev` launch runs `scripts/dev_start.py`. It creates or verifies `.venv`, installs backend dependencies from `requirements.lock.txt`, runs `npm ci`, creates local `.env` files when missing, checks ffmpeg/ffprobe, checks Redis, starts the FastAPI backend, starts the Vite frontend, and starts a Celery worker when Redis is available.
+
+Local endpoints:
+
+- Backend API docs: [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
+- Frontend page: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
 Python 3.11 or 3.12 is required.
 Recommended: Python 3.11
@@ -74,6 +79,17 @@ Redis behavior in `scripts/dev_start.py --redis auto`:
 - Redis unavailable and Docker unavailable: backend and frontend start in Celery eager dev mode; the worker is skipped.
 - Production and Docker deployments should run Redis plus a Celery worker instead of relying on eager mode.
 
+For local Ollama experiments, set these values in `backend/.env`:
+
+```ini
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=gemma3:12b
+OPENAI_API_KEY=
+```
+
+The current OpenAI translation path remains disabled when `OPENAI_API_KEY` is empty; missing OpenAI credentials do not block backend, Redis, FFmpeg, worker, or frontend startup.
+
 ## Stop Services
 
 Use the VS Code task `dev:stop`, or run:
@@ -87,7 +103,7 @@ scripts/stop-dev.ps1
 - Redis is not running: install/start Redis, or run `python scripts/dev_start.py --redis auto` to use the eager fallback when Docker is unavailable.
 - ffmpeg or ffprobe is missing: install ffmpeg and ensure both binaries are on `PATH`, or set `FFMPEG_BINARY` and `FFPROBE_BINARY`.
 - Frontend port 5173 is occupied: stop the process using the port or let Vite choose another port.
-- Backend port 8000 is occupied: stop the existing backend before F5.
+- Backend port 8891 is occupied: stop the existing backend before F5.
 - `OPENAI_API_KEY` is not set: transcription for `Original` works, but translation targets are rejected until a key is configured.
 - Production auth: set `REQUIRE_AUTH_TOKEN=true` and `AUTH_TOKEN`; frontend builds can set `VITE_API_TOKEN` so API requests include `X-API-Token`.
 - `python scripts/verify_delivery.py --full --ci-fast` or `--smoke` prints a fast-mode banner and may skip expensive checks; it is not a full release verification.

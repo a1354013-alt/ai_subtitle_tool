@@ -119,16 +119,16 @@ describe("BatchUploadPanel", () => {
   });
 
   it("uses configured API base URL for SUCCESS download buttons", async () => {
-    vi.stubEnv("VITE_API_BASE_URL", "http://localhost:8000");
+    vi.stubEnv("VITE_API_BASE_URL", "http://127.0.0.1:8891");
 
     const wrapper = await submitBatchWithStatus("SUCCESS");
 
     const links = wrapper.findAll(".task-actions a");
     expect(links).toHaveLength(4);
-    expect(links[0].attributes("href")).toBe("http://localhost:8000/download/task-1");
-    expect(links[1].attributes("href")).toBe("http://localhost:8000/download/task-1?lang=English&format=srt");
-    expect(links[2].attributes("href")).toBe("http://localhost:8000/download/task-1?lang=English&format=ass");
-    expect(links[3].attributes("href")).toBe("http://localhost:8000/download/task-1?lang=English&format=vtt");
+    expect(links[0].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1");
+    expect(links[1].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1?lang=English&format=srt");
+    expect(links[2].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1?lang=English&format=ass");
+    expect(links[3].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1?lang=English&format=vtt");
   });
 
   it("shows failed styling for FAILURE", async () => {

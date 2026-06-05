@@ -48,17 +48,26 @@ from .services.file_service import write_text_atomic
 from .services.subtitle_service import load_vtt_from_srt, write_vtt_for_srt_to_zip
 import zipfile
 
+def _is_production_environment() -> bool:
+    return (settings.ENVIRONMENT or "").strip().lower() == "production"
+
+
+def _docs_path(path: str) -> str | None:
+    return None if _is_production_environment() else path
+
+
 app = FastAPI(
     title="AI Video Subtitle Tool",
     version="1.0.0",
     description="Automated video subtitle generation with translation and editing capabilities.",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
+    docs_url=_docs_path("/docs"),
+    redoc_url=_docs_path("/redoc"),
+    openapi_url=_docs_path("/openapi.json"),
 )
 logger = logging.getLogger(__name__)
 OPENAI_TRANSLATION_REQUIRED_MESSAGE = "OPENAI_API_KEY is required when translation targets are requested."
 _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
-AUTH_EXEMPT_PATHS = {"/healthz", "/readyz", "/openapi.json", "/api/docs", "/api/redoc"}
+AUTH_EXEMPT_PATHS = {"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"}
 
 
 @app.exception_handler(HTTPException)
@@ -374,13 +383,18 @@ def check_system_dependencies():
         if not settings.REQUIRE_AUTH_TOKEN:
             logger.warning("Production is running without REQUIRE_AUTH_TOKEN=true.")
     
+    production = _is_production_environment()
+
     # 1. Check ffmpeg
     try:
         run_media_command([settings.FFMPEG_BINARY, "-version"], timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
     except (MediaProcessError, FileNotFoundError):
-        logger.error("CRITICAL: %s. Suggestion: %s", 
-                     ERROR_MESSAGES["ffmpeg_not_found"]["message"], 
-                     ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"])
+        log = logger.error if production else logger.warning
+        prefix = "CRITICAL: " if production else "Development warning: "
+        log("%s%s. Suggestion: %s",
+            prefix,
+            ERROR_MESSAGES["ffmpeg_not_found"]["message"],
+            ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"])
 
     # 2. Check OpenAI API Key (required only when translation is requested)
     if not settings.OPENAI_API_KEY:
@@ -394,9 +408,12 @@ def check_system_dependencies():
         r = _redis.Redis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
         r.ping()
     except Exception:
-        logger.error("CRITICAL: %s. Suggestion: %s", 
-                     ERROR_MESSAGES["redis_not_running"]["message"], 
-                     ERROR_MESSAGES["redis_not_running"]["suggestion"])
+        log = logger.error if production else logger.warning
+        prefix = "CRITICAL: " if production else "Development warning: "
+        log("%s%s. Suggestion: %s",
+            prefix,
+            ERROR_MESSAGES["redis_not_running"]["message"],
+            ERROR_MESSAGES["redis_not_running"]["suggestion"])
 
 from contextlib import asynccontextmanager
 

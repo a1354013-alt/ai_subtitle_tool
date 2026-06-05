@@ -2,6 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Run Full Stack Dev",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/dev_start.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "preLaunchTask": "dev:ensure-env"
+    },
+    {
       "name": "Backend API",
       "type": "python",
       "request": "launch",
@@ -40,21 +52,16 @@
       "cwd": "${workspaceFolder}/frontend",
       "console": "integratedTerminal",
       "env": {
-        "VITE_API_BASE_URL": "http://127.0.0.1:8000"
+        "VITE_API_BASE_URL": "http://127.0.0.1:8891"
       },
       "preLaunchTask": "dev:ensure-env"
-    },
+    }
+  ],
+  "compounds": [
     {
-      "name": "Run Full Stack Dev",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/dev_start.py",
-      "console": "integratedTerminal",
-      "justMyCode": false,
-      "env": {
-        "PYTHONUNBUFFERED": "1"
-      },
-      "preLaunchTask": "dev:ensure-env"
+      "name": "Backend + Celery + Frontend",
+      "configurations": ["Backend API", "Celery Worker", "Frontend Vite"],
+      "stopAll": true
     }
   ]
 }

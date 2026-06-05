@@ -51,8 +51,28 @@ def check_python_version() -> None:
 def create_venv() -> None:
     info("Checking virtual environment...")
     if VENV_DIR.exists():
-        success(f"Virtual environment already exists: {VENV_DIR}")
-        return
+        py_exe = Path(get_python_exe())
+        if py_exe.exists():
+            result = subprocess.run(
+                [
+                    str(py_exe),
+                    "-c",
+                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')",
+                ],
+                cwd=ROOT_DIR,
+                capture_output=True,
+                text=True,
+            )
+            version_text = result.stdout.strip()
+            if result.returncode == 0:
+                parts = tuple(int(part) for part in version_text.split(".")[:3])
+                if is_supported_python_version(parts):
+                    success(f"Virtual environment already exists: {VENV_DIR}")
+                    return
+                warn(f"Existing virtual environment uses unsupported Python {version_text}; recreating .venv")
+        else:
+            warn("Existing virtual environment is missing its Python executable; recreating .venv")
+        shutil.rmtree(VENV_DIR)
 
     info(f"Creating virtual environment at {VENV_DIR}...")
     subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=True, cwd=ROOT_DIR)
@@ -301,9 +321,9 @@ def main() -> None:
     print("Next steps:")
     print("1. Press F5 in VS Code to start the full development stack")
     print("   OR run: python scripts/dev_start.py")
-    print("2. Frontend: http://localhost:5173")
-    print("3. Backend API: http://localhost:8000")
-    print("4. API docs: http://localhost:8000/api/docs")
+    print("2. Frontend: http://127.0.0.1:5173")
+    print("3. Backend API: http://127.0.0.1:8891")
+    print("4. API docs: http://127.0.0.1:8891/docs")
     print()
 
 

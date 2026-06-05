@@ -1,6 +1,6 @@
 $ErrorActionPreference = "SilentlyContinue"
 
-$ports = @(8000, 5173)
+$ports = @(8891, 5173)
 foreach ($port in $ports) {
     Get-NetTCPConnection -LocalPort $port | ForEach-Object {
         Stop-Process -Id $_.OwningProcess -Force

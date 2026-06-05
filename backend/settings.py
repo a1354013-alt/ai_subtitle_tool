@@ -48,7 +48,7 @@ APP_ENV = ENVIRONMENT
 TESTING = _get_bool("TESTING", False)
 
 API_HOST = _getenv("API_HOST", "0.0.0.0") or "0.0.0.0"
-API_PORT = _get_int("API_PORT", 8000)
+API_PORT = _get_int("API_PORT", 8891)
 
 UPLOAD_DIR = Path(_getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")) or (BASE_DIR / "uploads")).resolve()
 OUTPUT_DIR = Path(_getenv("OUTPUT_DIR", str(BASE_DIR / "outputs")) or (BASE_DIR / "outputs")).resolve()
@@ -65,10 +65,13 @@ MAX_UPLOAD_SIZE_MB = _get_int("MAX_UPLOAD_SIZE_MB", 2048)
 MAX_BATCH_FILES = _get_int("MAX_BATCH_FILES", 20)
 MAX_VIDEO_DURATION_MINUTES = _get_int("MAX_VIDEO_DURATION_MINUTES", 180)
 
-TRANSLATE_PROVIDER = (_getenv("TRANSLATE_PROVIDER", "openai") or "openai").strip().lower()
+LLM_PROVIDER = (_getenv("LLM_PROVIDER", _getenv("TRANSLATE_PROVIDER", "openai")) or "openai").strip().lower()
+TRANSLATE_PROVIDER = (_getenv("TRANSLATE_PROVIDER", LLM_PROVIDER) or LLM_PROVIDER).strip().lower()
 TRANSLATE_MODEL = _getenv("TRANSLATE_MODEL", _getenv("OPENAI_MODEL", "gpt-4o-mini")) or "gpt-4o-mini"
 OPENAI_API_KEY = _getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = _getenv("OPENAI_MODEL", TRANSLATE_MODEL) or TRANSLATE_MODEL
+OLLAMA_BASE_URL = _getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434") or "http://127.0.0.1:11434"
+OLLAMA_MODEL = _getenv("OLLAMA_MODEL", "gemma3:12b") or "gemma3:12b"
 WHISPER_MODEL = _getenv("WHISPER_MODEL", "") or ""
 HF_TOKEN = _getenv("HF_TOKEN", "")
 

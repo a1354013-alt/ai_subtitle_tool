@@ -121,6 +121,19 @@ async def test_openapi_exposes_stable_contract_fields(app_client):
 
 
 @pytest.mark.anyio
+async def test_development_docs_are_available(app_client):
+    client, _main, _tmp = app_client
+
+    docs = await client.get("/docs")
+    openapi = await client.get("/openapi.json")
+
+    assert docs.status_code != 404
+    assert docs.status_code == 200
+    assert openapi.status_code != 404
+    assert openapi.status_code == 200
+
+
+@pytest.mark.anyio
 async def test_upload_contract_returns_uuid_and_pending(app_client):
     client, main, _tmp = app_client
 
