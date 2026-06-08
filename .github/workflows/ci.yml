@@ -10,16 +10,6 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,6 +30,40 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
+      - name: Start Redis with retry and health check
+        run: |
+          pulled=0
+          for i in 1 2 3; do
+            if docker pull redis:7-alpine; then
+              pulled=1
+              break
+            fi
+            echo "redis pull failed on attempt ${i}, retrying..."
+            sleep 10
+          done
+
+          if [ "${pulled}" != "1" ]; then
+            echo "::error::Redis image pull failed after 3 attempts"
+            exit 1
+          fi
+
+          docker rm -f redis-ci >/dev/null 2>&1 || true
+          docker run -d --name redis-ci -p 6379:6379 redis:7-alpine
+
+          for i in {1..30}; do
+            if docker exec redis-ci redis-cli ping; then
+              echo "REDIS_URL=redis://localhost:6379/0" >> "${GITHUB_ENV}"
+              echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> "${GITHUB_ENV}"
+              echo "CELERY_RESULT_BACKEND=redis://localhost:6379/1" >> "${GITHUB_ENV}"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::Redis did not become ready"
+          docker logs redis-ci || true
+          exit 1
+
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
@@ -49,7 +73,7 @@ jobs:
       - name: Compile Python modules
         run: python -m compileall -q backend tests scripts benchmarks test_hwaccel.py test_report.py
 
-      - name: Run pytest
+      - name: Run backend tests (pytest)
         run: python -m pytest -q
 
       - name: Install frontend dependencies
