@@ -337,26 +337,44 @@ Frontend example: [frontend/.env.example](frontend/.env.example)
 - `VITE_API_BASE_URL`
 - `VITE_APP_TITLE`
 
-## Translation & OpenAI Configuration
+## Translation Provider Configuration
 
 ### Transcribe Mode (Original Language Only)
 
 To generate subtitles in the original language only (no translation):
 
 1. **No OpenAI API Key needed**
-2. Leave `OPENAI_API_KEY` empty or unset in `.env`
+2. Set `LLM_PROVIDER=none` or leave translation disabled in the UI
 3. Upload with single target language (e.g., "Original")
 4. System will transcribe video to text without translation
 
-`/healthz` and `/readyz` do not fail solely because `OPENAI_API_KEY` is missing. The key is required only when translation is requested.
+`/healthz` and `/readyz` do not fail solely because translation is disabled or `OPENAI_API_KEY` is missing. Translation provider issues should not block upload, FFmpeg, Redis, or subtitle generation for `Original`.
 
-### Translate Mode (Requires OpenAI API Key)
+### Translate Mode With Ollama (No OpenAI Key Required)
+
+To generate translated subtitles with a local Ollama instance:
+
+1. Set in `backend/.env`:
+   ```ini
+   LLM_PROVIDER=ollama
+   TRANSLATE_PROVIDER=ollama
+   OLLAMA_BASE_URL=http://127.0.0.1:11434
+   OLLAMA_MODEL=gemma3:12b
+   OPENAI_API_KEY=
+   ```
+2. Start Ollama and confirm `http://127.0.0.1:11434/api/tags` responds.
+3. Upload with translated target languages (for example `Traditional Chinese, English`).
+4. The frontend should show `已啟用 Ollama：gemma3:12b` when translation is ready.
+
+### Translate Mode With OpenAI
 
 To generate subtitles in multiple languages (original + translations):
 
 1. **Get OpenAI API Key** from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 2. Set in `backend/.env`:
    ```ini
+   LLM_PROVIDER=openai
+   TRANSLATE_PROVIDER=openai
    OPENAI_API_KEY=sk-...
    OPENAI_MODEL=gpt-4o-mini
    TRANSLATE_MODEL=gpt-4o-mini
@@ -366,18 +384,20 @@ To generate subtitles in multiple languages (original + translations):
 
 ### Configuration Check
 
-Call `/api/config` to check current status:
+Call `/api/capabilities` to check current provider status:
 
 ```bash
-curl http://127.0.0.1:8891/api/config
+curl http://127.0.0.1:8891/api/capabilities
 ```
 
 Response includes:
-- `translationEnabled`: true if `OPENAI_API_KEY` is set
-- `openaiConfigured`: true when `OPENAI_API_KEY` is present. Actual key validity is checked when translation is requested.
+- `provider`: `openai`, `ollama`, or `none`
+- `model`: the active translation model for the selected provider
+- `translationEnabled`: whether translation is currently available
+- `reason`: a machine-readable reason when translation is unavailable
 - `availableModes`: list of available modes (`["transcribe"]` or `["transcribe", "translate"]`)
 
-If translation is not configured, uploading with multiple languages will fail with a clear error message.
+`/api/config` mirrors the same capability fields alongside upload-size and subtitle-format settings. If translation is not configured, uploading with multiple languages fails with a provider-specific error message, while `Original` still works.
 
 ## Known Limitations
 

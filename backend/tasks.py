@@ -25,6 +25,7 @@ from .pipeline_segments import (
 )
 from . import settings
 from .services.upload_validation import normalize_lang_suffix
+from .services.llm_capabilities import ensure_translation_available
 from .utils.cleanup_utils import create_task_lock, remove_task_lock, cleanup_old_files as cleanup_old_files_impl
 from .utils.media_process import run_media_command
 from .utils.storage_utils import get_storage_backend
@@ -55,7 +56,6 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         translate_segments,
         generate_bilingual_srt,
         should_translate,
-        translation_targets_requested,
     )
     from .utils.ass_utils import generate_ass
     from .utils.split_utils import merge_segments_subtitles
@@ -138,15 +138,13 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
 
         translations = {}
         translation_metadata = []
-        openai_enabled = bool(settings.OPENAI_API_KEY)
-        if translation_targets_requested(target_langs, "Auto") and not openai_enabled:
-            raise ValueError("OPENAI_API_KEY is required when translation targets are requested.")
+        llm_status = ensure_translation_available(target_langs)
 
         for lang in target_langs:
             if is_task_canceled(upload_dir, business_id):
                 raise RuntimeError("Task canceled")
 
-            if should_translate(lang, "Auto", openai_enabled):
+            if should_translate(lang, "Auto", llm_status.translation_enabled):
                 try:
                     lang_translations, _ = translate_segments(segments, "Auto", [lang])
                     translations[lang] = lang_translations[lang]

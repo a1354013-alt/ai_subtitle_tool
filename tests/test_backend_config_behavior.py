@@ -232,3 +232,68 @@ async def test_readyz_does_not_require_openai_key(monkeypatch: pytest.MonkeyPatc
 
     response = await main.readyz()
     assert response == {"status": "ok"}
+
+
+def test_api_capabilities_reports_ollama_status(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    main = _reload_main(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        main,
+        "get_llm_capability_status",
+        lambda: SimpleNamespace(
+            provider="ollama",
+            model="gemma3:12b",
+            translation_enabled=True,
+            reason=None,
+            message=None,
+            default_target_language="Traditional Chinese",
+            available_modes=["transcribe", "translate"],
+            openai_configured=False,
+        ),
+    )
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.app)
+    response = client.get("/api/capabilities")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "ollama",
+        "model": "gemma3:12b",
+        "translationEnabled": True,
+        "reason": None,
+        "message": None,
+        "defaultTargetLanguage": "Traditional Chinese",
+        "availableModes": ["transcribe", "translate"],
+        "openaiConfigured": False,
+    }
+
+
+def test_api_config_uses_capability_status_instead_of_openai_key(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    main = _reload_main(monkeypatch, tmp_path)
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(
+        main,
+        "get_llm_capability_status",
+        lambda: SimpleNamespace(
+            provider="ollama",
+            model="gemma3:12b",
+            translation_enabled=True,
+            reason=None,
+            message=None,
+            default_target_language="Traditional Chinese",
+            available_modes=["transcribe", "translate"],
+            openai_configured=False,
+        ),
+    )
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.app)
+    response = client.get("/api/config")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["translationEnabled"] is True
+    assert data["provider"] == "ollama"
+    assert data["model"] == "gemma3:12b"

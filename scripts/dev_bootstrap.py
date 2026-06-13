@@ -203,24 +203,45 @@ def check_redis() -> bool:
     return False
 
 
-def check_openai_key() -> bool:
-    info("Checking OpenAI API Key...")
+def check_translation_provider() -> bool:
+    info("Checking translation provider configuration...")
     if not ENV_FILE.exists():
-        warn("Environment file not created yet, skipping OpenAI check")
+        warn("Environment file not created yet, skipping translation provider check")
         return True
 
     env_content = ENV_FILE.read_text(encoding="utf-8")
+    llm_provider = "openai"
+    openai_key = ""
+    ollama_base_url = ""
+    ollama_model = ""
     for line in env_content.splitlines():
-        if not line.startswith("OPENAI_API_KEY="):
-            continue
-        key = line.split("=", 1)[1].strip()
-        if key and not key.startswith("#"):
-            success("OpenAI API Key is configured")
-            return True
+        if line.startswith("LLM_PROVIDER="):
+            llm_provider = line.split("=", 1)[1].strip() or "openai"
+        elif line.startswith("OPENAI_API_KEY="):
+            openai_key = line.split("=", 1)[1].strip()
+        elif line.startswith("OLLAMA_BASE_URL="):
+            ollama_base_url = line.split("=", 1)[1].strip()
+        elif line.startswith("OLLAMA_MODEL="):
+            ollama_model = line.split("=", 1)[1].strip()
+
+    if llm_provider == "ollama":
+        if ollama_base_url and ollama_model:
+            success(f"Ollama is configured ({ollama_model} @ {ollama_base_url})")
+        else:
+            warn("LLM_PROVIDER=ollama but OLLAMA_BASE_URL or OLLAMA_MODEL is missing")
+        return True
+
+    if llm_provider == "none":
+        warn("LLM_PROVIDER=none - translation is intentionally disabled")
+        return True
+
+    if openai_key and not openai_key.startswith("#"):
+        success("OpenAI API Key is configured")
+        return True
 
     warn("OpenAI API Key not configured")
-    warn("Translation features will not work without it")
-    warn("Set OPENAI_API_KEY in backend/.env to enable translation")
+    warn("OpenAI translation will not work without it")
+    warn("Set OPENAI_API_KEY in backend/.env or switch LLM_PROVIDER to ollama")
     return True
 
 
@@ -258,7 +279,7 @@ def print_summary(all_ok: bool) -> None:
     )
     print(
         "OpenAI Key: "
-        + ("configured" if os.environ.get("OPENAI_API_KEY") else "not detected in shell env (optional, required for translation)")
+        + ("configured" if os.environ.get("OPENAI_API_KEY") else "not detected in shell env (only required for LLM_PROVIDER=openai)")
     )
     print()
 
@@ -299,7 +320,7 @@ def main() -> None:
         warn(f"Redis check failed: {exc}")
 
     try:
-        check_openai_key()
+    check_translation_provider()
     except Exception as exc:
         warn(f"OpenAI API key check failed: {exc}")
 

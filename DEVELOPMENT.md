@@ -83,12 +83,13 @@ For local Ollama experiments, set these values in `backend/.env`:
 
 ```ini
 LLM_PROVIDER=ollama
+TRANSLATE_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=gemma3:12b
 OPENAI_API_KEY=
 ```
 
-The current OpenAI translation path remains disabled when `OPENAI_API_KEY` is empty; missing OpenAI credentials do not block backend, Redis, FFmpeg, worker, or frontend startup.
+When `LLM_PROVIDER=ollama`, backend translation does not require `OPENAI_API_KEY`. The backend probes `OLLAMA_BASE_URL/api/tags` for capability status, and the frontend should show the active Ollama model instead of an OpenAI-key warning.
 
 ## Stop Services
 
@@ -104,6 +105,7 @@ scripts/stop-dev.ps1
 - ffmpeg or ffprobe is missing: install ffmpeg and ensure both binaries are on `PATH`, or set `FFMPEG_BINARY` and `FFPROBE_BINARY`.
 - Frontend port 5173 is occupied: stop the process using the port or let Vite choose another port.
 - Backend port 8891 is occupied: stop the existing backend before F5.
-- `OPENAI_API_KEY` is not set: transcription for `Original` works, but translation targets are rejected until a key is configured.
+- `LLM_PROVIDER=openai` and `OPENAI_API_KEY` is not set: `Original` works, but OpenAI translation targets are rejected until a key is configured.
+- `LLM_PROVIDER=ollama` and translation is unavailable: start Ollama and confirm `OLLAMA_BASE_URL`; upload/transcription still work for `Original`.
 - Production auth: set `REQUIRE_AUTH_TOKEN=true` and `AUTH_TOKEN`; frontend builds can set `VITE_API_TOKEN` so API requests include `X-API-Token`.
 - `python scripts/verify_delivery.py --full --ci-fast` or `--smoke` prints a fast-mode banner and may skip expensive checks; it is not a full release verification.

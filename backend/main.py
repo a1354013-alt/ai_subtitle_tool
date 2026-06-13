@@ -34,7 +34,7 @@ from . import settings
 from .batch_manager import BatchManager, InvalidBatchIdError
 from .core.paths import validate_path_traversal
 from .schemas.batch import BatchStatusResponse, BatchTaskResponse, BatchUploadResponse
-from .schemas.config import AppConfigResponse
+from .schemas.config import AppCapabilitiesResponse, AppConfigResponse
 from .schemas.results import FileInfo, TaskResultManifest, TranslationInfo
 from .schemas.subtitles import SubtitleEditRequest
 from .schemas.tasks import RecentTask, TaskStatusResponse
@@ -43,6 +43,13 @@ from .services.batch_service import (
     build_batch_download_urls as _build_batch_download_urls,
     build_batch_task_response as _build_batch_task_response,
     model_dump as _model_dump,
+)
+from .services.llm_capabilities import (
+    OLLAMA_UNAVAILABLE_MESSAGE,
+    OPENAI_TRANSLATION_REQUIRED_MESSAGE,
+    TRANSLATION_DISABLED_MESSAGE,
+    ensure_translation_available,
+    get_llm_capability_status,
 )
 from .services.file_service import write_text_atomic
 from .services.subtitle_service import load_vtt_from_srt, write_vtt_for_srt_to_zip
@@ -65,7 +72,6 @@ app = FastAPI(
     openapi_url=_docs_path("/openapi.json"),
 )
 logger = logging.getLogger(__name__)
-OPENAI_TRANSLATION_REQUIRED_MESSAGE = "OPENAI_API_KEY is required when translation targets are requested."
 _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 AUTH_EXEMPT_PATHS = {"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"}
 
@@ -92,15 +98,45 @@ def _is_test_environment() -> bool:
 
 
 def _ensure_openai_configured_for_targets(target_langs: list[str]) -> None:
-    if translation_targets_requested(target_langs) and not settings.OPENAI_API_KEY:
+    if not translation_targets_requested(target_langs):
+        return
+    try:
+        ensure_translation_available(target_langs)
+    except ValueError as exc:
+        message = str(exc)
+        error_code = "translation_unavailable"
+        suggestion = "Request only original language subtitles, or configure the selected LLM provider."
+        if message == OPENAI_TRANSLATION_REQUIRED_MESSAGE:
+            error_code = "openai_not_configured"
+            suggestion = "Set OPENAI_API_KEY in your .env file to enable OpenAI translation, or request only original language subtitles."
+        elif message == OLLAMA_UNAVAILABLE_MESSAGE:
+            error_code = "ollama_unavailable"
+            suggestion = "Start Ollama and confirm OLLAMA_BASE_URL and OLLAMA_MODEL are correct."
+        elif message == TRANSLATION_DISABLED_MESSAGE:
+            error_code = "translation_disabled"
+            suggestion = "Set LLM_PROVIDER to ollama or openai to enable translation, or request only original language subtitles."
         raise HTTPException(
             status_code=400,
             detail={
-                "error_code": "openai_not_configured",
-                "message": OPENAI_TRANSLATION_REQUIRED_MESSAGE,
-                "suggestion": "Set OPENAI_API_KEY in your .env file to enable translation, or request only original language subtitles.",
+                "error_code": error_code,
+                "message": message,
+                "suggestion": suggestion,
             },
         )
+
+
+def _capability_response_payload() -> dict[str, Any]:
+    status = get_llm_capability_status()
+    return {
+        "provider": status.provider,
+        "model": status.model,
+        "translationEnabled": status.translation_enabled,
+        "reason": status.reason,
+        "message": status.message,
+        "defaultTargetLanguage": status.default_target_language,
+        "availableModes": status.available_modes,
+        "openaiConfigured": status.openai_configured,
+    }
 
 
 def configure_cors() -> None:
@@ -360,17 +396,27 @@ async def healthz():
 
 @app.get("/api/config", response_model=AppConfigResponse)
 async def get_app_config():
+    capabilities = _capability_response_payload()
     return AppConfigResponse(
         maxUploadSizeMb=settings.MAX_UPLOAD_SIZE_MB,
         maxBatchFiles=settings.MAX_BATCH_FILES,
         supportedExtensions=list(settings.SUPPORTED_VIDEO_EXTENSIONS),
         batchUploadEnabled=settings.BATCH_UPLOAD_ENABLED,
         subtitleFormats=list(settings.SUBTITLE_FORMATS),
-        translationEnabled=bool(settings.OPENAI_API_KEY),
-        openaiConfigured=bool(settings.OPENAI_API_KEY),
-        defaultTargetLanguage="Traditional Chinese" if settings.OPENAI_API_KEY else "Original",
-        availableModes=["transcribe"] + (["translate"] if settings.OPENAI_API_KEY else []),
+        translationEnabled=capabilities["translationEnabled"],
+        openaiConfigured=capabilities["openaiConfigured"],
+        defaultTargetLanguage=capabilities["defaultTargetLanguage"],
+        availableModes=capabilities["availableModes"],
+        provider=capabilities["provider"],
+        model=capabilities["model"],
+        reason=capabilities["reason"],
+        message=capabilities["message"],
     )
+
+
+@app.get("/api/capabilities", response_model=AppCapabilitiesResponse)
+async def get_app_capabilities():
+    return AppCapabilitiesResponse(**_capability_response_payload())
 
 
 def check_system_dependencies():
@@ -396,11 +442,21 @@ def check_system_dependencies():
             ERROR_MESSAGES["ffmpeg_not_found"]["message"],
             ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"])
 
-    # 2. Check OpenAI API Key (required only when translation is requested)
-    if not settings.OPENAI_API_KEY:
-        logger.warning("%s. Suggestion: %s",
-                       ERROR_MESSAGES["openai_api_key_missing"]["message"],
-                       ERROR_MESSAGES["openai_api_key_missing"]["suggestion"])
+    # 2. Check translation provider (warn only; do not block general startup)
+    llm_status = get_llm_capability_status()
+    if not llm_status.translation_enabled and llm_status.message:
+        if llm_status.provider == "openai":
+            logger.warning(
+                "%s. Suggestion: %s",
+                ERROR_MESSAGES["openai_api_key_missing"]["message"],
+                ERROR_MESSAGES["openai_api_key_missing"]["suggestion"],
+            )
+        elif llm_status.provider == "ollama":
+            logger.warning(
+                "%s. Suggestion: Confirm OLLAMA_BASE_URL=%s and that the Ollama service is running.",
+                llm_status.message,
+                settings.OLLAMA_BASE_URL,
+            )
 
     # 3. Check Redis (best effort on startup)
     try:

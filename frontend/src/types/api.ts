@@ -24,6 +24,21 @@ export type AppConfig = {
   openaiConfigured: boolean;
   defaultTargetLanguage: string;
   availableModes: string[];
+  provider: string;
+  model?: string | null;
+  reason?: string | null;
+  message?: string | null;
+};
+
+export type AppCapabilities = {
+  provider: string;
+  model?: string | null;
+  translationEnabled: boolean;
+  reason?: string | null;
+  message?: string | null;
+  defaultTargetLanguage: string;
+  availableModes: string[];
+  openaiConfigured: boolean;
 };
 
 export type BatchTaskStatus = "PENDING" | "PROCESSING" | "SUCCESS" | "FAILURE" | "CANCELED";

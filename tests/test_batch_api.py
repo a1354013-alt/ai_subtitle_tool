@@ -253,6 +253,7 @@ def test_upload_allows_original_without_openai_key(batch_app, monkeypatch: pytes
 
 def test_upload_rejects_translation_target_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
     client, main = batch_app
+    monkeypatch.setattr(main.settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
 
     response = client.post(
@@ -267,6 +268,7 @@ def test_upload_rejects_translation_target_without_openai_key(batch_app, monkeyp
 
 def test_upload_rejects_mixed_original_and_translation_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
     client, main = batch_app
+    monkeypatch.setattr(main.settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
 
     response = client.post(
@@ -281,6 +283,7 @@ def test_upload_rejects_mixed_original_and_translation_without_openai_key(batch_
 
 def test_upload_allows_translation_target_with_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
     client, main = batch_app
+    monkeypatch.setattr(main.settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *args, **kwargs: None)
 
@@ -295,6 +298,7 @@ def test_upload_allows_translation_target_with_openai_key(batch_app, monkeypatch
 
 def test_batch_rejects_translation_target_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
     client, main = batch_app
+    monkeypatch.setattr(main.settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
 
     response = client.post(
@@ -305,3 +309,54 @@ def test_batch_rejects_translation_target_without_openai_key(batch_app, monkeypa
 
     assert response.status_code == 400
     assert response.json()["message"] == "OPENAI_API_KEY is required when translation targets are requested."
+
+
+def test_upload_allows_translation_target_with_ollama_without_openai_key(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    monkeypatch.setattr(main.settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(main.settings, "OLLAMA_MODEL", "gemma3:12b")
+    monkeypatch.setattr(main, "_enqueue_process_video_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        main,
+        "get_llm_capability_status",
+        lambda: SimpleNamespace(
+            provider="ollama",
+            model="gemma3:12b",
+            translation_enabled=True,
+            reason=None,
+            message=None,
+            default_target_language="Traditional Chinese",
+            available_modes=["transcribe", "translate"],
+            openai_configured=False,
+        ),
+    )
+    monkeypatch.setattr(main, "ensure_translation_available", lambda _langs: None)
+
+    response = client.post(
+        "/upload",
+        files={"file": ("demo.mp4", b"video", "video/mp4")},
+        data={"target_langs": "Traditional Chinese", "subtitle_format": "srt"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_upload_rejects_translation_target_when_ollama_unavailable(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    monkeypatch.setattr(main.settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
+
+    def _raise(_langs):
+        raise ValueError("Ollama is not reachable. Confirm OLLAMA_BASE_URL and that Ollama is running.")
+
+    monkeypatch.setattr(main, "ensure_translation_available", _raise)
+
+    response = client.post(
+        "/upload",
+        files={"file": ("demo.mp4", b"video", "video/mp4")},
+        data={"target_langs": "Traditional Chinese", "subtitle_format": "srt"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "ollama_unavailable"

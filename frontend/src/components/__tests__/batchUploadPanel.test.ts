@@ -8,11 +8,13 @@ const {
   mockGetBatchStatus,
   mockDownloadBatch,
   mockGetAppConfig,
+  mockGetAppCapabilities,
 } = vi.hoisted(() => ({
   mockUploadBatch: vi.fn(),
   mockGetBatchStatus: vi.fn(),
   mockDownloadBatch: vi.fn((batchId: string) => `/batch/${batchId}/download`),
   mockGetAppConfig: vi.fn(),
+  mockGetAppCapabilities: vi.fn(),
 }));
 
 vi.mock("@/api/batch", () => ({
@@ -23,6 +25,10 @@ vi.mock("@/api/batch", () => ({
 
 vi.mock("@/api/config", () => ({
   getAppConfig: mockGetAppConfig,
+}));
+
+vi.mock("@/api/capabilities", () => ({
+  getAppCapabilities: mockGetAppCapabilities,
 }));
 
 function makeBatchStatus(status: string): BatchStatusResponse {
@@ -69,6 +75,20 @@ async function mountPanel() {
     openaiConfigured: false,
     defaultTargetLanguage: "Original",
     availableModes: ["transcribe"],
+    provider: "none",
+    model: null,
+    reason: "translation_disabled",
+    message: null,
+  });
+  mockGetAppCapabilities.mockResolvedValue({
+    provider: "none",
+    model: null,
+    translationEnabled: false,
+    reason: "translation_disabled",
+    message: null,
+    defaultTargetLanguage: "Original",
+    availableModes: ["transcribe"],
+    openaiConfigured: false,
   });
   const wrapper = mount(BatchUploadPanel);
   await flushPromises();
@@ -97,6 +117,7 @@ describe("BatchUploadPanel", () => {
     mockGetBatchStatus.mockReset();
     mockDownloadBatch.mockReset();
     mockGetAppConfig.mockReset();
+    mockGetAppCapabilities.mockReset();
   });
 
   afterEach(() => {
@@ -191,5 +212,24 @@ describe("BatchUploadPanel", () => {
 
     const payload = mockUploadBatch.mock.calls[0][0] as FormData;
     expect(payload.get("remove_silence")).toBe("true");
+  });
+
+  it("shows Ollama status instead of hardcoded OpenAI key warning", async () => {
+    mockGetAppCapabilities.mockResolvedValueOnce({
+      provider: "ollama",
+      model: "gemma3:12b",
+      translationEnabled: true,
+      reason: null,
+      message: null,
+      defaultTargetLanguage: "Traditional Chinese",
+      availableModes: ["transcribe", "translate"],
+      openaiConfigured: false,
+    });
+
+    const wrapper = await mountPanel();
+
+    expect(wrapper.text()).toContain("Ollama");
+    expect(wrapper.text()).toContain("gemma3:12b");
+    expect(wrapper.text()).not.toContain("OpenAI API Key");
   });
 });

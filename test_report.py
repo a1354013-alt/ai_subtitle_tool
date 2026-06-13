@@ -25,7 +25,7 @@ def test_report_generation_and_markdown_rendering():
     assert data["filename"] == "test_video.mp4"
     assert data["status"] == "SUCCESS"
     assert data["elapsed_seconds"] == 123.45
-    assert data["translate_provider"] in {"openai", "none"}
+    assert data["translate_provider"] in {"openai", "ollama", "none"}
     assert "Test warning 1" in data["warnings"]
 
     markdown = report_service.render_markdown(data)

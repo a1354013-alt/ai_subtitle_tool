@@ -38,7 +38,7 @@ def generate_report_data(task_id: str, task_status_info: Dict[str, Any], history
     # 模型與 Provider
     # 這裡使用當前設定，因為任務執行時通常使用這些設定
     whisper_model = os.getenv("WHISPER_MODEL", settings.WHISPER_MODEL)
-    translate_provider = settings.TRANSLATE_PROVIDER
+    translate_provider = settings.LLM_PROVIDER
     
     return {
         "task_id": task_id,

@@ -1,6 +1,17 @@
 from pydantic import BaseModel
 
 
+class AppCapabilitiesResponse(BaseModel):
+    provider: str
+    model: str | None
+    translationEnabled: bool
+    reason: str | None
+    message: str | None
+    defaultTargetLanguage: str
+    availableModes: list[str]
+    openaiConfigured: bool
+
+
 class AppConfigResponse(BaseModel):
     maxUploadSizeMb: int
     maxBatchFiles: int
@@ -11,4 +22,8 @@ class AppConfigResponse(BaseModel):
     openaiConfigured: bool
     defaultTargetLanguage: str
     availableModes: list[str]
+    provider: str
+    model: str | None
+    reason: str | None
+    message: str | None
 

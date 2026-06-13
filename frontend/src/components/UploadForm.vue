@@ -19,12 +19,11 @@
               class="input" 
               type="text" 
               :placeholder="translationPlaceholder"
-              :disabled="!isTranslationAvailable"
             />
-            <div v-if="!isTranslationAvailable" class="help text-warning">
-              {{ translationUnavailableMessage }}
+            <div class="help" :class="isTranslationAvailable ? 'text-success' : 'text-warning'">
+              {{ translationStatusMessage }}
             </div>
-            <div v-else class="help">
+            <div v-if="isTranslationAvailable" class="help">
               {{ $t('upload.commaSeparatedHelp', { example: 'Traditional Chinese, English' }) }}
             </div>
           </div>
@@ -83,9 +82,11 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
+import { getAppCapabilities } from "@/api/capabilities";
 import { getAppConfig } from "@/api/config";
-import type { AppConfig } from "@/types/api";
+import type { AppCapabilities, AppConfig } from "@/types/api";
 import type { SubtitleFormat } from "@/types/subtitle";
+import { getTranslationStatusMessage, translationTargetsRequested } from "@/utils/translation";
 
 const emit = defineEmits<{
   (e: "submit", payload: FormData): void;
@@ -116,12 +117,26 @@ const config = ref<AppConfig>({
   openaiConfigured: false,
   defaultTargetLanguage: "Original",
   availableModes: ["transcribe"],
+  provider: "none",
+  model: null,
+  reason: "translation_disabled",
+  message: null,
+});
+const capabilities = ref<AppCapabilities>({
+  provider: "none",
+  model: null,
+  translationEnabled: false,
+  reason: "translation_disabled",
+  message: null,
+  defaultTargetLanguage: "Original",
+  availableModes: ["transcribe"],
+  openaiConfigured: false,
 });
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "(same origin)";
 
 const isTranslationAvailable = computed(() => {
-  return config.value.translationEnabled && config.value.openaiConfigured;
+  return capabilities.value.translationEnabled;
 });
 
 const translationPlaceholder = computed(() => {
@@ -131,12 +146,7 @@ const translationPlaceholder = computed(() => {
   return t("upload.translationOnlyPlaceholder");
 });
 
-const translationUnavailableMessage = computed(() => {
-  if (!config.value.openaiConfigured) {
-    return t("batch.translationUnavailable");
-  }
-  return t("upload.translationDisabled");
-});
+const translationStatusMessage = computed(() => getTranslationStatusMessage(capabilities.value, t));
 
 function validateSelectedFile(selected: File | null): string {
   if (!selected) return "";
@@ -155,9 +165,7 @@ function validateSelectedFile(selected: File | null): string {
 }
 
 function applyDefaultTargetLanguage() {
-  targetLangs.value = isTranslationAvailable.value
-    ? config.value.defaultTargetLanguage || "Traditional Chinese"
-    : "Original";
+  targetLangs.value = capabilities.value.defaultTargetLanguage || "Original";
 }
 
 function onFileChange(e: Event) {
@@ -175,9 +183,13 @@ function onFileChange(e: Event) {
 async function onSubmit() {
   validationError.value = validateSelectedFile(file.value);
   if (!file.value || validationError.value) return;
+  if (translationTargetsRequested(targetLangs.value) && !isTranslationAvailable.value) {
+    validationError.value = translationStatusMessage.value;
+    return;
+  }
   const fd = new FormData();
   fd.append("file", file.value);
-  fd.append("target_langs", isTranslationAvailable.value ? targetLangs.value : "Original");
+  fd.append("target_langs", translationTargetsRequested(targetLangs.value) ? targetLangs.value : "Original");
   fd.append("subtitle_format", subtitleFormat.value);
   fd.append("burn_subtitles", String(burnSubtitles.value));
   fd.append("remove_silence", String(removeSilence.value));
@@ -186,13 +198,14 @@ async function onSubmit() {
 }
 
 onMounted(async () => {
-  try {
-    config.value = await getAppConfig();
-    applyDefaultTargetLanguage();
-  } catch {
-    // Keep built-in defaults when the config endpoint is temporarily unavailable.
-    applyDefaultTargetLanguage();
+  const [configResult, capabilitiesResult] = await Promise.allSettled([getAppConfig(), getAppCapabilities()]);
+  if (configResult.status === "fulfilled") {
+    config.value = configResult.value;
   }
+  if (capabilitiesResult.status === "fulfilled") {
+    capabilities.value = capabilitiesResult.value;
+  }
+  applyDefaultTargetLanguage();
 });
 </script>
 

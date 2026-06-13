@@ -67,11 +67,11 @@ MAX_VIDEO_DURATION_MINUTES = _get_int("MAX_VIDEO_DURATION_MINUTES", 180)
 
 LLM_PROVIDER = (_getenv("LLM_PROVIDER", _getenv("TRANSLATE_PROVIDER", "openai")) or "openai").strip().lower()
 TRANSLATE_PROVIDER = (_getenv("TRANSLATE_PROVIDER", LLM_PROVIDER) or LLM_PROVIDER).strip().lower()
-TRANSLATE_MODEL = _getenv("TRANSLATE_MODEL", _getenv("OPENAI_MODEL", "gpt-4o-mini")) or "gpt-4o-mini"
-OPENAI_API_KEY = _getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = _getenv("OPENAI_MODEL", TRANSLATE_MODEL) or TRANSLATE_MODEL
-OLLAMA_BASE_URL = _getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434") or "http://127.0.0.1:11434"
-OLLAMA_MODEL = _getenv("OLLAMA_MODEL", "gemma3:12b") or "gemma3:12b"
+TRANSLATE_MODEL = (_getenv("TRANSLATE_MODEL", _getenv("OPENAI_MODEL", "gpt-4o-mini")) or "gpt-4o-mini").strip()
+OPENAI_API_KEY = (_getenv("OPENAI_API_KEY", "") or "").strip()
+OPENAI_MODEL = (_getenv("OPENAI_MODEL", TRANSLATE_MODEL) or TRANSLATE_MODEL).strip()
+OLLAMA_BASE_URL = (_getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434") or "http://127.0.0.1:11434").strip()
+OLLAMA_MODEL = (_getenv("OLLAMA_MODEL", "gemma3:12b") or "gemma3:12b").strip()
 WHISPER_MODEL = _getenv("WHISPER_MODEL", "") or ""
 HF_TOKEN = _getenv("HF_TOKEN", "")
 

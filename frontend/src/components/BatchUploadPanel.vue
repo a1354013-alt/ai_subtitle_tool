@@ -26,11 +26,12 @@
                 class="input" 
                 type="text" 
                 placeholder="Original"
-                :disabled="!config.translationEnabled || !config.openaiConfigured"
               />
-              <div class="help">{{ $t('batch.commaSeparatedLanguages') }}</div>
-              <div v-if="!config.translationEnabled || !config.openaiConfigured" class="help text-warning">
-                {{ $t('batch.translationUnavailable') }}
+              <div class="help" :class="isTranslationAvailable ? 'text-success' : 'text-warning'">
+                {{ translationStatusMessage }}
+              </div>
+              <div v-if="isTranslationAvailable" class="help">
+                {{ $t('batch.commaSeparatedLanguages') }}
               </div>
             </div>
           </div>
@@ -121,10 +122,12 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { getBatchStatus, uploadBatch, downloadBatch } from "@/api/batch";
+import { getAppCapabilities } from "@/api/capabilities";
 import { getAppConfig } from "@/api/config";
 import { buildApiUrl } from "@/api/client";
-import type { AppConfig, BatchStatusResponse, BatchTaskResponse } from "@/types/api";
+import type { AppCapabilities, AppConfig, BatchStatusResponse, BatchTaskResponse } from "@/types/api";
 import type { APIError } from "@/types/api";
+import { getTranslationStatusMessage, translationTargetsRequested } from "@/utils/translation";
 
 const files = ref<File[]>([]);
 const { t } = useI18n();
@@ -147,6 +150,20 @@ const config = ref<AppConfig>({
   openaiConfigured: false,
   defaultTargetLanguage: "Original",
   availableModes: ["transcribe"],
+  provider: "none",
+  model: null,
+  reason: "translation_disabled",
+  message: null,
+});
+const capabilities = ref<AppCapabilities>({
+  provider: "none",
+  model: null,
+  translationEnabled: false,
+  reason: "translation_disabled",
+  message: null,
+  defaultTargetLanguage: "Original",
+  availableModes: ["transcribe"],
+  openaiConfigured: false,
 });
 const showDownloadZip = computed(() => (batchStatus.value?.completed ?? 0) > 0);
 const totalSizeText = computed(() =>
@@ -155,7 +172,8 @@ const totalSizeText = computed(() =>
 
 let statusInterval: any = null;
 
-const isTranslationAvailable = computed(() => config.value.translationEnabled && config.value.openaiConfigured);
+const isTranslationAvailable = computed(() => capabilities.value.translationEnabled);
+const translationStatusMessage = computed(() => getTranslationStatusMessage(capabilities.value, t));
 
 function formatSupportedExtensions() {
   return config.value.supportedExtensions.join(", ");
@@ -185,9 +203,7 @@ function validateSelectedFiles(selectedFiles: File[]): string {
 }
 
 function applyDefaultTargetLanguage() {
-  targetLangs.value = isTranslationAvailable.value
-    ? config.value.defaultTargetLanguage || "Traditional Chinese"
-    : "Original";
+  targetLangs.value = capabilities.value.defaultTargetLanguage || "Original";
 }
 
 function onFilesChange(e: Event) {
@@ -202,11 +218,15 @@ function onFilesChange(e: Event) {
 async function onSubmit() {
   validationError.value = validateSelectedFiles(files.value);
   if (files.value.length === 0 || validationError.value) return;
+  if (translationTargetsRequested(targetLangs.value) && !isTranslationAvailable.value) {
+    validationError.value = translationStatusMessage.value;
+    return;
+  }
   submitting.value = true;
   
   const fd = new FormData();
   files.value.forEach((file) => fd.append("files", file));
-  fd.append("target_langs", isTranslationAvailable.value ? targetLangs.value : "Original");
+  fd.append("target_langs", translationTargetsRequested(targetLangs.value) ? targetLangs.value : "Original");
   fd.append("subtitle_format", subtitleFormat.value);
   fd.append("burn_subtitles", String(burnSubtitles.value));
   fd.append("remove_silence", String(removeSilence.value));
@@ -324,13 +344,14 @@ onUnmounted(() => {
 });
 
 onMounted(async () => {
-  try {
-    config.value = await getAppConfig();
-    applyDefaultTargetLanguage();
-  } catch {
-    // Keep the built-in defaults when config cannot be fetched.
-    applyDefaultTargetLanguage();
+  const [configResult, capabilitiesResult] = await Promise.allSettled([getAppConfig(), getAppCapabilities()]);
+  if (configResult.status === "fulfilled") {
+    config.value = configResult.value;
   }
+  if (capabilitiesResult.status === "fulfilled") {
+    capabilities.value = capabilitiesResult.value;
+  }
+  applyDefaultTargetLanguage();
 });
 </script>
 

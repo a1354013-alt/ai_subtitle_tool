@@ -18,7 +18,7 @@ def test_is_translation_request_false_for_same_language():
     assert not is_translation_request("english", "English")
 
 
-def test_should_translate_only_with_openai_and_translate_language():
+def test_should_translate_only_with_enabled_provider_and_translate_language():
     assert should_translate("English", "Auto", True)
     assert not should_translate("English", "Auto", False)
     assert not should_translate("Original", "Auto", True)
@@ -84,6 +84,7 @@ def test_finalize_pipeline_rejects_translation_target_without_openai_key(monkeyp
     import backend.utils.split_utils as split_utils
     import backend.utils.translate_utils as translate_utils
 
+    monkeypatch.setattr(tasks.settings, "LLM_PROVIDER", "openai")
     monkeypatch.setattr(tasks.settings, "OPENAI_API_KEY", "")
 
     translate_called = {"called": False}
@@ -112,6 +113,55 @@ def test_finalize_pipeline_rejects_translation_target_without_openai_key(monkeyp
         )
 
     assert translate_called["called"] is False
+
+
+def test_finalize_pipeline_allows_ollama_without_openai_key(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+    import backend.utils.split_utils as split_utils
+    import backend.utils.translate_utils as translate_utils
+
+    monkeypatch.setattr(tasks.settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(tasks.settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(tasks.settings, "OLLAMA_MODEL", "gemma3:12b")
+    monkeypatch.setattr(tasks, "prepare_segment_results_for_merge", lambda results: results)
+    monkeypatch.setattr(split_utils, "merge_segments_subtitles", lambda results: results)
+    monkeypatch.setattr(
+        tasks,
+        "ensure_translation_available",
+        lambda _langs: SimpleNamespace(translation_enabled=True),
+    )
+
+    def fake_translate_segments(*_args, **_kwargs):
+        return {"Traditional Chinese": ["哈囉"]}, []
+
+    def fake_generate_bilingual_srt(_segments, _translated_texts, output_path):
+        Path(output_path).write_text("ok", encoding="utf-8")
+        return output_path
+
+    monkeypatch.setattr(translate_utils, "translate_segments", fake_translate_segments)
+    monkeypatch.setattr(translate_utils, "generate_bilingual_srt", fake_generate_bilingual_srt)
+
+    class DummyStorage:
+        def upload_file(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(tasks, "get_storage_backend", lambda: DummyStorage())
+
+    video_path = tmp_path / "input.mp4"
+    video_path.write_bytes(b"dummy content")
+
+    result = tasks.finalize_pipeline(
+        [SimpleNamespace(text="hello", start=0.0, end=1.0)],
+        str(video_path),
+        {
+            "business_id": "task1",
+            "target_langs": ["Traditional Chinese"],
+            "subtitle_format": "srt",
+            "burn_subtitles": False,
+        },
+    )
+
+    assert result["translations"][0]["translated"] is True
 
 
 def test_storage_upload_optional_failure_becomes_warning(monkeypatch):
