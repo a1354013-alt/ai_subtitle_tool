@@ -320,7 +320,7 @@ def main() -> None:
         warn(f"Redis check failed: {exc}")
 
     try:
-    check_translation_provider()
+        check_translation_provider()
     except Exception as exc:
         warn(f"OpenAI API key check failed: {exc}")
 

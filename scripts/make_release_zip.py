@@ -12,6 +12,7 @@ EXCLUDED_DIR_NAMES = frozenset({
     ".git",
     ".github",
     ".vscode",
+    ".tmp",
     "__pycache__",
     "node_modules",
     "dist",
@@ -23,6 +24,7 @@ EXCLUDED_DIR_NAMES = frozenset({
     "outputs",
     "temp",
     "tmp",
+    "data_tmp",
     "segments",
     "release_out",
     "release_pkg",
@@ -96,41 +98,50 @@ def _is_excluded(rel_posix: str) -> bool:
 def build_release_zip(repo_root: Path, out_path: Path) -> None:
     repo_root = repo_root.resolve()
     out_path = out_path.resolve()
-    try:
-        out_rel = out_path.relative_to(repo_root).as_posix()
-    except ValueError:
-        out_rel = None
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if out_path.exists():
         out_path.unlink()
 
-    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        # Use os.walk instead of rglob to prune directories before descending
+    try:
+        out_rel_posix = out_path.relative_to(repo_root).as_posix()
+    except ValueError:
+        out_rel_posix = None
+
+    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for dirpath, dirnames, filenames in os.walk(repo_root):
             # Prune excluded directories in-place to prevent descending into them
-            dirnames[:] = [
-                d for d in dirnames
-                if d not in EXCLUDED_DIR_NAMES
-            ]
-            
+            dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_NAMES]
+
             for filename in filenames:
                 abs_path = Path(dirpath) / filename
                 rel_path = abs_path.relative_to(repo_root)
                 rel_posix = rel_path.as_posix()
 
-                if out_rel is not None and rel_posix == out_rel:
+                # Skip the output zip file itself
+                if out_rel_posix is not None and rel_posix == out_rel_posix:
                     continue
+                
+                # Skip if any top-level directory part is excluded
+                parts = rel_posix.split("/")
+                if parts[0] in EXCLUDED_DIR_NAMES:
+                    continue
+                
+                # Skip environment files and other excluded content
                 if _is_env_file(rel_posix):
                     continue
                 if _is_excluded(rel_posix):
                     continue
 
-                archive.write(abs_path, rel_posix)
+                zf.write(abs_path, rel_posix)
 
 
 def _assert_release_zip_clean(out_path: Path) -> None:
     with zipfile.ZipFile(out_path, "r") as archive:
         names = archive.namelist()
+
+    forbidden_dir_names = {"tmp", "temp", "data_tmp", "uploads", "outputs"}
 
     required = {
         "README.md",
@@ -147,6 +158,10 @@ def _assert_release_zip_clean(out_path: Path) -> None:
 
     for name in names:
         normalized = name.lstrip("./")
+        # Check if any forbidden directory is in the path
+        parts = normalized.split("/")
+        if parts[0] in forbidden_dir_names:
+            raise SystemExit(f"release zip contains forbidden content: {normalized}")
         if _is_env_file(normalized) or _is_excluded(normalized):
             raise SystemExit(f"release zip contains forbidden content: {normalized}")
 
