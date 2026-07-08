@@ -422,6 +422,35 @@ async def test_subtitle_get_put_and_download_vtt(app_client, monkeypatch: pytest
 
 
 @pytest.mark.anyio
+async def test_update_subtitle_deletes_stale_s3_final_video(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "22222222-2222-2222-2222-222222222222"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}_English.srt").write_text("hello", encoding="utf-8")
+
+    deleted: list[str] = []
+
+    class RecordingStorage:
+        def delete_file(self, remote_path: str) -> bool:
+            deleted.append(remote_path)
+            return True
+
+    monkeypatch.setattr(main.settings, "STORAGE_BACKEND", "s3")
+    monkeypatch.setattr(main, "get_storage_backend", lambda: RecordingStorage())
+
+    response = await client.put(
+        f"/subtitle/{task_id}",
+        params={"lang": "English"},
+        json={"format": "srt", "content": "UPDATED"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert deleted == [f"{task_id}_final.mp4"]
+    assert any("Stored final video was deleted" in warning for warning in response.json()["warnings"])
+
+
+@pytest.mark.anyio
 async def test_results_manifest_marks_vtt_available_only_when_srt_exists(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
     task_id = "33333333-3333-3333-3333-333333333333"
@@ -459,6 +488,42 @@ async def test_rebuild_final_contract_enqueues(app_client, monkeypatch: pytest.M
     assert status_response.status_code == 200, status_response.text
     assert status_response.json()["task_id"] == rebuild_task_id
     assert status_response.json()["status"] == "PENDING"
+
+
+@pytest.mark.anyio
+async def test_rebuild_final_history_failure_does_not_return_queued(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "44444444-4444-4444-4444-444444444444"
+
+    class FailingHistory:
+        def upsert_created(self, *_args, **_kwargs):
+            raise RuntimeError("sqlite unavailable")
+
+    monkeypatch.setattr(main, "TASK_HISTORY", FailingHistory())
+
+    response = await client.post(f"/tasks/{task_id}/rebuild-final", params={"lang": "Traditional_Chinese", "format": "ass"})
+    assert response.status_code == 500, response.text
+    body = response.json()
+    assert body["detail"] == "Failed to record rebuild task history"
+    assert body.get("status") != "queued"
+
+
+@pytest.mark.anyio
+async def test_rebuild_final_enqueue_failure_marks_history_failure(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "44444444-4444-4444-4444-444444444444"
+
+    def _fail_enqueue(*_args, **_kwargs):
+        raise RuntimeError("broker unavailable")
+
+    monkeypatch.setattr(main, "_enqueue_rebuild_final_task", _fail_enqueue)
+
+    response = await client.post(f"/tasks/{task_id}/rebuild-final", params={"lang": "Traditional_Chinese", "format": "ass"})
+    assert response.status_code == 503, response.text
+
+    entries = main.TASK_HISTORY.list_recent(limit=1)
+    assert len(entries) == 1
+    assert entries[0].status == "FAILURE"
 
 
 @pytest.mark.anyio

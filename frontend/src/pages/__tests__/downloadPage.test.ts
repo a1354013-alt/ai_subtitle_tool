@@ -27,6 +27,9 @@ function flush() {
 }
 
 describe("DownloadPage", () => {
+  const originalTaskId = "44444444-4444-4444-4444-444444444444";
+  const rebuildTaskId = "66666666-6666-6666-6666-666666666666";
+
   beforeEach(() => {
     mockRebuildFinalVideo.mockReset();
     mockRouterPush.mockReset();
@@ -182,12 +185,12 @@ describe("DownloadPage", () => {
     vi.spyOn(result, "fetchManifest").mockResolvedValue(result.manifest);
     mockRebuildFinalVideo.mockResolvedValueOnce({
       status: "queued",
-      task_id: "t",
-      rebuild_task_id: "rebuild_t_123",
+      task_id: originalTaskId,
+      rebuild_task_id: rebuildTaskId,
     });
 
     const wrapper = mount(DownloadPage, {
-      props: { taskId: "t" },
+      props: { taskId: originalTaskId },
       global: { stubs: { RouterLink: true } },
     });
 
@@ -197,7 +200,7 @@ describe("DownloadPage", () => {
     await rebuildButton!.trigger("click");
     await flush();
 
-    expect(mockRebuildFinalVideo).toHaveBeenCalledWith("t", "English", "srt");
-    expect(mockRouterPush).toHaveBeenCalledWith({ name: "task", params: { taskId: "rebuild_t_123" } });
+    expect(mockRebuildFinalVideo).toHaveBeenCalledWith(originalTaskId, "English", "srt");
+    expect(mockRouterPush).toHaveBeenCalledWith({ name: "task", params: { taskId: rebuildTaskId } });
   });
 });

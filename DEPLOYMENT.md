@@ -107,6 +107,8 @@ python scripts/verify_release_zip.py release.zip
 
 `python scripts/verify_delivery.py --full` is the pre-release closed-loop check. It runs Python version validation, backend dependency preflight, backend compile/tests, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, `npm audit --omit=dev`, then rebuilds and re-validates the release zip.
 
+Local storage is the fully supported storage mode for release deployments. `STORAGE_BACKEND=s3` is experimental; rebuild-final uploads rebuilt `{task_id}_final.mp4` to object storage, subtitle edits attempt to delete stale stored final videos, and `S3_UPLOAD_REQUIRED=true` makes rebuild upload failures fail the task.
+
 If backend dependencies are missing, verification stops before pytest and prints:
 
 ```txt

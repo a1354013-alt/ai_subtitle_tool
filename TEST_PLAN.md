@@ -126,5 +126,6 @@ Then:
 - Upload a short MP4
 - Verify status progresses to `SUCCESS`
 - Verify results show subtitles + final video, and that `final.mp4` burns only the first selected subtitle language while other languages remain downloadable as subtitle files.
-- Edit a subtitle line and verify the UI reflects updated content
+- Edit a subtitle line and verify the UI reflects updated content; the existing final video should be invalidated until the explicit rebuild action is used.
+- From Downloads, trigger the explicit rebuild action and verify the app navigates to the queued rebuild task status page. On success, subtitle/download links should point back to the original task results.
 - Download final video and subtitle files

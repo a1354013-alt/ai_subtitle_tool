@@ -283,8 +283,10 @@ def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> 
     logger.warning("process_video_task has no apply_async; skipping enqueue for task_id=%s", task_id)
 
 
-def _enqueue_rebuild_final_task(task_id: str, lang_suffix: str, subtitle_format: str) -> str:
-    rebuild_task_id = str(uuid.uuid4())
+def _enqueue_rebuild_final_task(
+    task_id: str, lang_suffix: str, subtitle_format: str, rebuild_task_id: str | None = None
+) -> str:
+    rebuild_task_id = rebuild_task_id or str(uuid.uuid4())
     if _is_test_environment():
         logger.info("Skipping Celery rebuild enqueue in test environment for task_id=%s", task_id)
         return rebuild_task_id
@@ -779,7 +781,7 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
     if subtitle_format not in ("ass", "srt"):
         raise HTTPException(status_code=400, detail="format must be 'ass' or 'srt'")
 
-    rebuild_task_id = _enqueue_rebuild_final_task(task_id=task_id, lang_suffix=lang_suffix, subtitle_format=subtitle_format)
+    rebuild_task_id = str(uuid.uuid4())
     try:
         TASK_HISTORY.upsert_created(
             task_id=rebuild_task_id,
@@ -787,7 +789,30 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
             status=TaskStatusEnum.PENDING.value,
         )
     except Exception:
-        logger.warning("Failed to record rebuild task history (non-fatal): %s", rebuild_task_id, exc_info=True)
+        logger.error("Failed to record rebuild task history before enqueue: %s", rebuild_task_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to record rebuild task history") from None
+
+    try:
+        _enqueue_rebuild_final_task(
+            task_id=task_id,
+            lang_suffix=lang_suffix,
+            subtitle_format=subtitle_format,
+            rebuild_task_id=rebuild_task_id,
+        )
+    except HTTPException:
+        try:
+            TASK_HISTORY.update_status(task_id=rebuild_task_id, status=TaskStatusEnum.FAILURE.value)
+        except Exception:
+            logger.warning("Failed to mark rebuild task history as failed: %s", rebuild_task_id, exc_info=True)
+        raise
+    except Exception:
+        logger.error("Failed to enqueue rebuild task: %s", rebuild_task_id, exc_info=True)
+        try:
+            TASK_HISTORY.update_status(task_id=rebuild_task_id, status=TaskStatusEnum.FAILURE.value)
+        except Exception:
+            logger.warning("Failed to mark rebuild task history as failed: %s", rebuild_task_id, exc_info=True)
+        raise HTTPException(status_code=503, detail="Failed to enqueue rebuild task") from None
+
     return {"status": "queued", "task_id": task_id, "rebuild_task_id": rebuild_task_id}
 
 
@@ -1256,6 +1281,20 @@ async def update_subtitle(task_id: str, edit: SubtitleEditRequest, lang: str = Q
         except OSError:
             logger.warning("Failed to delete final video after subtitle update: %s", final_video_path, exc_info=True)
             result["warnings"].append("Subtitle updated but final video could not be deleted.")
+
+    if settings.STORAGE_BACKEND == "s3":
+        try:
+            deleted = get_storage_backend().delete_file(f"{task_id}_final.mp4")
+            if deleted:
+                result["warnings"].append(
+                    "Stored final video was deleted to prevent using old subtitles. "
+                    "Use rebuild to generate a fresh final video."
+                )
+            else:
+                result["warnings"].append("Subtitle updated but stored final video could not be deleted.")
+        except Exception:
+            logger.warning("Failed to delete stored final video after subtitle update: %s", task_id, exc_info=True)
+            result["warnings"].append("Subtitle updated but stored final video could not be deleted.")
 
     return result
 

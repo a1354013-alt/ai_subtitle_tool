@@ -7,7 +7,7 @@ Main pages:
 - Upload: create task (`POST /upload`)
 - Task status: poll status (`GET /status/{task_id}`)
 - Subtitles: fetch/update (`GET/PUT /subtitle/{task_id}?lang=...&format=...`)
-- Downloads: show existing outputs (`GET /results/{task_id}`, `GET /download/{task_id}?...`)
+- Downloads: show existing outputs (`GET /results/{task_id}`, `GET /download/{task_id}?...`) and offer an explicit final-video rebuild action (`POST /tasks/{task_id}/rebuild-final`)
 
 ## Requirements
 
@@ -57,6 +57,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8891
 ## Business Rules (UI)
 
 - Subtitle editing updates only the subtitle file; it does NOT rebuild/burn the video.
-- Downloads page only downloads existing outputs; it must not trigger background rebuild.
+- Downloads page may enqueue a background rebuild only when the user clicks the explicit rebuild action.
+- Rebuild status uses the queued rebuild task id, while success actions link back to the original task results.
 - Subtitles/download actions always use an explicit `lang` from manifest / selector (localStorage is UI preference only).
 - Status warnings are non-fatal and are shown separately from errors.

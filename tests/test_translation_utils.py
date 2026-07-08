@@ -192,3 +192,64 @@ def test_storage_upload_required_failure_raises(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Object storage upload failed"):
         tasks._record_storage_upload(FailingStorage(), "local", "remote", [])
+
+
+def test_rebuild_final_uploads_rebuilt_video_to_storage(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+    import backend.utils.subtitle_video_utils as subtitle_video_utils
+
+    task_id = "77777777-7777-7777-7777-777777777777"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    (upload_dir / f"{task_id}.mp4").write_bytes(b"video")
+    (upload_dir / f"{task_id}_English.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+
+    uploads: list[tuple[str, str]] = []
+
+    class RecordingStorage:
+        def upload_file(self, local_path, remote_path):
+            uploads.append((local_path, remote_path))
+            return True
+
+    def fake_burn(_video_path, _subtitle_path, output_path):
+        Path(output_path).write_bytes(b"rebuilt")
+
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(tasks.settings, "STORAGE_BACKEND", "s3")
+    monkeypatch.setattr(tasks.settings, "S3_UPLOAD_REQUIRED", True)
+    monkeypatch.setattr(tasks, "get_storage_backend", lambda: RecordingStorage())
+    monkeypatch.setattr(subtitle_video_utils, "burn_subtitles", fake_burn)
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    result = tasks.rebuild_final_video_task.run(task_id, "English", "srt")
+
+    assert result == {"warnings": [], "result_task_id": task_id}
+    assert uploads == [(str(upload_dir / f"{task_id}_final.mp4"), f"{task_id}_final.mp4")]
+
+
+def test_rebuild_final_required_storage_upload_failure_fails_task(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+    import backend.utils.subtitle_video_utils as subtitle_video_utils
+
+    task_id = "88888888-8888-8888-8888-888888888888"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    (upload_dir / f"{task_id}.mp4").write_bytes(b"video")
+    (upload_dir / f"{task_id}_English.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+
+    class FailingStorage:
+        def upload_file(self, *_args, **_kwargs):
+            return False
+
+    def fake_burn(_video_path, _subtitle_path, output_path):
+        Path(output_path).write_bytes(b"rebuilt")
+
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(tasks.settings, "STORAGE_BACKEND", "s3")
+    monkeypatch.setattr(tasks.settings, "S3_UPLOAD_REQUIRED", True)
+    monkeypatch.setattr(tasks, "get_storage_backend", lambda: FailingStorage())
+    monkeypatch.setattr(subtitle_video_utils, "burn_subtitles", fake_burn)
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    with pytest.raises(RuntimeError, match=f"Object storage upload failed for {task_id}_final.mp4"):
+        tasks.rebuild_final_video_task.run(task_id, "English", "srt")

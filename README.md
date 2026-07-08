@@ -311,6 +311,7 @@ Important variables:
 - `S3_SECRET_KEY`
 - `S3_REGION`
 - `S3_BUCKET`
+- `S3_UPLOAD_REQUIRED`
 - `REQUIRE_AUTH_TOKEN` enables token auth for non-health API routes. Send either `Authorization: Bearer <token>` or `X-API-Token: <token>`.
 - `AUTH_TOKEN` is required when `REQUIRE_AUTH_TOKEN=true`.
 - `RATE_LIMIT_PER_IP` limits requests per IP per hour. `0` disables the middleware limit for local development; use a positive integer in production.
@@ -331,6 +332,8 @@ Storage backend selection is explicit:
 3. Any other `STORAGE_BACKEND` value fails fast with a configuration error.
 
 Do not rely on `S3_BUCKET` alone to enable S3 storage.
+
+Local storage is the fully supported storage mode. S3 storage is experimental, but current rebuild-final behavior uploads rebuilt `{task_id}_final.mp4` back to object storage, and subtitle edits attempt to delete the stale stored final video before the user rebuilds. When `S3_UPLOAD_REQUIRED=true`, failed S3 upload during rebuild fails the rebuild task instead of returning a successful result with stale storage.
 
 Frontend example: [frontend/.env.example](frontend/.env.example)
 
@@ -405,7 +408,7 @@ Response includes:
 - Real transcription and translation are mocked in tests; the default suite does not call external APIs.
 - Batch ZIP names include the sanitized original filename, task id, and language suffix to avoid collisions when multiple target languages are generated.
 - Batch ZIP includes VTT subtitles generated from SRT using the same conversion path as single-file VTT downloads.
-- **S3 storage is experimental**; local file storage is the default and fully supported.
+- **S3 storage is experimental**; local file storage is the default and fully supported. Rebuild-final uploads rebuilt final videos to S3, and subtitle edits invalidate stale S3 final videos on a best-effort basis.
 
 ## Portfolio Highlights
 

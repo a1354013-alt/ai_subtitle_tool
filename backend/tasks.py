@@ -399,5 +399,10 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
     out_path = f"{base_path}_final.mp4"
     self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Rebuilding final video..."})
     burn_subtitles(video_path, subtitle_path, out_path)
+
+    warnings: list[str] = []
+    storage = get_storage_backend()
+    _record_storage_upload(storage, out_path, f"{task_id}_final.mp4", warnings)
+
     self.update_state(state="PROGRESS", meta={"progress": 100, "status": "Completed"})
-    return {"warnings": [], "result_task_id": task_id}
+    return {"warnings": list(dict.fromkeys(warnings)), "result_task_id": task_id}

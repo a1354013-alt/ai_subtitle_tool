@@ -38,16 +38,18 @@ describe("TaskStatusPage warnings", () => {
   });
 
   it("uses result_task_id for success action links when present", () => {
+    const rebuildTaskId = "66666666-6666-6666-6666-666666666666";
+    const originalTaskId = "44444444-4444-4444-4444-444444444444";
     const pinia = createPinia();
     setActivePinia(pinia);
     const store = useTaskStore();
     store.$patch({
-      taskId: "rebuild-task",
+      taskId: rebuildTaskId,
       status: "SUCCESS",
       progress: 100,
       message: "Completed",
-      result_task_id: "original-task",
-      result_url: "/results/original-task",
+      result_task_id: originalTaskId,
+      result_url: `/results/${originalTaskId}`,
       warnings: [],
       error: null,
       pollingTimer: null,
@@ -57,7 +59,7 @@ describe("TaskStatusPage warnings", () => {
     vi.spyOn(store, "stopPolling").mockImplementation(() => {});
 
     const wrapper = mount(TaskStatusPage, {
-      props: { taskId: "rebuild-task" },
+      props: { taskId: rebuildTaskId },
       global: {
         plugins: [pinia],
         stubs: { RouterLink: true },
@@ -65,7 +67,7 @@ describe("TaskStatusPage warnings", () => {
     });
 
     const links = wrapper.findAllComponents({ name: "RouterLink" });
-    expect(links.at(1)?.props("to")).toEqual({ name: "subtitles", params: { taskId: "original-task" } });
-    expect(links.at(2)?.props("to")).toEqual({ name: "downloads", params: { taskId: "original-task" } });
+    expect(links.at(1)?.props("to")).toEqual({ name: "subtitles", params: { taskId: originalTaskId } });
+    expect(links.at(2)?.props("to")).toEqual({ name: "downloads", params: { taskId: originalTaskId } });
   });
 });
