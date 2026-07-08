@@ -5,7 +5,9 @@ import json
 import time
 import os
 import shutil
+import sys
 import tempfile
+import types
 import unittest
 import uuid
 from pathlib import Path
@@ -629,10 +631,95 @@ class TestDiarizationObservability(unittest.TestCase):
         # This test must be runnable without installing heavy diarization deps.
         from backend.utils.diarization_utils import diarize_audio
 
-        segments, warning = diarize_audio(audio_path="dummy.wav", hf_token="token")
+        original_import = __import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pyannote.audio":
+                raise ImportError("pyannote not installed")
+            return original_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            segments, warning = diarize_audio(audio_path="dummy.wav", hf_token="token")
+
         self.assertEqual(segments, [])
         self.assertTrue(isinstance(warning, str) and len(warning) > 0)
         self.assertIn("pyannote", warning.lower())
+
+    def test_diarize_audio_falls_back_to_legacy_pyannote_auth_argument(self):
+        from backend.utils.diarization_utils import diarize_audio
+
+        calls = []
+
+        class FakePipeline:
+            @classmethod
+            def from_pretrained(cls, model_name, **kwargs):
+                calls.append((model_name, kwargs))
+                if "token" in kwargs:
+                    raise TypeError("unexpected keyword argument 'token'")
+                return cls()
+
+            def to(self, _device):
+                return self
+
+            def __call__(self, _audio_path):
+                return types.SimpleNamespace(itertracks=lambda yield_label: [])
+
+        pyannote_module = types.ModuleType("pyannote")
+        pyannote_module.__path__ = []
+        audio_module = types.ModuleType("pyannote.audio")
+        audio_module.Pipeline = FakePipeline
+        pyannote_module.audio = audio_module
+
+        torch_module = types.ModuleType("torch")
+        torch_module.cuda = types.SimpleNamespace(is_available=lambda: False)
+        torch_module.device = lambda name: name
+
+        with patch.dict(
+            sys.modules,
+            {
+                "pyannote": pyannote_module,
+                "pyannote.audio": audio_module,
+                "torch": torch_module,
+            },
+        ):
+            segments, warning = diarize_audio(audio_path="dummy.wav", hf_token="token")
+
+        self.assertEqual(segments, [])
+        self.assertIsNone(warning)
+        self.assertEqual(calls[0][1], {"token": "token"})
+        self.assertEqual(calls[1][1], {"use_auth_token": "token"})
+
+    def test_diarize_audio_reports_pyannote_incompatible_api(self):
+        from backend.utils.diarization_utils import diarize_audio
+
+        class FakePipeline:
+            @classmethod
+            def from_pretrained(cls, _model_name, **_kwargs):
+                raise TypeError("bad signature")
+
+        pyannote_module = types.ModuleType("pyannote")
+        pyannote_module.__path__ = []
+        audio_module = types.ModuleType("pyannote.audio")
+        audio_module.Pipeline = FakePipeline
+        pyannote_module.audio = audio_module
+
+        torch_module = types.ModuleType("torch")
+        torch_module.cuda = types.SimpleNamespace(is_available=lambda: False)
+        torch_module.device = lambda name: name
+
+        with patch.dict(
+            sys.modules,
+            {
+                "pyannote": pyannote_module,
+                "pyannote.audio": audio_module,
+                "torch": torch_module,
+            },
+        ):
+            segments, warning = diarize_audio(audio_path="dummy.wav", hf_token="token")
+
+        self.assertEqual(segments, [])
+        self.assertIn("pyannote", warning.lower())
+        self.assertIn("incompatible", warning.lower())
 
 
 class TestAssEscaping(unittest.TestCase):

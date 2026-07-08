@@ -457,6 +457,7 @@ async def test_rebuild_final_contract_enqueues(app_client, monkeypatch: pytest.M
     r = await client.post(f"/tasks/{task_id}/rebuild-final", params={"lang": "Traditional_Chinese", "format": "ass"})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "queued"
+    assert r.json()["task_id"] == task_id
     assert called == {"task_id": task_id, "lang_suffix": "Traditional_Chinese", "subtitle_format": "ass"}
     assert r.json()["rebuild_task_id"].startswith(f"rebuild_{task_id}_")
 

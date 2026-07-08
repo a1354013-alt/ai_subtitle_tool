@@ -152,8 +152,8 @@ async function onRebuildFinal() {
   try {
     const langInfo = files.value.find((f) => f.lang === selectedLang.value);
     const format = langInfo?.ass ? "ass" : "srt";
-    await rebuildFinalVideo(taskId.value, selectedLang.value, format);
-    await router.push({ name: "task", params: { taskId: taskId.value } });
+    const response = await rebuildFinalVideo(taskId.value, selectedLang.value, format);
+    await router.push({ name: "task", params: { taskId: response.rebuild_task_id } });
   } catch (e) {
     res.error = e as any;
   } finally {

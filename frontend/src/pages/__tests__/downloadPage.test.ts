@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
 
-const { mockRebuildFinalVideo } = vi.hoisted(() => ({
+const { mockRebuildFinalVideo, mockRouterPush } = vi.hoisted(() => ({
   mockRebuildFinalVideo: vi.fn(),
+  mockRouterPush: vi.fn(),
 }));
 
 vi.mock("@/api/tasks", () => ({
@@ -14,7 +15,7 @@ vi.mock("vue-router", async () => {
   const actual = await vi.importActual<any>("vue-router");
   return {
     ...actual,
-    useRouter: () => ({ push: vi.fn() }),
+    useRouter: () => ({ push: mockRouterPush }),
   };
 });
 
@@ -28,6 +29,7 @@ function flush() {
 describe("DownloadPage", () => {
   beforeEach(() => {
     mockRebuildFinalVideo.mockReset();
+    mockRouterPush.mockReset();
   });
 
   it("shows a clear note when final.mp4 is missing", async () => {
@@ -160,5 +162,42 @@ describe("DownloadPage", () => {
 
     expect(mockRebuildFinalVideo).toHaveBeenCalledOnce();
     expect(wrapper.text()).toContain("Rebuild failed");
+    expect(mockRouterPush).not.toHaveBeenCalled();
+  });
+
+  it("navigates to the queued rebuild task after rebuild succeeds", async () => {
+    setActivePinia(createPinia());
+    localStorage.setItem("ai_subtitle_tool_preferred_lang", "English");
+    const result = useResultStore();
+    result.manifest = {
+      task_id: "t",
+      task_status: "SUCCESS",
+      has_video: false,
+      subtitle_languages: ["English"],
+      available_files: [{ lang: "English", display_name: "English", ass: false, srt: true, translated: true }],
+      warnings: [],
+    };
+    result.loading = false;
+    result.error = null;
+    vi.spyOn(result, "fetchManifest").mockResolvedValue(result.manifest);
+    mockRebuildFinalVideo.mockResolvedValueOnce({
+      status: "queued",
+      task_id: "t",
+      rebuild_task_id: "rebuild_t_123",
+    });
+
+    const wrapper = mount(DownloadPage, {
+      props: { taskId: "t" },
+      global: { stubs: { RouterLink: true } },
+    });
+
+    await flush();
+    const rebuildButton = wrapper.findAll("button").find((button) => button.text().includes("Rebuild"));
+    expect(rebuildButton).toBeTruthy();
+    await rebuildButton!.trigger("click");
+    await flush();
+
+    expect(mockRebuildFinalVideo).toHaveBeenCalledWith("t", "English", "srt");
+    expect(mockRouterPush).toHaveBeenCalledWith({ name: "task", params: { taskId: "rebuild_t_123" } });
   });
 });
