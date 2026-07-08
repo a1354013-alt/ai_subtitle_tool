@@ -20,14 +20,14 @@
       <RouterLink
         v-if="isSuccess"
         class="btn primary"
-        :to="{ name: 'subtitles', params: { taskId } }"
+        :to="{ name: 'subtitles', params: { taskId: resultTaskId } }"
       >
         {{ $t('editor.title') }}
       </RouterLink>
       <RouterLink
         v-if="isSuccess"
         class="btn primary"
-        :to="{ name: 'downloads', params: { taskId } }"
+        :to="{ name: 'downloads', params: { taskId: resultTaskId } }"
       >
         {{ $t('editor.download') }}
       </RouterLink>
@@ -48,6 +48,7 @@ const taskId = computed(() => props.taskId);
 
 const task = useTaskStore();
 const isSuccess = computed(() => String(task.status).toUpperCase() === "SUCCESS");
+const resultTaskId = computed(() => task.result_task_id || taskId.value);
 
 watch(
   taskId,

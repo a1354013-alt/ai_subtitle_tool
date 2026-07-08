@@ -36,4 +36,36 @@ describe("TaskStatusPage warnings", () => {
     expect(wrapper.text()).toContain("a");
     expect(wrapper.text()).toContain("b");
   });
+
+  it("uses result_task_id for success action links when present", () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useTaskStore();
+    store.$patch({
+      taskId: "rebuild-task",
+      status: "SUCCESS",
+      progress: 100,
+      message: "Completed",
+      result_task_id: "original-task",
+      result_url: "/results/original-task",
+      warnings: [],
+      error: null,
+      pollingTimer: null,
+    });
+
+    vi.spyOn(store, "startPolling").mockResolvedValue(undefined as any);
+    vi.spyOn(store, "stopPolling").mockImplementation(() => {});
+
+    const wrapper = mount(TaskStatusPage, {
+      props: { taskId: "rebuild-task" },
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: true },
+      },
+    });
+
+    const links = wrapper.findAllComponents({ name: "RouterLink" });
+    expect(links.at(1)?.props("to")).toEqual({ name: "subtitles", params: { taskId: "original-task" } });
+    expect(links.at(2)?.props("to")).toEqual({ name: "downloads", params: { taskId: "original-task" } });
+  });
 });

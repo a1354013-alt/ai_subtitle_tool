@@ -6,6 +6,7 @@ export type TaskStatusResponse = {
   progress: number;
   message?: string | null;
   result_url?: string | null;
+  result_task_id?: string | null;
   warnings: string[];
   error_code?: string;
   suggestion?: string;
@@ -20,4 +21,3 @@ export type RecentTask = {
   created_at: string;
   duration_seconds?: number | null;
 };
-

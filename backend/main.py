@@ -284,7 +284,7 @@ def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> 
 
 
 def _enqueue_rebuild_final_task(task_id: str, lang_suffix: str, subtitle_format: str) -> str:
-    rebuild_task_id = f"rebuild_{task_id}_{int(time.time() * 1000)}"
+    rebuild_task_id = str(uuid.uuid4())
     if _is_test_environment():
         logger.info("Skipping Celery rebuild enqueue in test environment for task_id=%s", task_id)
         return rebuild_task_id
@@ -644,6 +644,7 @@ async def get_status(task_id: str):
     progress = 0
     message = ""
     result_url = None
+    result_task_id = None
     warnings: List[str] = []
     error_code: Optional[str] = None
     suggestion: Optional[str] = None
@@ -659,15 +660,19 @@ async def get_status(task_id: str):
     elif status == "SUCCESS":
         progress = 100
         message = "Completed"
-        
+
+        if isinstance(task_result.result, dict):
+            raw_result_task_id = task_result.result.get("result_task_id")
+            if raw_result_task_id:
+                result_task_id = validate_task_id(str(raw_result_task_id))
+            warnings.extend(task_result.result.get("warnings", []) or [])
+
+        result_owner_task_id = result_task_id or task_id
         storage = get_storage_backend()
         # Try to get S3 URL first, fallback to local results page
-        result_url = storage.get_url(f"{task_id}_final.mp4")
+        result_url = storage.get_url(f"{result_owner_task_id}_final.mp4")
         if not result_url:
-            result_url = f"/results/{task_id}"
-            
-        if isinstance(task_result.result, dict):
-            warnings.extend(task_result.result.get("warnings", []) or [])
+            result_url = f"/results/{result_owner_task_id}"
         status = TaskStatusEnum.SUCCESS
     elif status == "FAILURE":
         if isinstance(task_result.info, dict) and task_result.info.get("error_code"):
@@ -735,6 +740,7 @@ async def get_status(task_id: str):
         progress=progress,
         message=message,
         result_url=result_url,
+        result_task_id=result_task_id,
         warnings=warnings,
         error_code=error_code,
         suggestion=suggestion,
@@ -774,6 +780,14 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
         raise HTTPException(status_code=400, detail="format must be 'ass' or 'srt'")
 
     rebuild_task_id = _enqueue_rebuild_final_task(task_id=task_id, lang_suffix=lang_suffix, subtitle_format=subtitle_format)
+    try:
+        TASK_HISTORY.upsert_created(
+            task_id=rebuild_task_id,
+            filename=f"Rebuild final video for {task_id}",
+            status=TaskStatusEnum.PENDING.value,
+        )
+    except Exception:
+        logger.warning("Failed to record rebuild task history (non-fatal): %s", rebuild_task_id, exc_info=True)
     return {"status": "queued", "task_id": task_id, "rebuild_task_id": rebuild_task_id}
 
 

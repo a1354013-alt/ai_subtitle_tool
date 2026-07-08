@@ -11,6 +11,7 @@ class TaskStatusResponse(BaseModel):
     progress: int
     message: Optional[str] = None
     result_url: Optional[str] = None
+    result_task_id: Optional[str] = None
     warnings: list[str] = Field(default_factory=list)
     error_code: Optional[str] = None
     suggestion: Optional[str] = None

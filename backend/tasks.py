@@ -400,4 +400,4 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
     self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Rebuilding final video..."})
     burn_subtitles(video_path, subtitle_path, out_path)
     self.update_state(state="PROGRESS", meta={"progress": 100, "status": "Completed"})
-    return {"warnings": []}
+    return {"warnings": [], "result_task_id": task_id}

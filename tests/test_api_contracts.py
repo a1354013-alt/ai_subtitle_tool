@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import re
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -445,21 +446,43 @@ async def test_results_manifest_marks_vtt_available_only_when_srt_exists(app_cli
 async def test_rebuild_final_contract_enqueues(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
     task_id = "44444444-4444-4444-4444-444444444444"
-    called: dict[str, str] = {}
 
-    def _fake_enqueue(task_id: str, lang_suffix: str, subtitle_format: str) -> None:
-        called["task_id"] = task_id
-        called["lang_suffix"] = lang_suffix
-        called["subtitle_format"] = subtitle_format
-        return f"rebuild_{task_id}_123"
-
-    monkeypatch.setattr(main, "_enqueue_rebuild_final_task", _fake_enqueue)
     r = await client.post(f"/tasks/{task_id}/rebuild-final", params={"lang": "Traditional_Chinese", "format": "ass"})
     assert r.status_code == 200, r.text
-    assert r.json()["status"] == "queued"
-    assert r.json()["task_id"] == task_id
-    assert called == {"task_id": task_id, "lang_suffix": "Traditional_Chinese", "subtitle_format": "ass"}
-    assert r.json()["rebuild_task_id"].startswith(f"rebuild_{task_id}_")
+    body = r.json()
+    assert body["status"] == "queued"
+    assert body["task_id"] == task_id
+    rebuild_task_id = body["rebuild_task_id"]
+    assert str(uuid.UUID(rebuild_task_id)) == rebuild_task_id
+
+    status_response = await client.get(f"/status/{rebuild_task_id}")
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["task_id"] == rebuild_task_id
+    assert status_response.json()["status"] == "PENDING"
+
+
+@pytest.mark.anyio
+async def test_rebuild_success_status_points_to_original_result_task(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    original_task_id = "44444444-4444-4444-4444-444444444444"
+    rebuild_task_id = "66666666-6666-6666-6666-666666666666"
+
+    monkeypatch.setattr(
+        main,
+        "_get_async_result",
+        lambda _tid: _make_async_result(
+            "SUCCESS",
+            result={"warnings": [], "result_task_id": original_task_id},
+        ),
+    )
+
+    response = await client.get(f"/status/{rebuild_task_id}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["task_id"] == rebuild_task_id
+    assert body["status"] == "SUCCESS"
+    assert body["result_task_id"] == original_task_id
+    assert body["result_url"] == f"/results/{original_task_id}"
 
 
 @pytest.mark.anyio

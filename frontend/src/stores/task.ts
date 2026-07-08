@@ -17,6 +17,8 @@ export const useTaskStore = defineStore("task", {
     status: "PENDING" as string,
     progress: 0 as number,
     message: "" as string,
+    result_task_id: null as string | null,
+    result_url: null as string | null,
     warnings: [] as string[],
     error: null as APIError | null,
     error_code: "" as string,
@@ -30,6 +32,8 @@ export const useTaskStore = defineStore("task", {
       this.status = "PENDING";
       this.progress = 0;
       this.message = "";
+      this.result_task_id = null;
+      this.result_url = null;
       this.warnings = [];
       this.error = null;
       this.error_code = "";
@@ -78,6 +82,8 @@ export const useTaskStore = defineStore("task", {
       this.status = res.status;
       this.progress = res.progress;
       this.message = res.message ?? "";
+      this.result_task_id = res.result_task_id ?? null;
+      this.result_url = res.result_url ?? null;
       this.warnings = Array.isArray(res.warnings) ? res.warnings : [];
       this.error_code = res.error_code ?? "";
       this.suggestion = res.suggestion ?? "";

@@ -333,8 +333,8 @@ def run_zip_only(repo_root: Path) -> Path:
 
 
 def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
-    run_zip_only(repo_root)
     _ensure_supported_python_version()
+    run_zip_only(repo_root)
     frontend_dir = repo_root / "frontend"
     _print_fast_mode_banner(
         ci_fast=ci_fast,
