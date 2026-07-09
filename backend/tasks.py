@@ -4,18 +4,10 @@ import shutil
 
 try:
     from celery import chord
-    from .celery_app import celery_app
 except ImportError:
     chord = None
 
-    class _NoCelery:
-        def task(self, *args, **kwargs):
-            def _dec(fn):
-                return fn
-
-            return _dec
-
-    celery_app = _NoCelery()
+from .celery_app import celery_app
 
 from .pipeline_segments import (
     SimpleSegment,

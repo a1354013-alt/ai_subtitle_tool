@@ -10,6 +10,24 @@ def test_env_examples_exist_for_docker_delivery():
     assert (REPO_ROOT / "frontend" / ".env.example").exists()
 
 
+def test_backend_env_example_allows_f5_frontend_origin():
+    env_example = (REPO_ROOT / "backend" / ".env.example").read_text(encoding="utf-8")
+    cors_line = next(line for line in env_example.splitlines() if line.startswith("CORS_ORIGINS="))
+    origins = cors_line.split("=", 1)[1].split(",")
+
+    assert "http://127.0.0.1:5173" in origins
+    assert "http://localhost:5173" in origins
+    assert "http://127.0.0.1:3000" in origins
+    assert "http://localhost:3000" in origins
+
+
+def test_start_dev_normalizes_backend_cors_for_f5_origin():
+    start_dev = (REPO_ROOT / "scripts" / "start-dev.ps1").read_text(encoding="utf-8")
+
+    assert "Ensure-BackendCorsOrigins" in start_dev
+    assert "http://127.0.0.1:5173" in start_dev
+
+
 def test_readme_no_longer_references_old_batch_storage_path():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     deployment = (REPO_ROOT / "DEPLOYMENT.md").read_text(encoding="utf-8")

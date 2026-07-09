@@ -72,3 +72,38 @@ def test_frontend_env_api_base_is_forced_to_f5_backend_port():
 def test_frontend_env_api_base_is_added_when_missing():
     updated = dev_bootstrap._ensure_frontend_api_base("VITE_APP_TITLE=AI Subtitle Tool\n")
     assert updated.splitlines()[0] == "VITE_API_BASE_URL=http://127.0.0.1:8891"
+
+
+def test_backend_cors_origins_include_f5_frontend_origin():
+    updated = dev_bootstrap._ensure_backend_cors_origins("CORS_ORIGINS=http://localhost:5173,http://localhost:3000\n")
+    origins = updated.split("=", 1)[1].strip().split(",")
+
+    assert "http://127.0.0.1:5173" in origins
+    assert "http://localhost:5173" in origins
+    assert "http://127.0.0.1:3000" in origins
+    assert "http://localhost:3000" in origins
+
+
+def test_backend_cors_origins_are_added_when_missing():
+    updated = dev_bootstrap._ensure_backend_cors_origins("APP_ENV=development\n")
+    assert updated.splitlines()[0].startswith("CORS_ORIGINS=")
+    assert "http://127.0.0.1:5173" in updated
+
+
+def test_supported_node_20_is_allowed():
+    verify_delivery._ensure_supported_node_version("v20.19.0")
+    assert runtime_requirements.is_supported_node_version("20.0.0") is True
+
+
+@pytest.mark.parametrize("version", ["v22.18.0", "v24.14.0"])
+def test_unsupported_node_versions_are_rejected(version: str):
+    assert runtime_requirements.is_supported_node_version(version) is False
+    message = runtime_requirements.node_version_error_message(version)
+    assert "Node.js 20.x is required." in message
+    assert f"Current version: {version}" in message
+
+    with pytest.raises(verify_delivery.VerificationError) as exc_info:
+        verify_delivery._ensure_supported_node_version(version)
+
+    assert exc_info.value.exit_code == verify_delivery.EXIT_NODE_VERSION_ERROR
+    assert "[node-preflight]" in str(exc_info.value)

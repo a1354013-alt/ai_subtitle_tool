@@ -11,7 +11,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from runtime_requirements import PYTHON_REQUIREMENT_TEXT, is_supported_python_version, python_version_error_message
+from runtime_requirements import (
+    NODE_REQUIREMENT_TEXT,
+    PYTHON_REQUIREMENT_TEXT,
+    is_supported_node_version,
+    is_supported_python_version,
+    node_version_error_message,
+    python_version_error_message,
+)
 
 
 ROOT_DIR = Path(__file__).parent.parent
@@ -23,6 +30,12 @@ ENV_EXAMPLE = BACKEND_DIR / ".env.example"
 FRONTEND_ENV_FILE = FRONTEND_DIR / ".env"
 FRONTEND_ENV_EXAMPLE = FRONTEND_DIR / ".env.example"
 LOCAL_BACKEND_URL = "http://127.0.0.1:8891"
+LOCAL_CORS_ORIGINS = (
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
+)
 
 
 def info(msg: str) -> None:
@@ -121,8 +134,16 @@ def check_node_npm() -> bool:
         error("Node.js and npm are required. Install Node.js 20.x before continuing.")
         return False
 
+    result = subprocess.run([node_path, "--version"], capture_output=True, text=True)
+    version_text = result.stdout.strip()
+    if result.returncode != 0 or not is_supported_node_version(version_text):
+        error(node_version_error_message(version_text))
+        return False
+
     success(f"npm found: {npm_path}")
     success(f"node found: {node_path}")
+    success(f"Node.js {version_text}")
+    info(NODE_REQUIREMENT_TEXT)
     return True
 
 
@@ -146,7 +167,13 @@ def install_frontend_deps() -> bool:
 def create_env_file() -> bool:
     info("Checking environment configuration...")
     if ENV_FILE.exists():
-        success(f"Environment file exists: {ENV_FILE}")
+        content = ENV_FILE.read_text(encoding="utf-8")
+        updated = _ensure_backend_cors_origins(content)
+        if updated != content:
+            ENV_FILE.write_text(updated, encoding="utf-8")
+            success(f"Updated {ENV_FILE} CORS_ORIGINS for local F5 frontend origins")
+        else:
+            success(f"Environment file exists: {ENV_FILE}")
         return True
 
     if not ENV_EXAMPLE.exists():
@@ -161,9 +188,29 @@ def create_env_file() -> bool:
     content = content.replace("REDIS_URL=redis://redis:6379/0", "REDIS_URL=redis://127.0.0.1:6379/0")
     content = content.replace("CELERY_BROKER_URL=redis://redis:6379/0", "CELERY_BROKER_URL=redis://127.0.0.1:6379/0")
     content = content.replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1")
-    ENV_FILE.write_text(content, encoding="utf-8")
+    ENV_FILE.write_text(_ensure_backend_cors_origins(content), encoding="utf-8")
     success(f"Environment file created: {ENV_FILE}")
     return True
+
+
+def _ensure_backend_cors_origins(content: str) -> str:
+    lines = content.splitlines()
+    found = False
+    updated: list[str] = []
+    for line in lines:
+        if line.startswith("CORS_ORIGINS="):
+            raw = line.split("=", 1)[1]
+            origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+            for origin in LOCAL_CORS_ORIGINS:
+                if origin not in origins:
+                    origins.append(origin)
+            updated.append(f"CORS_ORIGINS={','.join(origins)}")
+            found = True
+        else:
+            updated.append(line)
+    if not found:
+        updated.insert(0, f"CORS_ORIGINS={','.join(LOCAL_CORS_ORIGINS)}")
+    return "\n".join(updated).rstrip() + "\n"
 
 
 def _ensure_frontend_api_base(content: str) -> str:

@@ -11,10 +11,48 @@ $FrontendEnv = Join-Path $Root "frontend\.env"
 $FrontendExample = Join-Path $Root "frontend\.env.example"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $BackendUrl = "http://127.0.0.1:8891"
+$LocalCorsOrigins = @(
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000"
+)
 if (-not (Test-Path $Python)) { $Python = "python" }
 $Npm = "npm"
 $NpmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if ($NpmCmd) { $Npm = $NpmCmd.Source }
+
+function Ensure-BackendCorsOrigins {
+    param([string]$Content)
+
+    $lines = $Content -split "\r?\n"
+    $found = $false
+    $updated = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $lines) {
+        if ($line -match "^CORS_ORIGINS=(.*)$") {
+            $found = $true
+            $origins = New-Object System.Collections.Generic.List[string]
+            foreach ($origin in ($Matches[1] -split ",")) {
+                $trimmed = $origin.Trim()
+                if ($trimmed -and -not $origins.Contains($trimmed)) {
+                    $origins.Add($trimmed)
+                }
+            }
+            foreach ($origin in $LocalCorsOrigins) {
+                if (-not $origins.Contains($origin)) {
+                    $origins.Add($origin)
+                }
+            }
+            $updated.Add("CORS_ORIGINS=$($origins -join ',')")
+        } elseif ($line -ne "") {
+            $updated.Add($line)
+        }
+    }
+    if (-not $found) {
+        $updated.Insert(0, "CORS_ORIGINS=$($LocalCorsOrigins -join ',')")
+    }
+    return (($updated -join "`r`n") + "`r`n")
+}
 
 function Ensure-Env {
     if (-not (Test-Path $BackendEnv)) {
@@ -26,6 +64,7 @@ function Ensure-Env {
             $content = $content.Replace("REDIS_URL=redis://redis:6379/0", "REDIS_URL=redis://127.0.0.1:6379/0")
             $content = $content.Replace("CELERY_BROKER_URL=redis://redis:6379/0", "CELERY_BROKER_URL=redis://127.0.0.1:6379/0")
             $content = $content.Replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1")
+            $content = Ensure-BackendCorsOrigins $content
             Set-Content -LiteralPath $BackendEnv -Value $content -Encoding UTF8
             Write-Host "Created backend\.env from backend\.env.example"
         } else {
@@ -47,6 +86,14 @@ function Ensure-Env {
         if ($updatedFrontendContent -ne $frontendContent) {
             Set-Content -LiteralPath $FrontendEnv -Value $updatedFrontendContent -Encoding UTF8
             Write-Host "Updated frontend\.env VITE_API_BASE_URL to $BackendUrl"
+        }
+    }
+    if (Test-Path $BackendEnv) {
+        $backendContent = Get-Content -LiteralPath $BackendEnv -Raw
+        $updatedBackendContent = Ensure-BackendCorsOrigins $backendContent
+        if ($updatedBackendContent -ne $backendContent) {
+            Set-Content -LiteralPath $BackendEnv -Value $updatedBackendContent -Encoding UTF8
+            Write-Host "Updated backend\.env CORS_ORIGINS for local F5 frontend origins"
         }
     }
 }

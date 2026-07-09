@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from make_release_zip import build_release_zip
-from runtime_requirements import is_supported_python_version, python_version_error_message
+from runtime_requirements import is_supported_node_version, is_supported_python_version, node_version_error_message, python_version_error_message
 from verify_docker_config import verify as verify_docker_config
 
 
@@ -103,6 +103,7 @@ FORBIDDEN_ZIP_MARKERS = (
 
 EXIT_PYTHON_VERSION_ERROR = 20
 EXIT_BACKEND_DEPENDENCY_ERROR = 21
+EXIT_NODE_VERSION_ERROR = 22
 
 BACKEND_DEPENDENCY_MODULES = (
     ("celery", "celery"),
@@ -166,6 +167,28 @@ def _ensure_supported_python_version(version_info: tuple[int, int, int] | None =
         raise VerificationError(
             f"[python-preflight] {python_version_error_message(current_version)}",
             exit_code=EXIT_PYTHON_VERSION_ERROR,
+        )
+
+
+def _node_version_text(node_executable: str = "node") -> str:
+    resolved = shutil.which(node_executable) or node_executable
+    completed = subprocess.run([resolved, "--version"], capture_output=True, text=True)
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        raise VerificationError(
+            f"[node-preflight] Node.js 20.x is required. Unable to run node --version"
+            + (f": {stderr}" if stderr else ""),
+            exit_code=EXIT_NODE_VERSION_ERROR,
+        )
+    return completed.stdout.strip()
+
+
+def _ensure_supported_node_version(version_text: str | None = None) -> None:
+    current_version = version_text if version_text is not None else _node_version_text()
+    if not is_supported_node_version(current_version):
+        raise VerificationError(
+            f"[node-preflight] {node_version_error_message(current_version)}",
+            exit_code=EXIT_NODE_VERSION_ERROR,
         )
 
 
@@ -347,6 +370,7 @@ def run_zip_only(repo_root: Path) -> Path:
 
 def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
     _ensure_supported_python_version()
+    _ensure_supported_node_version()
     run_zip_only(repo_root)
     frontend_dir = repo_root / "frontend"
     _print_fast_mode_banner(
