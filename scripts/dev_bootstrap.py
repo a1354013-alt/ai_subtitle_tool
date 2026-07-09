@@ -20,6 +20,9 @@ FRONTEND_DIR = ROOT_DIR / "frontend"
 VENV_DIR = ROOT_DIR / ".venv"
 ENV_FILE = BACKEND_DIR / ".env"
 ENV_EXAMPLE = BACKEND_DIR / ".env.example"
+FRONTEND_ENV_FILE = FRONTEND_DIR / ".env"
+FRONTEND_ENV_EXAMPLE = FRONTEND_DIR / ".env.example"
+LOCAL_BACKEND_URL = "http://127.0.0.1:8891"
 
 
 def info(msg: str) -> None:
@@ -130,7 +133,8 @@ def install_frontend_deps() -> bool:
         success("Frontend dependencies already installed")
         return True
 
-    result = subprocess.run(["npm", "ci"], cwd=FRONTEND_DIR)
+    npm_exe = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+    result = subprocess.run([npm_exe, "ci"], cwd=FRONTEND_DIR)
     if result.returncode != 0:
         error("Frontend dependencies installation failed")
         return False
@@ -159,6 +163,44 @@ def create_env_file() -> bool:
     content = content.replace("CELERY_RESULT_BACKEND=redis://redis:6379/1", "CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1")
     ENV_FILE.write_text(content, encoding="utf-8")
     success(f"Environment file created: {ENV_FILE}")
+    return True
+
+
+def _ensure_frontend_api_base(content: str) -> str:
+    lines = content.splitlines()
+    found = False
+    updated: list[str] = []
+    for line in lines:
+        if line.startswith("VITE_API_BASE_URL="):
+            updated.append(f"VITE_API_BASE_URL={LOCAL_BACKEND_URL}")
+            found = True
+        else:
+            updated.append(line)
+    if not found:
+        updated.insert(0, f"VITE_API_BASE_URL={LOCAL_BACKEND_URL}")
+    return "\n".join(updated).rstrip() + "\n"
+
+
+def create_frontend_env_file() -> bool:
+    info("Checking frontend environment configuration...")
+    if FRONTEND_ENV_FILE.exists():
+        content = FRONTEND_ENV_FILE.read_text(encoding="utf-8")
+        updated = _ensure_frontend_api_base(content)
+        if updated != content:
+            FRONTEND_ENV_FILE.write_text(updated, encoding="utf-8")
+            success(f"Updated {FRONTEND_ENV_FILE} for local backend {LOCAL_BACKEND_URL}")
+        else:
+            success(f"Frontend environment file exists: {FRONTEND_ENV_FILE}")
+        return True
+
+    if FRONTEND_ENV_EXAMPLE.exists():
+        content = FRONTEND_ENV_EXAMPLE.read_text(encoding="utf-8")
+    else:
+        warn(f"Template file not found: {FRONTEND_ENV_EXAMPLE}; creating a minimal frontend .env")
+        content = ""
+
+    FRONTEND_ENV_FILE.write_text(_ensure_frontend_api_base(content), encoding="utf-8")
+    success(f"Frontend environment file created: {FRONTEND_ENV_FILE}")
     return True
 
 
@@ -269,6 +311,7 @@ def print_summary(all_ok: bool) -> None:
     print(f"Backend dependencies: {'ready' if all_ok else 'check errors above'}")
     print(f"Frontend dependencies: {'ready' if (FRONTEND_DIR / 'node_modules').exists() else 'missing'}")
     print(f"Environment file (.env): {'ready' if ENV_FILE.exists() else 'missing'}")
+    print(f"Frontend environment file: {'ready' if FRONTEND_ENV_FILE.exists() else 'missing'}")
     print(
         "FFmpeg: "
         + ("ready" if shutil.which("ffmpeg") and shutil.which("ffprobe") else "missing (required for video processing)")
@@ -307,6 +350,8 @@ def main() -> None:
     if not install_frontend_deps():
         all_ok = False
     if not create_env_file():
+        all_ok = False
+    if not create_frontend_env_file():
         all_ok = False
 
     try:

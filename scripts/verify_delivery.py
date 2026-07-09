@@ -29,12 +29,24 @@ REQUIRED_FILES = {
     "frontend/package.json",
     "requirements.txt",
     "scripts/verify_docker_config.py",
+    "scripts/dev_bootstrap.py",
+    "scripts/dev_start.py",
+    "scripts/start-dev.cmd",
+    "scripts/start-dev.ps1",
+    "scripts/stop-dev.cmd",
+    "scripts/stop-dev.ps1",
     ".vscode/launch.json",
     ".vscode/tasks.json",
     ".vscode/extensions.json",
 }
 
 RELEASE_REQUIRED_FILES = REQUIRED_FILES - {
+    "scripts/dev_bootstrap.py",
+    "scripts/dev_start.py",
+    "scripts/start-dev.cmd",
+    "scripts/start-dev.ps1",
+    "scripts/stop-dev.cmd",
+    "scripts/stop-dev.ps1",
     ".vscode/launch.json",
     ".vscode/tasks.json",
     ".vscode/extensions.json",
@@ -85,6 +97,7 @@ FORBIDDEN_ZIP_MARKERS = (
     "scripts/dev_start.py",
     "scripts/start-dev.cmd",
     "scripts/start-dev.ps1",
+    "scripts/stop-dev.cmd",
     "scripts/stop-dev.ps1",
 )
 

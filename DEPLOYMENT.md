@@ -4,12 +4,20 @@ This document covers local development, Docker startup, and release packaging fo
 
 ## Local Development
 
-### Backend
+For one-click local development, open the repository root in VS Code and press F5. The default `Run Full Stack Dev` launch starts:
+
+- Frontend: `http://127.0.0.1:5173`
+- Backend API docs: `http://127.0.0.1:8891/docs`
+- Backend health: `http://127.0.0.1:8891/healthz`
+
+F5 creates `.venv` with Python 3.11 or 3.12 when needed, installs `requirements.lock.txt`, runs frontend `npm ci` when needed, creates `backend/.env` and `frontend/.env` from examples, and sets `VITE_API_BASE_URL=http://127.0.0.1:8891`. Redis on `127.0.0.1:6379` is used when available; Docker Redis is tried next; if Redis cannot be started, local F5 uses Celery eager mode and skips the worker.
+
+### Manual Backend
 
 ```bash
-python -m venv venv
-# Windows: venv\Scripts\activate
-# macOS/Linux: source venv/bin/activate
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
 python -m pip install -r requirements.lock.txt
 cp backend/.env.example backend/.env
 ```
@@ -35,10 +43,10 @@ Run services:
 ```bash
 redis-server
 celery -A backend.celery_app:celery_app worker --loglevel=info
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
+uvicorn backend.main:app --host 127.0.0.1 --port 8891 --reload
 ```
 
-### Frontend
+### Manual Frontend
 
 ```bash
 cd frontend
@@ -52,7 +60,7 @@ Node.js 20.x is required.
 Default local frontend env:
 
 ```ini
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://127.0.0.1:8891
 VITE_APP_TITLE=AI Subtitle Tool
 ```
 
@@ -75,6 +83,7 @@ Contract notes:
 
 - `docker-compose.yml` points backend services at `backend/.env.example`.
 - The frontend Docker build uses `VITE_API_BASE_URL=http://localhost:9091`.
+- Docker maps backend container port `8000` to external port `9091`; this is separate from local F5 backend port `8891`.
 - Runtime directories are mounted under `backend/uploads`, `backend/outputs`, and `backend/tmp`.
 
 ## Release Packaging

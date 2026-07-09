@@ -25,6 +25,7 @@ def _load_script_module(module_name: str, relative_path: str):
 
 verify_delivery = _load_script_module("test_verify_delivery_script", "scripts/verify_delivery.py")
 runtime_requirements = _load_script_module("test_runtime_requirements", "scripts/runtime_requirements.py")
+dev_bootstrap = _load_script_module("test_dev_bootstrap", "scripts/dev_bootstrap.py")
 
 
 def test_backend_dependency_preflight_passes_when_required_modules_exist(monkeypatch: pytest.MonkeyPatch):
@@ -59,3 +60,15 @@ def test_unsupported_python_versions_are_rejected(version: tuple[int, int, int])
     message = runtime_requirements.python_version_error_message(version)
     assert "Python 3.11 or 3.12 is required." in message
     assert f"Current version: {version[0]}.{version[1]}.{version[2]}" in message
+
+
+def test_frontend_env_api_base_is_forced_to_f5_backend_port():
+    content = "VITE_API_BASE_URL=http://localhost:8000\nVITE_APP_TITLE=AI Subtitle Tool\n"
+    updated = dev_bootstrap._ensure_frontend_api_base(content)
+    assert "VITE_API_BASE_URL=http://127.0.0.1:8891" in updated
+    assert "VITE_APP_TITLE=AI Subtitle Tool" in updated
+
+
+def test_frontend_env_api_base_is_added_when_missing():
+    updated = dev_bootstrap._ensure_frontend_api_base("VITE_APP_TITLE=AI Subtitle Tool\n")
+    assert updated.splitlines()[0] == "VITE_API_BASE_URL=http://127.0.0.1:8891"

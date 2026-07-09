@@ -12,6 +12,9 @@ $FrontendExample = Join-Path $Root "frontend\.env.example"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $BackendUrl = "http://127.0.0.1:8891"
 if (-not (Test-Path $Python)) { $Python = "python" }
+$Npm = "npm"
+$NpmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if ($NpmCmd) { $Npm = $NpmCmd.Source }
 
 function Ensure-Env {
     if (-not (Test-Path $BackendEnv)) {
@@ -38,6 +41,9 @@ function Ensure-Env {
         $updatedFrontendContent = $frontendContent `
             -replace "VITE_API_BASE_URL=http://localhost:8000", "VITE_API_BASE_URL=$BackendUrl" `
             -replace "VITE_API_BASE_URL=http://127\.0\.0\.1:8000", "VITE_API_BASE_URL=$BackendUrl"
+        if ($updatedFrontendContent -notmatch "(?m)^VITE_API_BASE_URL=") {
+            $updatedFrontendContent = "VITE_API_BASE_URL=$BackendUrl`r`n$updatedFrontendContent"
+        }
         if ($updatedFrontendContent -ne $frontendContent) {
             Set-Content -LiteralPath $FrontendEnv -Value $updatedFrontendContent -Encoding UTF8
             Write-Host "Updated frontend\.env VITE_API_BASE_URL to $BackendUrl"
@@ -71,6 +77,6 @@ switch ($Mode) {
     "ensure-redis" { Ensure-Redis; return }
     "backend" { $env:ENVIRONMENT = "development"; $env:API_PORT = "8891"; & $Python -m uvicorn backend.main:app --host 127.0.0.1 --port 8891 --reload; return }
     "celery" { Ensure-Redis; & $Python -m celery -A backend.celery_app:celery_app worker --loglevel=info; return }
-    "frontend" { $env:VITE_API_BASE_URL = $BackendUrl; Push-Location (Join-Path $Root "frontend"); npm run dev; Pop-Location; return }
+    "frontend" { $env:VITE_API_BASE_URL = $BackendUrl; Push-Location (Join-Path $Root "frontend"); & $Npm run dev -- --host 127.0.0.1 --port 5173; Pop-Location; return }
     "full" { & $Python (Join-Path $Root "scripts\dev_start.py") --redis auto; return }
 }

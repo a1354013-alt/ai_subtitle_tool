@@ -48,6 +48,7 @@ EXCLUDED_RELATIVE_PATHS = frozenset({
     "scripts/dev_start.py",
     "scripts/start-dev.cmd",
     "scripts/start-dev.ps1",
+    "scripts/stop-dev.cmd",
     "scripts/stop-dev.ps1",
 })
 

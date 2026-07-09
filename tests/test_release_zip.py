@@ -63,6 +63,7 @@ def test_release_zip_excludes_sensitive_and_generated_content(tmp_path: Path):
     assert "scripts/dev_start.py" not in names
     assert "scripts/start-dev.cmd" not in names
     assert "scripts/start-dev.ps1" not in names
+    assert "scripts/stop-dev.cmd" not in names
     assert "scripts/stop-dev.ps1" not in names
     assert "release.zip" not in names
     assert "release-check.zip" not in names

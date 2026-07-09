@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -52,3 +53,39 @@ def test_delivery_docs_describe_supported_runtime_versions_and_preflight_command
 
     assert expected_prod_audit in readme
     assert "dev dependency advisories are not production runtime risks" in readme
+
+
+def test_vscode_f5_development_files_are_tracked_and_wired():
+    expected_files = [
+        ".vscode/launch.json",
+        ".vscode/tasks.json",
+        ".vscode/extensions.json",
+        "scripts/dev_start.py",
+        "scripts/dev_bootstrap.py",
+        "scripts/start-dev.cmd",
+        "scripts/start-dev.ps1",
+        "scripts/stop-dev.ps1",
+        "scripts/stop-dev.cmd",
+    ]
+    for relative_path in expected_files:
+        assert (REPO_ROOT / relative_path).exists(), relative_path
+
+    launch = json.loads((REPO_ROOT / ".vscode" / "launch.json").read_text(encoding="utf-8"))
+    assert launch["configurations"][0]["name"] == "Run Full Stack Dev"
+    assert launch["configurations"][0]["program"].endswith("/scripts/dev_start.py")
+
+    tasks = json.loads((REPO_ROOT / ".vscode" / "tasks.json").read_text(encoding="utf-8"))
+    stop_task = next(task for task in tasks["tasks"] if task["label"] == "dev:stop")
+    assert stop_task["command"].endswith("/scripts/stop-dev.cmd")
+
+    extensions = json.loads((REPO_ROOT / ".vscode" / "extensions.json").read_text(encoding="utf-8"))
+    for extension in ("ms-python.python", "ms-python.vscode-pylance", "Vue.volar", "dbaeumer.vscode-eslint"):
+        assert extension in extensions["recommendations"]
+
+
+def test_gitignore_preserves_tracked_vscode_development_files():
+    gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".vscode/*" in gitignore
+    assert "!.vscode/launch.json" in gitignore
+    assert "!.vscode/tasks.json" in gitignore
+    assert "!.vscode/extensions.json" in gitignore

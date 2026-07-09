@@ -15,6 +15,8 @@ import time
 import argparse
 import threading
 import shutil
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional, List
 
@@ -23,6 +25,7 @@ BACKEND_DIR = ROOT_DIR / "backend"
 FRONTEND_DIR = ROOT_DIR / "frontend"
 VENV_DIR = ROOT_DIR / ".venv"
 ENV_FILE = BACKEND_DIR / ".env"
+FRONTEND_ENV_FILE = FRONTEND_DIR / ".env"
 BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 8891
 FRONTEND_HOST = "127.0.0.1"
@@ -104,7 +107,9 @@ def get_bootstrap_python_exe() -> str:
                 candidate = result.stdout.strip()
                 if candidate and _supported_python(candidate):
                     return candidate
-    return sys.executable
+    error("Python 3.11 or 3.12 is required for first-run bootstrap.")
+    error("Install Python 3.11 or 3.12, or make it available through the Windows py launcher as py -3.11 or py -3.12.")
+    sys.exit(1)
 
 
 def backend_deps_available() -> bool:
@@ -129,6 +134,7 @@ class ProcessManager:
     def __init__(self):
         self.processes: dict[str, subprocess.Popen] = {}
         self.stopped = False
+        self.failures: dict[str, int] = {}
         
         # Register signal handlers
         signal.signal(signal.SIGINT, self._handle_signal)
@@ -199,6 +205,7 @@ class ProcessManager:
         finally:
             return_code = process.wait()
             if return_code != 0 and not self.stopped:
+                self.failures[name] = return_code
                 error(f"{name} exited with code {return_code}")
     
     def monitor_process(self, name: str):
@@ -216,6 +223,7 @@ class ProcessManager:
         finally:
             return_code = process.wait()
             if return_code != 0 and not self.stopped:
+                self.failures[name] = return_code
                 error(f"{name} exited with code {return_code}")
     
     def shutdown(self):
@@ -267,6 +275,11 @@ def check_prerequisites() -> bool:
         error(f"Environment file not found at {ENV_FILE}")
         error("Run: python scripts/dev_bootstrap.py")
         return False
+
+    if not FRONTEND_ENV_FILE.exists():
+        error(f"Frontend environment file not found at {FRONTEND_ENV_FILE}")
+        error("Run: python scripts/dev_bootstrap.py")
+        return False
     
     # Check node_modules
     if not (FRONTEND_DIR / "node_modules").exists():
@@ -305,25 +318,41 @@ def check_docker_available() -> bool:
 
 def start_redis_with_docker() -> bool:
     """Start Redis using Docker if not already running."""
+    container_name = "ai-subtitle-tool-redis-dev"
     # Check if redis container already exists
     try:
         result = subprocess.run(
-            ["docker", "ps", "--filter", "name=redis-dev", "--format", "{{.Names}}"],
+            ["docker", "ps", "--filter", f"name={container_name}", "--format", "{{.Names}}"],
             capture_output=True,
             text=True,
             timeout=5
         )
-        if "redis-dev" in result.stdout:
+        if container_name in result.stdout:
             success("Redis container already running")
             return True
+
+        exited = subprocess.run(
+            ["docker", "ps", "-a", "--filter", f"name={container_name}", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if container_name in exited.stdout:
+            subprocess.run(["docker", "start", container_name], capture_output=True, timeout=20)
+            time.sleep(2)
+            return check_redis_running()
         
         # Start new Redis container
         info("Starting Redis container...")
-        subprocess.run(
-            ["docker", "run", "-d", "--name", "redis-dev", "-p", "6379:6379", "redis:7-alpine"],
+        result = subprocess.run(
+            ["docker", "run", "-d", "--name", container_name, "-p", "6379:6379", "redis:7-alpine"],
             capture_output=True,
+            text=True,
             timeout=30
         )
+        if result.returncode != 0:
+            warn(result.stderr.strip() or "docker run failed")
+            return False
         time.sleep(2)  # Wait for Redis to start
         return check_redis_running()
     except Exception as e:
@@ -343,6 +372,10 @@ def ensure_prerequisites():
     # Check .env
     if not ENV_FILE.exists():
         error(f"Environment file not found at {ENV_FILE}")
+        needs_bootstrap = True
+
+    if not FRONTEND_ENV_FILE.exists():
+        error(f"Frontend environment file not found at {FRONTEND_ENV_FILE}")
         needs_bootstrap = True
 
     # Check backend dependencies
@@ -372,6 +405,10 @@ def ensure_prerequisites():
     
     if not (FRONTEND_DIR / "node_modules").exists():
         error(f"Frontend dependencies still not installed after bootstrap")
+        sys.exit(1)
+
+    if not FRONTEND_ENV_FILE.exists():
+        error(f"Frontend environment file still not found after bootstrap")
         sys.exit(1)
 
     missing_media_tools = [name for name in ("ffmpeg", "ffprobe") if shutil.which(name) is None]
@@ -449,6 +486,53 @@ def check_port_available(port: int) -> bool:
         return True
 
 
+def _process_exited(manager: ProcessManager, required_names: tuple[str, ...]) -> str | None:
+    for name in required_names:
+        process = manager.processes.get(name)
+        if process is not None and process.poll() is not None:
+            return name
+    return None
+
+
+def wait_for_http(url: str, manager: ProcessManager, required_names: tuple[str, ...], timeout_seconds: int) -> bool:
+    deadline = time.time() + timeout_seconds
+    last_error = ""
+    while time.time() < deadline:
+        failed_name = _process_exited(manager, required_names)
+        if failed_name:
+            error(f"{failed_name} exited before {url} became ready.")
+            return False
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if 200 <= response.status < 500:
+                    return True
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_error = str(exc)
+        time.sleep(1)
+    error(f"Timed out waiting for {url}. Last error: {last_error or 'no response'}")
+    return False
+
+
+def wait_for_tcp(host: str, port: int, manager: ProcessManager, required_names: tuple[str, ...], timeout_seconds: int) -> bool:
+    import socket
+
+    deadline = time.time() + timeout_seconds
+    last_error = ""
+    while time.time() < deadline:
+        failed_name = _process_exited(manager, required_names)
+        if failed_name:
+            error(f"{failed_name} exited before {host}:{port} became ready.")
+            return False
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                return True
+        except OSError as exc:
+            last_error = str(exc)
+        time.sleep(1)
+    error(f"Timed out waiting for {host}:{port}. Last error: {last_error or 'no response'}")
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Subtitle Tool - Development Stack Starter")
     parser.add_argument(
@@ -489,40 +573,64 @@ def main():
     py_exe = get_python_exe()
     
     # Start backend
-    manager.add_process(
+    if not manager.add_process(
         "BACKEND",
         [py_exe, "-m", "uvicorn", "backend.main:app", "--host", BACKEND_HOST, "--port", str(BACKEND_PORT), "--reload"],
         cwd=ROOT_DIR,
         env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", "API_PORT": str(BACKEND_PORT), **redis_env_vars}
-    )
+    ):
+        manager.shutdown()
+        sys.exit(1)
     
     # Start frontend
-    manager.add_process(
+    if not manager.add_process(
         "FRONTEND",
-        [get_npm_exe(), "run", "dev"],
+        [get_npm_exe(), "run", "dev", "--", "--host", FRONTEND_HOST, "--port", str(FRONTEND_PORT)],
         cwd=FRONTEND_DIR,
         env_vars={"VITE_API_BASE_URL": BACKEND_URL}
-    )
+    ):
+        manager.shutdown()
+        sys.exit(1)
     
     # Start Celery worker only if Redis is available (not in eager mode)
     if redis_available:
-        manager.add_process(
+        if not manager.add_process(
             "WORKER",
             [py_exe, "-m", "celery", "-A", "backend.celery_app:celery_app", "worker", "--loglevel=info"],
             cwd=ROOT_DIR,
             env_vars={"PYTHONUNBUFFERED": "1", "ENVIRONMENT": "development", **redis_env_vars}
-        )
+        ):
+            manager.shutdown()
+            sys.exit(1)
     else:
         info("[DEV] Skipping Celery worker because eager mode is enabled.")
+
+    required_processes = ("BACKEND", "FRONTEND", "WORKER") if redis_available else ("BACKEND", "FRONTEND")
+
+    info("Waiting for backend health check and frontend dev server...")
+    if not wait_for_http(f"{BACKEND_URL}/healthz", manager, required_processes, 60):
+        manager.shutdown()
+        sys.exit(1)
+    success(f"Backend health check ready: {BACKEND_URL}/healthz")
+
+    if not wait_for_tcp(FRONTEND_HOST, FRONTEND_PORT, manager, required_processes, 60):
+        manager.shutdown()
+        sys.exit(1)
+    success(f"Frontend dev server ready: {FRONTEND_URL}")
+
+    if redis_available:
+        info("Celery worker is running with Redis broker.")
+    else:
+        info("Celery eager mode is enabled; no worker process is running.")
     
     print()
     print("=" * 70)
-    success("Development stack is starting...")
+    success("Development stack is ready.")
     print()
     print("Services:")
     print(f"  Frontend: {FRONTEND_URL}")
-    print(f"  Backend:  {BACKEND_URL}")
     print(f"  API Docs: {BACKEND_URL}/docs")
+    print(f"  Health:   {BACKEND_URL}/healthz")
     print()
     if not redis_available:
         print("Note: Running in Celery eager mode (no Redis)")
@@ -537,6 +645,8 @@ def main():
                 process = manager.processes[name]
                 if process.poll() is not None:
                     error(f"{name} exited. Check the output above for errors.")
+                    manager.shutdown()
+                    sys.exit(process.returncode or 1)
             time.sleep(1)
     except KeyboardInterrupt:
         pass

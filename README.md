@@ -45,15 +45,21 @@ Services:
 ### Option B: VS Code F5
 
 1. Clone and open the project in VS Code.
-2. Press **F5** to launch the backend, frontend, and worker stack.
-3. Wait for the terminal messages:
-   ```
-   [BACKEND] Application startup complete
-   [FRONTEND] VITE ready in ...
-   [WORKER] ready
-   ```
-4. Open [http://localhost:5173](http://localhost:5173)
-5. Open the backend API docs at [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
+2. Press **F5**. The default launch configuration is `Run Full Stack Dev`.
+3. On first run, the launcher creates `.venv` with Python 3.11 or 3.12, installs `requirements.lock.txt`, runs `npm ci` when `frontend/node_modules` is missing, creates `backend/.env` and `frontend/.env` from their examples, and forces `VITE_API_BASE_URL=http://127.0.0.1:8891`.
+4. Redis handling is automatic: an existing Redis on `127.0.0.1:6379` is used, Docker is tried next with a project dev Redis container, and local development falls back to Celery eager mode when Redis cannot be started.
+5. Wait for the concise success summary, then open:
+   - Frontend: [http://127.0.0.1:5173](http://127.0.0.1:5173)
+   - API docs: [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
+   - Health: [http://127.0.0.1:8891/healthz](http://127.0.0.1:8891/healthz)
+
+Stop the F5 stack with Ctrl+C in the launch terminal or the VS Code task `dev:stop`. On Windows, the stop task calls `scripts/stop-dev.cmd`, which stops processes bound to local dev ports `8891` and `5173` plus Celery commands for this project.
+
+Troubleshooting:
+
+- If no supported Python is found, install Python 3.11 or 3.12, or make it available through `py -3.11` or `py -3.12`.
+- If Redis is unavailable and Docker cannot start it, the console says Celery eager mode is enabled; uploads still run inline for local development.
+- If backend or frontend readiness fails, the launcher reports the process that exited early and keeps that process output visible in the terminal.
 
 ### Option C: Manual Local Development
 

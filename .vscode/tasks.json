@@ -53,7 +53,7 @@
     {
       "label": "dev:stop",
       "type": "shell",
-      "command": "${workspaceFolder}/scripts/stop-dev.ps1",
+      "command": "${workspaceFolder}/scripts/stop-dev.cmd",
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared" }
     },
