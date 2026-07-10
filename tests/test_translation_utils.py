@@ -34,6 +34,7 @@ def test_finalize_pipeline_skips_translate_segments_for_original_language(monkey
     import backend.tasks as tasks
     import backend.utils.translate_utils as translate_utils
 
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setattr(tasks.settings, "OPENAI_API_KEY", "")
     monkeypatch.setattr(tasks.settings, "TESTING", False)
 
@@ -77,6 +78,86 @@ def test_finalize_pipeline_skips_translate_segments_for_original_language(monkey
 
     assert result["translations"][0]["translated"] is False
     assert translate_called["called"] is False
+    output = (tmp_path / "uploads" / "task1_Original.srt").read_text(encoding="utf-8")
+    assert "hello\nhello" not in output
+    assert output.count("hello") == 1
+
+
+def test_finalize_pipeline_translated_output_is_bilingual(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+    import backend.utils.split_utils as split_utils
+    import backend.utils.translate_utils as translate_utils
+
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(tasks, "prepare_segment_results_for_merge", lambda results: results)
+    monkeypatch.setattr(split_utils, "merge_segments_subtitles", lambda results: results)
+    monkeypatch.setattr(tasks, "ensure_translation_available", lambda _langs: SimpleNamespace(translation_enabled=True))
+    monkeypatch.setattr(translate_utils, "translate_segments", lambda *_args, **_kwargs: ({"Japanese": ["konnichiwa"]}, []))
+
+    class DummyStorage:
+        def upload_file(self, *args, **kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_storage_backend", lambda: DummyStorage())
+
+    video_path = tmp_path / "input.mp4"
+    video_path.write_bytes(b"dummy content")
+
+    result = tasks.finalize_pipeline(
+        [SimpleNamespace(text="hello", start=0.0, end=1.0)],
+        str(video_path),
+        {
+            "business_id": "task2",
+            "target_langs": ["Japanese"],
+            "subtitle_format": "srt",
+            "burn_subtitles": False,
+        },
+    )
+
+    output = (tmp_path / "uploads" / "task2_Japanese.srt").read_text(encoding="utf-8")
+    assert result["translations"][0]["translated"] is True
+    assert "konnichiwa\nhello" in output
+
+
+def test_finalize_pipeline_translation_fallback_is_monolingual(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+    import backend.utils.split_utils as split_utils
+    import backend.utils.translate_utils as translate_utils
+
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(tasks, "prepare_segment_results_for_merge", lambda results: results)
+    monkeypatch.setattr(split_utils, "merge_segments_subtitles", lambda results: results)
+    monkeypatch.setattr(tasks, "ensure_translation_available", lambda _langs: SimpleNamespace(translation_enabled=True))
+
+    def fail_translate(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(translate_utils, "translate_segments", fail_translate)
+
+    class DummyStorage:
+        def upload_file(self, *args, **kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_storage_backend", lambda: DummyStorage())
+
+    video_path = tmp_path / "input.mp4"
+    video_path.write_bytes(b"dummy content")
+
+    result = tasks.finalize_pipeline(
+        [SimpleNamespace(text="hello", start=0.0, end=1.0)],
+        str(video_path),
+        {
+            "business_id": "task3",
+            "target_langs": ["Japanese"],
+            "subtitle_format": "srt",
+            "burn_subtitles": False,
+        },
+    )
+
+    output = (tmp_path / "uploads" / "task3_Japanese.srt").read_text(encoding="utf-8")
+    assert result["translations"][0]["translated"] is False
+    assert "hello\nhello" not in output
+    assert output.count("hello") == 1
 
 
 def test_finalize_pipeline_rejects_translation_target_without_openai_key(monkeypatch, tmp_path):
@@ -227,6 +308,66 @@ def test_rebuild_final_uploads_rebuilt_video_to_storage(monkeypatch, tmp_path):
     assert uploads == [(str(upload_dir / f"{task_id}_final.mp4"), f"{task_id}_final.mp4")]
 
 
+def test_rebuild_final_missing_source_video_writes_error_artifact(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+
+    task_id = "77777777-7777-7777-7777-777777777778"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    (upload_dir / f"{task_id}_English.srt").write_text("hello", encoding="utf-8")
+
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    with pytest.raises(FileNotFoundError, match="Source video not found"):
+        tasks.rebuild_final_video_task.run(task_id, "English", "srt")
+
+    artifact = (upload_dir / f"{task_id}_error.json").read_text(encoding="utf-8")
+    assert "source_video_missing" in artifact
+
+
+def test_rebuild_final_missing_subtitle_writes_error_artifact(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+
+    task_id = "77777777-7777-7777-7777-777777777779"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    (upload_dir / f"{task_id}.mp4").write_bytes(b"video")
+
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    with pytest.raises(FileNotFoundError, match="Subtitle file not found"):
+        tasks.rebuild_final_video_task.run(task_id, "English", "srt")
+
+    artifact = (upload_dir / f"{task_id}_error.json").read_text(encoding="utf-8")
+    assert "subtitle_file_missing" in artifact
+
+
+def test_rebuild_final_ffmpeg_burn_failure_writes_error_artifact(monkeypatch, tmp_path):
+    import backend.tasks as tasks
+    import backend.utils.subtitle_video_utils as subtitle_video_utils
+
+    task_id = "77777777-7777-7777-7777-777777777780"
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    (upload_dir / f"{task_id}.mp4").write_bytes(b"video")
+    (upload_dir / f"{task_id}_English.srt").write_text("hello", encoding="utf-8")
+
+    def fail_burn(*_args, **_kwargs):
+        raise RuntimeError("ffmpeg burn failed")
+
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(subtitle_video_utils, "burn_subtitles", fail_burn)
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    with pytest.raises(RuntimeError, match="ffmpeg burn failed"):
+        tasks.rebuild_final_video_task.run(task_id, "English", "srt")
+
+    artifact = (upload_dir / f"{task_id}_error.json").read_text(encoding="utf-8")
+    assert "ffmpeg_not_found" in artifact
+
+
 def test_rebuild_final_required_storage_upload_failure_fails_task(monkeypatch, tmp_path):
     import backend.tasks as tasks
     import backend.utils.subtitle_video_utils as subtitle_video_utils
@@ -253,3 +394,6 @@ def test_rebuild_final_required_storage_upload_failure_fails_task(monkeypatch, t
 
     with pytest.raises(RuntimeError, match=f"Object storage upload failed for {task_id}_final.mp4"):
         tasks.rebuild_final_video_task.run(task_id, "English", "srt")
+
+    artifact = (upload_dir / f"{task_id}_error.json").read_text(encoding="utf-8")
+    assert "final_video_upload_failed" in artifact

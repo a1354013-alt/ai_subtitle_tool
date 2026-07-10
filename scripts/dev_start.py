@@ -20,6 +20,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, List
 
+from runtime_requirements import is_supported_node_version, node_version_error_message
+
 ROOT_DIR = Path(__file__).parent.parent
 BACKEND_DIR = ROOT_DIR / "backend"
 FRONTEND_DIR = ROOT_DIR / "frontend"
@@ -61,6 +63,31 @@ def get_python_exe() -> str:
 def get_npm_exe() -> str:
     """Use the Windows command shim so subprocess can launch npm reliably."""
     return shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+
+
+def check_node_version() -> bool:
+    node_exe = shutil.which("node")
+    if not node_exe:
+        error("Node.js is not available on PATH.")
+        error("Node.js 20.x is required. Run: python scripts/dev_bootstrap.py")
+        return False
+    try:
+        result = subprocess.run(
+            [node_exe, "--version"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:
+        error(f"Failed to check Node.js version: {exc}")
+        return False
+    version_text = result.stdout.strip()
+    if result.returncode != 0 or not is_supported_node_version(version_text):
+        error(node_version_error_message(version_text))
+        error("VS Code F5 requires Node.js 20.x even when frontend/node_modules already exists.")
+        return False
+    return True
 
 
 def _python_version(python_exe: str) -> tuple[int, int] | None:
@@ -280,6 +307,9 @@ def check_prerequisites() -> bool:
         error(f"Frontend environment file not found at {FRONTEND_ENV_FILE}")
         error("Run: python scripts/dev_bootstrap.py")
         return False
+
+    if not check_node_version():
+        return False
     
     # Check node_modules
     if not (FRONTEND_DIR / "node_modules").exists():
@@ -378,6 +408,9 @@ def ensure_prerequisites():
         error(f"Frontend environment file not found at {FRONTEND_ENV_FILE}")
         needs_bootstrap = True
 
+    if not check_node_version():
+        needs_bootstrap = True
+
     # Check backend dependencies
     if not backend_deps_available():
         error("Backend dependencies are missing from .venv")
@@ -409,6 +442,9 @@ def ensure_prerequisites():
 
     if not FRONTEND_ENV_FILE.exists():
         error(f"Frontend environment file still not found after bootstrap")
+        sys.exit(1)
+
+    if not check_node_version():
         sys.exit(1)
 
     missing_media_tools = [name for name in ("ffmpeg", "ffprobe") if shutil.which(name) is None]

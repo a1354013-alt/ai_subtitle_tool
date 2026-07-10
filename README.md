@@ -175,7 +175,7 @@ Notes:
 - Production audit uses `npm audit --omit=dev` and must pass with 0 vulnerabilities.
 - Full `npm audit` can still report dev dependency advisories; those are tracked separately. dev dependency advisories are not production runtime risks unless they move into runtime dependencies.
 
-Auth and rate limiting are enforced by middleware when enabled. Local demo defaults keep auth off and set `RATE_LIMIT_PER_IP=0` to avoid blocking long polling; production should set `REQUIRE_AUTH_TOKEN=true`, `AUTH_TOKEN`, and a positive `RATE_LIMIT_PER_IP`.
+Auth and rate limiting are enforced by middleware when enabled. Local demo defaults keep auth off and set `RATE_LIMIT_PER_IP=0`. Production should set `REQUIRE_AUTH_TOKEN=true`, `AUTH_TOKEN`, and a positive `RATE_LIMIT_PER_IP`; safe status polling endpoints (`GET /status/{task_id}` and `GET /batch/{batch_id}/status`) are exempt from the global per-IP bucket so normal long-running jobs are not blocked by polling.
 
 Docker contract:
 

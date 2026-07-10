@@ -5,6 +5,9 @@ import type { APIError } from "@/types/api";
 import { usePreferencesStore } from "@/stores/preferences";
 
 type PollTimer = number | null;
+const INITIAL_POLL_DELAY_MS = 1_000;
+const MAX_POLL_DELAY_MS = 10_000;
+const POLL_BACKOFF_FACTOR = 1.5;
 
 function isTerminalStatus(status: string): boolean {
   const normalizedStatus = String(status).toUpperCase();
@@ -24,6 +27,7 @@ export const useTaskStore = defineStore("task", {
     error_code: "" as string,
     suggestion: "" as string,
     pollingTimer: null as PollTimer,
+    pollDelayMs: INITIAL_POLL_DELAY_MS as number,
   }),
   actions: {
     resetForTask(taskId: string) {
@@ -38,6 +42,7 @@ export const useTaskStore = defineStore("task", {
       this.error = null;
       this.error_code = "";
       this.suggestion = "";
+      this.pollDelayMs = INITIAL_POLL_DELAY_MS;
     },
     async createTask(formData: FormData) {
       this.error = null;
@@ -112,12 +117,22 @@ export const useTaskStore = defineStore("task", {
 
       if (isTerminalStatus(this.status) || this.error?.status === 404) return;
 
-      this.pollingTimer = window.setInterval(() => {
-        void this.fetchTaskStatus(taskId).catch((e) => {
-          this.error = e as APIError;
-          this.stopPolling();
-        });
-      }, 1000);
+      this.scheduleNextPoll(taskId);
+    },
+    scheduleNextPoll(taskId: string) {
+      this.pollingTimer = window.setTimeout(() => {
+        this.pollingTimer = null;
+        void this.fetchTaskStatus(taskId)
+          .then(() => {
+            if (isTerminalStatus(this.status) || this.error?.status === 404) return;
+            this.pollDelayMs = Math.min(Math.ceil(this.pollDelayMs * POLL_BACKOFF_FACTOR), MAX_POLL_DELAY_MS);
+            this.scheduleNextPoll(taskId);
+          })
+          .catch((e) => {
+            this.error = e as APIError;
+            this.stopPolling();
+          });
+      }, this.pollDelayMs);
     },
     stopPolling() {
       if (this.pollingTimer !== null) {

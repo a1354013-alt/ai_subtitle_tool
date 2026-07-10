@@ -51,6 +51,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
     )
     from .utils.ass_utils import generate_ass
     from .utils.split_utils import merge_segments_subtitles
+    from .utils.subtitle_text_utils import generate_srt
     from .utils.subtitle_video_utils import burn_subtitles
     from .utils.task_control_utils import is_task_canceled
 
@@ -129,6 +130,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
             update_state_func(state="PROGRESS", meta={"progress": 70, "status": "Translating..."})
 
         translations = {}
+        translated_by_lang = {}
         translation_metadata = []
         llm_status = ensure_translation_available(target_langs)
 
@@ -140,6 +142,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                 try:
                     lang_translations, _ = translate_segments(segments, "Auto", [lang])
                     translations[lang] = lang_translations[lang]
+                    translated_by_lang[lang] = True
                     translation_metadata.append(
                         {
                             "language": lang,
@@ -152,6 +155,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                     msg = f"Translation to {lang} failed: {e}. Using original text."
                     warnings.append(msg)
                     translations[lang] = [s.text for s in segments]
+                    translated_by_lang[lang] = False
                     translation_metadata.append(
                         {
                             "language": lang,
@@ -163,6 +167,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
                         update_state_func(state="PROGRESS", meta={"progress": 70, "status": msg})
             else:
                 translations[lang] = [s.text for s in segments]
+                translated_by_lang[lang] = False
                 translation_metadata.append(
                     {
                         "language": lang,
@@ -177,19 +182,35 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
         result_files = {}
         for lang in target_langs:
             lang_suffix = normalize_lang_suffix(lang)
-            bilingual_srt = f"{base_path}_{lang_suffix}.srt"
-            generate_bilingual_srt(segments, translations[lang], bilingual_srt)
-
-            if subtitle_format == "ass":
-                bilingual_ass = f"{base_path}_{lang_suffix}.ass"
-                ass_segments = [
-                    SimpleSegment(s.start, s.end, f"{translations[lang][i]}\\N{s.text}")
+            subtitle_texts = translations[lang]
+            is_translated = translated_by_lang.get(lang, False)
+            output_srt = f"{base_path}_{lang_suffix}.srt"
+            if is_translated:
+                generate_bilingual_srt(segments, subtitle_texts, output_srt)
+            else:
+                monolingual_segments = [
+                    SimpleSegment(s.start, s.end, subtitle_texts[i])
                     for i, s in enumerate(segments)
                 ]
-                generate_ass(ass_segments, bilingual_ass)
-                result_files[lang] = bilingual_ass
+                with open(output_srt, "w", encoding="utf-8", newline="\n") as srt_file:
+                    srt_file.write(generate_srt(monolingual_segments))
+
+            if subtitle_format == "ass":
+                output_ass = f"{base_path}_{lang_suffix}.ass"
+                if is_translated:
+                    ass_segments = [
+                        SimpleSegment(s.start, s.end, f"{subtitle_texts[i]}\\N{s.text}")
+                        for i, s in enumerate(segments)
+                    ]
+                else:
+                    ass_segments = [
+                        SimpleSegment(s.start, s.end, subtitle_texts[i])
+                        for i, s in enumerate(segments)
+                    ]
+                generate_ass(ass_segments, output_ass)
+                result_files[lang] = output_ass
             else:
-                result_files[lang] = bilingual_srt
+                result_files[lang] = output_srt
 
         final_video_path = f"{base_path}_final.mp4"
         if do_burn:
@@ -364,37 +385,60 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
     This is intentionally explicit (user-triggered) and never runs automatically on subtitle edit.
     """
     from .utils.subtitle_video_utils import burn_subtitles
-    from .utils.task_control_utils import is_task_canceled
+    from .utils.task_control_utils import build_task_failure_payload, is_task_canceled, write_task_error_artifact
+    from .utils.error_handler import get_error_response, handle_known_error
 
     upload_dir = settings.get_upload_dir()
     base_path = str(settings.task_artifact_base(task_id))
+    rebuild_task_id = str(getattr(getattr(self, "request", None), "id", "") or task_id)
 
-    if is_task_canceled(upload_dir, task_id):
-        raise RuntimeError("Task canceled")
+    try:
+        if is_task_canceled(upload_dir, task_id):
+            raise RuntimeError("Task canceled")
 
-    # Prefer the silence-removed intermediate if it exists.
-    candidate_videos = [
-        f"{base_path}_no_silence.mp4",
-        f"{base_path}.mp4",
-        f"{base_path}.mkv",
-        f"{base_path}.avi",
-        f"{base_path}.mov",
-    ]
-    video_path = next((p for p in candidate_videos if os.path.exists(p)), None)
-    if not video_path:
-        raise FileNotFoundError("Source video not found for rebuild")
+        # Prefer the silence-removed intermediate if it exists.
+        candidate_videos = [
+            f"{base_path}_no_silence.mp4",
+            f"{base_path}.mp4",
+            f"{base_path}.mkv",
+            f"{base_path}.avi",
+            f"{base_path}.mov",
+        ]
+        video_path = next((p for p in candidate_videos if os.path.exists(p)), None)
+        if not video_path:
+            raise FileNotFoundError("Source video not found for rebuild")
 
-    subtitle_path = f"{base_path}_{lang_suffix}.{subtitle_format}"
-    if not os.path.exists(subtitle_path):
-        raise FileNotFoundError("Subtitle file not found for rebuild")
+        subtitle_path = f"{base_path}_{lang_suffix}.{subtitle_format}"
+        if not os.path.exists(subtitle_path):
+            raise FileNotFoundError("Subtitle file not found for rebuild")
 
-    out_path = f"{base_path}_final.mp4"
-    self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Rebuilding final video..."})
-    burn_subtitles(video_path, subtitle_path, out_path)
+        out_path = f"{base_path}_final.mp4"
+        self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Rebuilding final video..."})
+        burn_subtitles(video_path, subtitle_path, out_path)
 
-    warnings: list[str] = []
-    storage = get_storage_backend()
-    _record_storage_upload(storage, out_path, f"{task_id}_final.mp4", warnings)
+        warnings: list[str] = []
+        storage = get_storage_backend()
+        _record_storage_upload(storage, out_path, f"{task_id}_final.mp4", warnings)
 
-    self.update_state(state="PROGRESS", meta={"progress": 100, "status": "Completed"})
-    return {"warnings": list(dict.fromkeys(warnings)), "result_task_id": task_id}
+        self.update_state(state="PROGRESS", meta={"progress": 100, "status": "Completed"})
+        return {"warnings": list(dict.fromkeys(warnings)), "result_task_id": task_id}
+    except Exception as e:
+        error_code = handle_known_error(e)
+        error_info = get_error_response(error_code)
+        failure_payload = build_task_failure_payload(
+            error_code=error_code,
+            message=error_info["message"],
+            suggestion=error_info["suggestion"],
+        )
+        write_task_error_artifact(rebuild_task_id, upload_dir, failure_payload)
+        if rebuild_task_id != task_id:
+            write_task_error_artifact(task_id, upload_dir, failure_payload)
+        self.update_state(
+            state="FAILURE",
+            meta={
+                "progress": 0,
+                "status": "FAILED",
+                **failure_payload,
+            },
+        )
+        raise

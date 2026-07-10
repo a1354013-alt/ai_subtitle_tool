@@ -77,9 +77,7 @@ function Ensure-Env {
     }
     if (Test-Path $FrontendEnv) {
         $frontendContent = Get-Content -LiteralPath $FrontendEnv -Raw
-        $updatedFrontendContent = $frontendContent `
-            -replace "VITE_API_BASE_URL=http://localhost:8000", "VITE_API_BASE_URL=$BackendUrl" `
-            -replace "VITE_API_BASE_URL=http://127\.0\.0\.1:8000", "VITE_API_BASE_URL=$BackendUrl"
+        $updatedFrontendContent = $frontendContent -replace "(?m)^VITE_API_BASE_URL=.*$", "VITE_API_BASE_URL=$BackendUrl"
         if ($updatedFrontendContent -notmatch "(?m)^VITE_API_BASE_URL=") {
             $updatedFrontendContent = "VITE_API_BASE_URL=$BackendUrl`r`n$updatedFrontendContent"
         }

@@ -97,6 +97,31 @@ async def test_rate_limit_middleware_returns_429(app_client, monkeypatch: pytest
 
 
 @pytest.mark.anyio
+async def test_rate_limit_middleware_exempts_safe_status_polling(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    main._RATE_LIMIT_BUCKETS.clear()
+    monkeypatch.setattr(main.settings, "RATE_LIMIT_PER_IP", 1)
+
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("PENDING"))
+    task_id = "00000000-0000-0000-0000-000000000001"
+    main.TASK_HISTORY.upsert_created(task_id=task_id, filename="demo.mp4", status="PENDING")
+    batch_id = main.BATCH_MANAGER.create_batch([
+        {"task_id": task_id, "filename": "demo.mp4", "status": "PENDING", "error": None}
+    ])
+
+    first = await client.get("/api/config")
+    limited = await client.get("/api/config")
+    status_responses = [await client.get(f"/status/{task_id}") for _ in range(3)]
+    batch_responses = [await client.get(f"/batch/{batch_id}/status") for _ in range(2)]
+
+    assert first.status_code == 200
+    assert limited.status_code == 429
+    assert [response.status_code for response in status_responses] == [200, 200, 200]
+    assert [response.status_code for response in batch_responses] == [200, 200]
+    main._RATE_LIMIT_BUCKETS.clear()
+
+
+@pytest.mark.anyio
 async def test_rate_limit_middleware_disabled_at_zero(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
     main._RATE_LIMIT_BUCKETS.clear()
@@ -548,6 +573,39 @@ async def test_rebuild_success_status_points_to_original_result_task(app_client,
     assert body["status"] == "SUCCESS"
     assert body["result_task_id"] == original_task_id
     assert body["result_url"] == f"/results/{original_task_id}"
+
+
+@pytest.mark.anyio
+async def test_successful_rebuild_updates_final_video_manifest(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    import backend.tasks as tasks
+    import backend.utils.subtitle_video_utils as subtitle_video_utils
+
+    task_id = "44444444-4444-4444-4444-444444444445"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}.mp4").write_bytes(b"video")
+    (upload_dir / f"{task_id}_English.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+
+    class RecordingStorage:
+        def upload_file(self, *_args, **_kwargs):
+            return True
+
+    def fake_burn(_video_path, _subtitle_path, output_path):
+        Path(output_path).write_bytes(b"rebuilt")
+
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(tasks, "get_storage_backend", lambda: RecordingStorage())
+    monkeypatch.setattr(subtitle_video_utils, "burn_subtitles", fake_burn)
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    result = tasks.rebuild_final_video_task.run(task_id, "English", "srt")
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("SUCCESS", result=result))
+
+    response = await client.get(f"/results/{task_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["has_video"] is True
 
 
 @pytest.mark.anyio

@@ -74,6 +74,7 @@ app = FastAPI(
 logger = logging.getLogger(__name__)
 _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 AUTH_EXEMPT_PATHS = {"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"}
+RATE_LIMIT_EXEMPT_PREFIXES = ("/status/",)
 
 
 @app.exception_handler(HTTPException)
@@ -123,6 +124,12 @@ def _ensure_openai_configured_for_targets(target_langs: list[str]) -> None:
                 "suggestion": suggestion,
             },
         )
+
+
+def _is_rate_limit_exempt_path(path: str) -> bool:
+    if any(path.startswith(prefix) for prefix in RATE_LIMIT_EXEMPT_PREFIXES):
+        return True
+    return path.startswith("/batch/") and path.endswith("/status")
 
 
 def _capability_response_payload() -> dict[str, Any]:
@@ -175,7 +182,7 @@ async def security_middleware(request: Request, call_next):
             if not configured or (bearer != configured and header_token != configured):
                 return JSONResponse(status_code=401, content={"detail": "Invalid or missing API token"})
 
-        if settings.RATE_LIMIT_PER_IP > 0:
+        if settings.RATE_LIMIT_PER_IP > 0 and not _is_rate_limit_exempt_path(path):
             client_ip = request.client.host if request.client else "unknown"
             now = time.time()
             bucket = _RATE_LIMIT_BUCKETS.setdefault(client_ip, deque())

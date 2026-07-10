@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 
 vi.mock("@/api/tasks", () => {
@@ -13,6 +13,10 @@ import { useTaskStore } from "@/stores/task";
 import type { APIError } from "@/types/api";
 
 describe("useTaskStore polling", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("stops polling on terminal status (SUCCESS)", async () => {
     setActivePinia(createPinia());
     const store = useTaskStore();
@@ -96,6 +100,48 @@ describe("useTaskStore polling", () => {
     // error is cleared at start of fetchTaskStatus
     expect(store.error).toBeNull();
     expect(store.status).toBe("PROCESSING");
+  });
+
+  it("backs off polling for long-running tasks", async () => {
+    vi.useFakeTimers();
+    setActivePinia(createPinia());
+    const store = useTaskStore();
+
+    (getTaskStatus as unknown as any)
+      .mockResolvedValueOnce({
+        task_id: "x",
+        status: "PROCESSING",
+        progress: 10,
+        message: null,
+        result_url: null,
+        warnings: [],
+      })
+      .mockResolvedValue({
+        task_id: "x",
+        status: "PROCESSING",
+        progress: 20,
+        message: null,
+        result_url: null,
+        warnings: [],
+      });
+
+    await store.startPolling("x");
+
+    expect(getTaskStatus).toHaveBeenCalledTimes(1);
+    expect(store.pollDelayMs).toBe(1000);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(getTaskStatus).toHaveBeenCalledTimes(2);
+    expect(store.pollDelayMs).toBe(1500);
+
+    await vi.advanceTimersByTimeAsync(1499);
+    expect(getTaskStatus).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getTaskStatus).toHaveBeenCalledTimes(3);
+    expect(store.pollDelayMs).toBe(2250);
+
+    store.stopPolling();
   });
 });
 

@@ -3,6 +3,15 @@ from .error_messages import ERROR_MESSAGES
 def handle_known_error(err: Exception) -> str:
     error_text = str(err).lower()
 
+    if "source video not found for rebuild" in error_text:
+        return "source_video_missing"
+
+    if "subtitle file not found for rebuild" in error_text:
+        return "subtitle_file_missing"
+
+    if "object storage upload failed" in error_text:
+        return "final_video_upload_failed"
+
     if "ffmpeg" in error_text or "ffprobe" in error_text:
         return "ffmpeg_not_found"
 

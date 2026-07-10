@@ -1,10 +1,12 @@
-import { apiRequest, buildApiUrl } from "@/api/client";
+import { apiRequest, buildApiUrl, UPLOAD_TIMEOUT_MS } from "@/api/client";
 import type { BatchStatusResponse, BatchUploadResponse } from "@/types/api";
 
 export async function uploadBatch(formData: FormData): Promise<BatchUploadResponse> {
   return apiRequest<BatchUploadResponse>("/batch/upload", {
     method: "POST",
     body: formData,
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+    timeoutMessage: "Upload timeout",
   });
 }
 

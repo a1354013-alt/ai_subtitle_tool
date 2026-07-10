@@ -1,6 +1,12 @@
 import type { APIError } from "@/types/api";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+export const UPLOAD_TIMEOUT_MS = 0;
+
+type RequestOptions = RequestInit & {
+  timeoutMs?: number | null;
+  timeoutMessage?: string;
+};
 
 export function getApiBaseUrl(): string {
   const raw = import.meta.env.VITE_API_BASE_URL;
@@ -32,19 +38,26 @@ export function buildRequestHeaders(headers?: HeadersInit): HeadersInit | undefi
 
 export async function apiRequest<T>(
   path: string,
-  init: RequestInit & { timeoutMs?: number } = {}
+  init: RequestOptions = {}
 ): Promise<T> {
   const url = buildApiUrl(path);
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(
-    () => controller.abort(),
-    init.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  );
+  const timeoutMs = init.timeoutMs === undefined ? DEFAULT_TIMEOUT_MS : init.timeoutMs;
+  const timeout =
+    timeoutMs && timeoutMs > 0
+      ? window.setTimeout(
+          () => controller.abort(),
+          timeoutMs
+        )
+      : null;
 
   try {
+    const fetchInit = { ...init };
+    delete fetchInit.timeoutMs;
+    delete fetchInit.timeoutMessage;
     const res = await fetch(url, {
-      ...init,
+      ...fetchInit,
       headers: buildRequestHeaders(init.headers),
       signal: controller.signal,
     });
@@ -92,12 +105,14 @@ export async function apiRequest<T>(
     return (await res.text()) as unknown as T;
   } catch (e: any) {
     if (e?.name === "AbortError") {
-      const err: APIError = { message: "Request timeout", status: 408 };
+      const err: APIError = { message: init.timeoutMessage ?? "Request timeout", status: 408 };
       throw err;
     }
     throw e;
   } finally {
-    window.clearTimeout(timeout);
+    if (timeout !== null) {
+      window.clearTimeout(timeout);
+    }
   }
 }
 

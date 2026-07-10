@@ -1,4 +1,4 @@
-import { apiRequest } from "@/api/client";
+import { apiRequest, UPLOAD_TIMEOUT_MS } from "@/api/client";
 import type { RecentTask, TaskStatusResponse, UploadTaskResponse } from "@/types/task";
 import type { SubtitleFormat } from "@/types/subtitle";
 
@@ -6,6 +6,8 @@ export async function createUploadTask(formData: FormData): Promise<UploadTaskRe
   return apiRequest<UploadTaskResponse>("/upload", {
     method: "POST",
     body: formData,
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+    timeoutMessage: "Upload timeout",
   });
 }
 

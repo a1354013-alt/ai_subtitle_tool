@@ -31,6 +31,18 @@ ERROR_MESSAGES = {
         "message": "Task canceled by user.",
         "suggestion": "Restart the task if you still need subtitle generation for this file.",
     },
+    "source_video_missing": {
+        "message": "Source video not found for rebuild.",
+        "suggestion": "Upload the source video again or choose a task whose original video artifacts are still available.",
+    },
+    "subtitle_file_missing": {
+        "message": "Subtitle file not found for rebuild.",
+        "suggestion": "Generate or restore the requested subtitle file before rebuilding the final video.",
+    },
+    "final_video_upload_failed": {
+        "message": "Final video upload failed.",
+        "suggestion": "Check object storage configuration and retry the rebuild after storage is reachable.",
+    },
     "unknown_error": {
         "message": "An unexpected error occurred.",
         "suggestion": "Review the backend logs for details and retry once the underlying issue is fixed.",
