@@ -58,19 +58,27 @@
         </div>
       </div>
 
-      <div v-if="manifest && !manifest.has_video" class="card" style="margin-top: 12px">
+      <div v-if="showRebuildCard" class="card" style="margin-top: 12px">
         <div class="card-inner">
-          <div class="label">{{ $t('download.note') }}</div>
+          <div class="label">{{ rebuildCardTitle }}</div>
           <div class="help">
-            <div>
+            <div v-if="!manifest?.has_video">
               <strong>{{ $t('download.missingFinalStrong') }}</strong> {{ $t('download.missingFinalDescription') }}
             </div>
-            <div style="margin-top: 6px">
-              {{ $t('download.editDoesNotRebuild') }}
+            <div v-else>
+              {{ $t('download.rebuildExistingDescription') }}
             </div>
-            <div v-if="manifest && isSuccessManifest" style="margin-top: 10px">
+            <div style="margin-top: 8px">
+              <label class="label" for="rebuild-format">{{ $t('download.subtitleFormat') }}</label>
+              <select id="rebuild-format" class="select" v-model="selectedFormat" style="max-width: 220px">
+                <option v-for="format in availableRebuildFormats" :key="format" :value="format">
+                  {{ format.toUpperCase() }}
+                </option>
+              </select>
+            </div>
+            <div style="margin-top: 10px">
               <button class="btn primary" :disabled="rebuilding || !selectedLang" @click="onRebuildFinal">
-                {{ rebuilding ? $t('common.loading') : $t('editor.rebuild') }}
+                {{ rebuilding ? $t('common.loading') : rebuildCardTitle }}
               </button>
               <div class="help" style="margin-top: 6px">
                 {{ $t('download.rebuildHelp') }}
@@ -104,6 +112,7 @@ import type { DownloadItem } from "@/types/result";
 import { buildDownloadUrl } from "@/api/results";
 import { usePreferencesStore } from "@/stores/preferences";
 import { rebuildFinalVideo } from "@/api/tasks";
+import type { SubtitleFormat } from "@/types/subtitle";
 
 const props = defineProps<{ taskId: string }>();
 const { t } = useI18n();
@@ -113,9 +122,17 @@ const router = useRouter();
 const res = useResultStore();
 const prefs = usePreferencesStore();
 const selectedLang = ref(prefs.preferredLang);
+const selectedFormat = ref<SubtitleFormat>("ass");
 
 const manifest = computed(() => res.manifest);
 const files = computed(() => manifest.value?.available_files ?? []);
+const selectedFile = computed(() => files.value.find((f) => f.lang === selectedLang.value));
+const availableRebuildFormats = computed<SubtitleFormat[]>(() => {
+  const formats: SubtitleFormat[] = [];
+  if (selectedFile.value?.ass) formats.push("ass");
+  if (selectedFile.value?.srt) formats.push("srt");
+  return formats;
+});
 const fallbackMessages = computed(() =>
   files.value
     .filter((f) => f.translated === false)
@@ -126,6 +143,10 @@ const isSuccessManifest = computed(() => {
   if (!s) return true; // backwards-compat for older manifests
   return String(s).toUpperCase() === "SUCCESS";
 });
+const showRebuildCard = computed(() => Boolean(manifest.value && isSuccessManifest.value && files.value.length > 0));
+const rebuildCardTitle = computed(() =>
+  manifest.value?.has_video ? t("download.rebuildFinalVideo") : t("download.generateFinalVideo")
+);
 
 watch(
   files,
@@ -136,12 +157,19 @@ watch(
       selectedLang.value = list[0].lang;
       persistLang();
     }
+    ensureSelectedFormat();
   },
   { immediate: true }
 );
 
 function persistLang() {
   prefs.setPreferredLang(selectedLang.value);
+  ensureSelectedFormat();
+}
+
+function ensureSelectedFormat() {
+  if (availableRebuildFormats.value.includes(selectedFormat.value)) return;
+  selectedFormat.value = availableRebuildFormats.value[0] ?? "ass";
 }
 
 const rebuilding = ref(false);
@@ -151,7 +179,11 @@ async function onRebuildFinal() {
   rebuilding.value = true;
   try {
     const langInfo = files.value.find((f) => f.lang === selectedLang.value);
-    const format = langInfo?.ass ? "ass" : "srt";
+    const format = availableRebuildFormats.value.includes(selectedFormat.value)
+      ? selectedFormat.value
+      : langInfo?.ass
+        ? "ass"
+        : "srt";
     const response = await rebuildFinalVideo(taskId.value, selectedLang.value, format);
     await router.push({ name: "task", params: { taskId: response.rebuild_task_id } });
   } catch (e) {

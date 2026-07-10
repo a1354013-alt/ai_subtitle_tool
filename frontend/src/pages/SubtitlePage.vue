@@ -1,26 +1,27 @@
 <template>
   <div>
-    <PageHeader
-      :title="$t('editor.title')"
-      subtitle="Edit subtitle files (ASS/SRT). Editing only updates the subtitle file; it does not rebuild/burn the final video."
-    />
+    <PageHeader :title="$t('editor.title')" :subtitle="$t('editor.subtitle')" />
 
     <ErrorAlert v-if="sub.error" :error="sub.error" />
 
     <EmptyState
       v-if="!loading && manifestNotReady"
-      title="Subtitles not ready"
-      description="The task has not completed yet, so subtitle files are not available. Go back to the task status page and wait for SUCCESS."
+      :title="$t('editor.notReadyTitle')"
+      :description="$t('editor.notReadyDescription')"
     >
-      <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId: taskIdValue } }">Go to status</RouterLink>
+      <RouterLink class="btn primary" :to="{ name: 'task', params: { taskId: taskIdValue } }">
+        {{ $t('download.goToStatus') }}
+      </RouterLink>
     </EmptyState>
 
     <EmptyState
       v-else-if="!loading && noSubtitles"
-      title="No subtitles available"
-      description="This task does not have any downloadable subtitle files in the results manifest."
+      :title="$t('editor.noSubtitlesTitle')"
+      :description="$t('editor.noSubtitlesDescription')"
     >
-      <RouterLink class="btn primary" :to="{ name: 'downloads', params: { taskId: taskIdValue } }">Go to downloads</RouterLink>
+      <RouterLink class="btn primary" :to="{ name: 'downloads', params: { taskId: taskIdValue } }">
+        {{ $t('editor.goToDownloads') }}
+      </RouterLink>
     </EmptyState>
 
     <div
@@ -29,18 +30,18 @@
       style="align-items: center; justify-content: space-between; margin-bottom: 12px"
     >
       <div class="pill">
-        <span>Task</span>
+        <span>{{ $t('download.task') }}</span>
         <code class="mono">{{ taskIdValue }}</code>
       </div>
 
       <div class="row" style="align-items: center">
         <div class="pill" style="margin-right: 8px">
-          <span>Editing</span>
+          <span>{{ $t('editor.editing') }}</span>
           <code class="mono">{{ sub.lang }} / {{ sub.format.toUpperCase() }}</code>
         </div>
 
         <div class="pill">
-          <span>Language</span>
+          <span>{{ $t('download.language') }}</span>
           <select class="select" style="width: 220px" v-model="langSelection" @change="onLanguageChange">
             <option v-for="f in langOptions" :key="f.lang" :value="f.lang">{{ f.display_name }}</option>
           </select>
@@ -48,11 +49,13 @@
 
         <SubtitleFormatTabs :model-value="formatSelection" @update:modelValue="onFormatChange" />
 
-        <RouterLink class="btn" :to="{ name: 'downloads', params: { taskId: taskIdValue } }">{{ $t('editor.download') }}</RouterLink>
+        <RouterLink class="btn" :to="{ name: 'downloads', params: { taskId: taskIdValue } }">
+          {{ $t('editor.download') }}
+        </RouterLink>
       </div>
     </div>
 
-    <LoadingBlock v-if="loading" :title="$t('common.loading')" description="Fetching subtitle content." />
+    <LoadingBlock v-if="loading" :title="$t('common.loading')" :description="$t('editor.fetchingContent')" />
 
     <SubtitleEditor
       v-else-if="!manifestNotReady && !noSubtitles"
@@ -62,12 +65,33 @@
       :last-saved-at="sub.lastSavedAt"
       @save="save"
     />
+
+    <div v-if="!loading && sub.lastUpdateMessage" class="card" style="margin-top: 12px">
+      <div class="card-inner">
+        <div class="label">{{ $t('editor.saveResult') }}</div>
+        <div class="help">{{ sub.lastUpdateMessage }}</div>
+        <ul v-if="sub.warnings.length > 0" class="help warning-list">
+          <li v-for="warning in sub.warnings" :key="warning">{{ warning }}</li>
+        </ul>
+      </div>
+    </div>
+
+    <div v-if="!loading && canRebuildAfterSave" class="card" style="margin-top: 12px">
+      <div class="card-inner">
+        <div class="label">{{ $t('editor.rebuildFinalVideo') }}</div>
+        <div class="help">{{ $t('editor.rebuildAfterSaveHelp') }}</div>
+        <button class="btn primary" style="margin-top: 10px" :disabled="rebuilding" @click="rebuildFinal">
+          {{ rebuilding ? $t('common.loading') : $t('editor.rebuildFinalVideo') }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
+import { RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import PageHeader from "@/components/PageHeader.vue";
 import SubtitleFormatTabs from "@/components/SubtitleFormatTabs.vue";
 import SubtitleEditor from "@/components/SubtitleEditor.vue";
@@ -79,10 +103,13 @@ import type { SubtitleFormat } from "@/types/subtitle";
 import { useResultStore } from "@/stores/result";
 import type { FileInfo } from "@/types/result";
 import { usePreferencesStore } from "@/stores/preferences";
+import { rebuildFinalVideo } from "@/api/tasks";
 
 const props = defineProps<{ taskId: string }>();
 const taskId = computed(() => props.taskId);
 const taskIdValue = computed(() => taskId.value);
+const router = useRouter();
+const { t } = useI18n();
 
 const sub = useSubtitleStore();
 const result = useResultStore();
@@ -90,6 +117,7 @@ const prefs = usePreferencesStore();
 
 const langSelection = ref(sub.lang || prefs.preferredLang);
 const formatSelection = ref<SubtitleFormat>(sub.format);
+const rebuilding = ref(false);
 
 const langOptions = computed(() => result.manifest?.available_files ?? []);
 const manifestNotReady = computed(() => {
@@ -104,6 +132,9 @@ const editorModel = computed({
 });
 
 const loading = computed(() => result.loading || sub.loading);
+const canRebuildAfterSave = computed(
+  () => Boolean(sub.lastSavedAt) && !sub.isDirty && !manifestNotReady.value && !noSubtitles.value
+);
 
 function pickInitialFormat(file: FileInfo | undefined, preferred: SubtitleFormat): SubtitleFormat {
   const hasAss = !!file?.ass;
@@ -112,7 +143,6 @@ function pickInitialFormat(file: FileInfo | undefined, preferred: SubtitleFormat
   if (preferred === "srt" && hasSrt) return "srt";
   if (hasAss) return "ass";
   if (hasSrt) return "srt";
-  // Fallback: keep a deterministic choice (API may still 404, but manifest should normally include at least one).
   return preferred;
 }
 
@@ -122,7 +152,6 @@ function formatAvailableForLang(lang: string, format: SubtitleFormat): boolean {
 }
 
 async function initForTask(nextTaskId: string) {
-  // Ensure store state does not leak across tasks.
   sub.resetForTask(nextTaskId);
   await result.fetchManifest(nextTaskId);
 
@@ -142,7 +171,7 @@ async function initForTask(nextTaskId: string) {
 
 function confirmDiscardIfDirty(): boolean {
   if (!sub.isDirty) return true;
-  return window.confirm("You have unsaved changes. Discard them and leave this page?");
+  return window.confirm(t("editor.confirmLeave"));
 }
 
 onBeforeRouteLeave(() => confirmDiscardIfDirty());
@@ -161,12 +190,24 @@ async function save() {
   await sub.updateSubtitle(taskId.value, sub.lang, sub.format, sub.content);
 }
 
+async function rebuildFinal() {
+  rebuilding.value = true;
+  try {
+    const response = await rebuildFinalVideo(taskId.value, sub.lang, sub.format);
+    await router.push({ name: "task", params: { taskId: response.rebuild_task_id } });
+  } catch (e) {
+    sub.error = e as any;
+  } finally {
+    rebuilding.value = false;
+  }
+}
+
 async function onLanguageChange() {
   const next = langSelection.value;
   if (next === sub.lang) return;
 
   if (sub.isDirty) {
-    const ok = window.confirm("You have unsaved changes. Discard them and switch language?");
+    const ok = window.confirm(t("editor.confirmSwitchLanguage"));
     if (!ok) {
       langSelection.value = sub.lang;
       return;
@@ -186,13 +227,13 @@ async function onFormatChange(next: SubtitleFormat) {
   if (next === sub.format) return;
 
   if (!formatAvailableForLang(sub.lang, next)) {
-    window.alert(`No ${next.toUpperCase()} subtitle available for language: ${sub.lang}`);
+    window.alert(t("editor.formatUnavailable", { format: next.toUpperCase(), language: sub.lang }));
     formatSelection.value = sub.format;
     return;
   }
 
   if (sub.isDirty) {
-    const ok = window.confirm("You have unsaved changes. Discard them and switch format?");
+    const ok = window.confirm(t("editor.confirmSwitchFormat"));
     if (!ok) {
       formatSelection.value = sub.format;
       return;
@@ -203,3 +244,10 @@ async function onFormatChange(next: SubtitleFormat) {
   await sub.fetchSubtitle(taskId.value, sub.lang, next);
 }
 </script>
+
+<style scoped>
+.warning-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+</style>

@@ -1,13 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import SubtitlePage from "@/pages/SubtitlePage.vue";
 import { useResultStore } from "@/stores/result";
 import { useSubtitleStore } from "@/stores/subtitle";
 
+const { mockRebuildFinalVideo } = vi.hoisted(() => ({
+  mockRebuildFinalVideo: vi.fn(),
+}));
+
+vi.mock("@/api/tasks", () => ({
+  rebuildFinalVideo: mockRebuildFinalVideo,
+}));
+
 function flush() {
-  return Promise.resolve();
+  return flushPromises();
 }
 
 function seedManifest(partial?: Partial<ReturnType<typeof useResultStore>["manifest"]>) {
@@ -186,5 +194,78 @@ describe("SubtitlePage", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(window.alert).toHaveBeenCalled();
   });
-});
 
+  it("shows backend warnings and rebuild action after subtitle save", async () => {
+    setActivePinia(createPinia());
+    seedManifest();
+
+    const sub = useSubtitleStore();
+    vi.spyOn(sub, "fetchSubtitle").mockImplementation(async (_taskId, lang, format) => {
+      sub.lang = lang;
+      sub.format = format;
+      sub.content = "1\n00:00:00,000 --> 00:00:01,000\nhello\n";
+      sub.isDirty = false;
+      return { content: sub.content } as any;
+    });
+    vi.spyOn(sub, "updateSubtitle").mockImplementation(async (_taskId, _lang, _format, content) => {
+      sub.content = content;
+      sub.isDirty = false;
+      sub.lastSavedAt = Date.now();
+      sub.lastUpdateMessage = "Successfully updated SRT subtitle for English.";
+      sub.warnings = ["Final video was deleted to prevent using old subtitles."];
+    });
+
+    const { wrapper } = await mountViaRouter();
+    sub.setContent("1\n00:00:00,000 --> 00:00:01,000\nedited\n");
+    await flush();
+
+    const saveButton = wrapper.findAll("button").find((button) => button.text() === "Save");
+    await saveButton!.trigger("click");
+    await flush();
+
+    expect(wrapper.text()).toContain("Successfully updated SRT subtitle");
+    expect(wrapper.text()).toContain("Final video was deleted");
+    expect(wrapper.text()).toContain("Rebuild final video");
+  });
+
+  it("clicking rebuild calls API and navigates to rebuild task", async () => {
+    setActivePinia(createPinia());
+    seedManifest();
+    const rebuildTaskId = "66666666-6666-6666-6666-666666666666";
+
+    const sub = useSubtitleStore();
+    vi.spyOn(sub, "fetchSubtitle").mockImplementation(async (_taskId, lang, format) => {
+      sub.lang = lang;
+      sub.format = format;
+      sub.content = "1\n00:00:00,000 --> 00:00:01,000\nhello\n";
+      sub.isDirty = false;
+      return { content: sub.content } as any;
+    });
+    vi.spyOn(sub, "updateSubtitle").mockImplementation(async (_taskId, _lang, _format, content) => {
+      sub.content = content;
+      sub.isDirty = false;
+      sub.lastSavedAt = Date.now();
+      sub.lastUpdateMessage = "Saved.";
+      sub.warnings = [];
+    });
+    mockRebuildFinalVideo.mockResolvedValueOnce({
+      status: "queued",
+      task_id: "t",
+      rebuild_task_id: rebuildTaskId,
+    });
+
+    const { router, wrapper } = await mountViaRouter();
+    sub.setContent("1\n00:00:00,000 --> 00:00:01,000\nedited\n");
+    await flush();
+    await wrapper.findAll("button").find((button) => button.text() === "Save")!.trigger("click");
+    await flush();
+
+    const rebuildButton = wrapper.findAll("button").find((button) => button.text() === "Rebuild final video");
+    await rebuildButton!.trigger("click");
+    await flush();
+
+    expect(mockRebuildFinalVideo).toHaveBeenCalledWith("t", "Traditional_Chinese", "ass");
+    expect(router.currentRoute.value.name).toBe("task");
+    expect(router.currentRoute.value.params.taskId).toBe(rebuildTaskId);
+  });
+});

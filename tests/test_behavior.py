@@ -151,6 +151,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
         srt_path = tmpdir / f"{task_id}_{lang}.srt"
         ass_path = tmpdir / f"{task_id}_{lang}.ass"
         final_path = tmpdir / f"{task_id}_final.mp4"
+        new_srt = "1\n00:00:00,000 --> 00:00:01,000\nnew srt\n"
         srt_path.write_text("OLD_SRT", encoding="utf-8")
         ass_path.write_text("OLD_ASS", encoding="utf-8")
         final_path.write_bytes(b"video")
@@ -166,7 +167,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
             result = _run(
                 main.update_subtitle(
                     task_id=task_id,
-                    edit=main.SubtitleEditRequest(content="NEW_SRT", format="srt"),
+                    edit=main.SubtitleEditRequest(content=new_srt, format="srt"),
                     lang=lang,
                 )
             )
@@ -175,7 +176,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
         self.assertIn("warnings", result)
         self.assertIsInstance(result["warnings"], list)
         self.assertNotIn("warning", result)
-        self.assertEqual(srt_path.read_text(encoding="utf-8"), "NEW_SRT")
+        self.assertEqual(srt_path.read_text(encoding="utf-8"), new_srt)
         self.assertEqual(ass_path.read_text(encoding="utf-8"), "OLD_ASS")
         remove_mock.assert_called()
 
@@ -189,7 +190,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
 
         # GET /subtitle 應回指定格式內容
         get_srt = _run(main.get_subtitle(task_id=task_id, lang=lang, format="srt"))
-        self.assertEqual(get_srt["content"], "NEW_SRT")
+        self.assertEqual(get_srt["content"], new_srt)
 
         get_ass = _run(main.get_subtitle(task_id=task_id, lang=lang, format="ass"))
         self.assertEqual(get_ass["content"], "OLD_ASS")
@@ -201,6 +202,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
         task_id = str(uuid.uuid4())
         lang = "Traditional_Chinese"
         srt_path = tmpdir / f"{task_id}_{lang}.srt"
+        new_srt = "1\n00:00:00,000 --> 00:00:01,000\nnew\n"
         srt_path.write_text("OLD", encoding="utf-8")
 
         calls: list[tuple[str, str]] = []
@@ -216,12 +218,12 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
             _run(
                 main.update_subtitle(
                     task_id=task_id,
-                    edit=main.SubtitleEditRequest(content="NEW", format="srt"),
+                    edit=main.SubtitleEditRequest(content=new_srt, format="srt"),
                     lang=lang,
                 )
             )
 
-        self.assertEqual(srt_path.read_text(encoding="utf-8"), "NEW")
+        self.assertEqual(srt_path.read_text(encoding="utf-8"), new_srt)
         self.assertTrue(any(dst == str(srt_path) for (_src, dst) in calls))
 
     def test_update_subtitle_write_failure_does_not_corrupt_original(self):
@@ -231,6 +233,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
         task_id = str(uuid.uuid4())
         lang = "Traditional_Chinese"
         srt_path = tmpdir / f"{task_id}_{lang}.srt"
+        new_srt = "1\n00:00:00,000 --> 00:00:01,000\nnew\n"
         srt_path.write_text("OLD", encoding="utf-8")
 
         with (
@@ -240,7 +243,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
             _run(
                 main.update_subtitle(
                     task_id=task_id,
-                    edit=main.SubtitleEditRequest(content="NEW", format="srt"),
+                    edit=main.SubtitleEditRequest(content=new_srt, format="srt"),
                     lang=lang,
                 )
             )

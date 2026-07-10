@@ -15,6 +15,20 @@ def _make_async_result(status: str, info: dict | None = None, result: dict | Non
     return SimpleNamespace(status=status, info=info, result=result)
 
 
+VALID_SRT = "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
+VALID_ASS = """[Script Info]
+Title: Test
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,hello
+"""
+
+
 @pytest.fixture()
 async def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
@@ -414,7 +428,7 @@ async def test_subtitle_get_put_and_download_vtt(app_client, monkeypatch: pytest
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     srt_path = upload_dir / f"{task_id}_English.srt"
-    srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+    srt_path.write_text(VALID_SRT, encoding="utf-8")
     final_path = upload_dir / f"{task_id}_final.mp4"
     final_path.write_bytes(b"fake")
 
@@ -428,14 +442,14 @@ async def test_subtitle_get_put_and_download_vtt(app_client, monkeypatch: pytest
     r2 = await client.put(
         f"/subtitle/{task_id}",
         params={"lang": "English"},
-        json={"format": "srt", "content": "UPDATED"},
+        json={"format": "srt", "content": "1\n00:00:00,000 --> 00:00:01,500\nupdated\n"},
     )
     assert r2.status_code == 200
     body2 = r2.json()
     assert body2["status"] == "updated"
     assert body2["format"] == "srt"
     assert body2["language"] == "English"
-    assert srt_path.read_text(encoding="utf-8") == "UPDATED"
+    assert srt_path.read_text(encoding="utf-8") == "1\n00:00:00,000 --> 00:00:01,500\nupdated\n"
     # Updating subtitles deletes final video to avoid stale outputs.
     assert final_path.exists() is False
     assert body2["warnings"]
@@ -452,7 +466,7 @@ async def test_update_subtitle_deletes_stale_s3_final_video(app_client, monkeypa
     task_id = "22222222-2222-2222-2222-222222222222"
     upload_dir = Path(main.UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    (upload_dir / f"{task_id}_English.srt").write_text("hello", encoding="utf-8")
+    (upload_dir / f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
 
     deleted: list[str] = []
 
@@ -467,12 +481,130 @@ async def test_update_subtitle_deletes_stale_s3_final_video(app_client, monkeypa
     response = await client.put(
         f"/subtitle/{task_id}",
         params={"lang": "English"},
-        json={"format": "srt", "content": "UPDATED"},
+        json={"format": "srt", "content": "1\n00:00:00,000 --> 00:00:01,500\nupdated\n"},
     )
 
     assert response.status_code == 200, response.text
     assert deleted == [f"{task_id}_final.mp4"]
     assert any("Stored final video was deleted" in warning for warning in response.json()["warnings"])
+
+
+@pytest.mark.anyio
+async def test_update_subtitle_accepts_valid_ass(app_client):
+    client, main, _tmp = app_client
+    task_id = "22222222-2222-2222-2222-222222222223"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    ass_path = upload_dir / f"{task_id}_English.ass"
+    ass_path.write_text(VALID_ASS, encoding="utf-8")
+
+    response = await client.put(
+        f"/subtitle/{task_id}",
+        params={"lang": "English"},
+        json={"format": "ass", "content": VALID_ASS.replace("hello", "updated")},
+    )
+
+    assert response.status_code == 200, response.text
+    assert "updated" in ass_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("content", "expected_message"),
+    [
+        ("", "must not be empty"),
+        ("1\n00:00:00,000 -> 00:00:01,000\nhello\n", "at least one cue"),
+        ("1\n00:00:02,000 --> 00:00:01,000\nhello\n", "start time must be before"),
+        (
+            "1\n00:00:02,000 --> 00:00:03,000\nhello\n\n2\n00:00:01,000 --> 00:00:02,000\nback\n",
+            "must not go backwards",
+        ),
+    ],
+)
+async def test_update_subtitle_rejects_invalid_srt(app_client, content: str, expected_message: str):
+    client, main, _tmp = app_client
+    task_id = "22222222-2222-2222-2222-222222222224"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+
+    response = await client.put(
+        f"/subtitle/{task_id}",
+        params={"lang": "English"},
+        json={"format": "srt", "content": content},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error_code"] == "invalid_subtitle_format"
+    assert expected_message in body["message"]
+    assert body["suggestion"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("content", "expected_message"),
+    [
+        ("[V4+ Styles]\n[Events]\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,hello\n", "[Script Info]"),
+        ("[Script Info]\n[V4+ Styles]\n[Events]\n", "Dialogue"),
+    ],
+)
+async def test_update_subtitle_rejects_invalid_ass(app_client, content: str, expected_message: str):
+    client, main, _tmp = app_client
+    task_id = "22222222-2222-2222-2222-222222222225"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}_English.ass").write_text(VALID_ASS, encoding="utf-8")
+
+    response = await client.put(
+        f"/subtitle/{task_id}",
+        params={"lang": "English"},
+        json={"format": "ass", "content": content},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error_code"] == "invalid_subtitle_format"
+    assert expected_message in body["message"]
+    assert body["suggestion"]
+
+
+@pytest.mark.anyio
+async def test_update_subtitle_rejects_oversized_content(app_client):
+    client, main, _tmp = app_client
+    task_id = "22222222-2222-2222-2222-222222222226"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+
+    response = await client.put(
+        f"/subtitle/{task_id}",
+        params={"lang": "English"},
+        json={"format": "srt", "content": "x" * (5 * 1024 * 1024 + 1)},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "invalid_subtitle_format"
+    assert "5 MB limit" in response.json()["message"]
+
+
+@pytest.mark.anyio
+async def test_invalid_subtitle_does_not_overwrite_existing_file(app_client):
+    client, main, _tmp = app_client
+    task_id = "22222222-2222-2222-2222-222222222227"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    srt_path = upload_dir / f"{task_id}_English.srt"
+    srt_path.write_text(VALID_SRT, encoding="utf-8")
+
+    response = await client.put(
+        f"/subtitle/{task_id}",
+        params={"lang": "English"},
+        json={"format": "srt", "content": "not a subtitle"},
+    )
+
+    assert response.status_code == 400
+    assert srt_path.read_text(encoding="utf-8") == VALID_SRT
 
 
 @pytest.mark.anyio

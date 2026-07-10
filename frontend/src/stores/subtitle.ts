@@ -16,6 +16,8 @@ export const useSubtitleStore = defineStore("subtitle", {
     saving: false as boolean,
     error: null as APIError | null,
     lastSavedAt: null as number | null,
+    warnings: [] as string[],
+    lastUpdateMessage: "" as string,
   }),
   actions: {
     resetForTask(taskId: string) {
@@ -29,6 +31,8 @@ export const useSubtitleStore = defineStore("subtitle", {
       this.saving = false;
       this.error = null;
       this.lastSavedAt = null;
+      this.warnings = [];
+      this.lastUpdateMessage = "";
     },
     setLang(lang: string) {
       this.lang = lang;
@@ -49,6 +53,8 @@ export const useSubtitleStore = defineStore("subtitle", {
       this.loading = true;
       this.lang = lang;
       this.format = format;
+      this.warnings = [];
+      this.lastUpdateMessage = "";
       try {
         const res = await getSubtitle(taskId, lang, format);
         this.content = res.content;
@@ -64,10 +70,12 @@ export const useSubtitleStore = defineStore("subtitle", {
       this.error = null;
       this.saving = true;
       try {
-        await updateSubtitle(taskId, lang, format, content);
+        const res = await updateSubtitle(taskId, lang, format, content);
         this.content = content;
         this.isDirty = false;
         this.lastSavedAt = Date.now();
+        this.warnings = res.warnings ?? [];
+        this.lastUpdateMessage = res.message ?? "";
       } catch (e) {
         this.error = e as APIError;
         throw e;

@@ -53,6 +53,7 @@ from .services.llm_capabilities import (
 )
 from .services.file_service import write_text_atomic
 from .services.subtitle_service import load_vtt_from_srt, write_vtt_for_srt_to_zip
+from .services.subtitle_validation import SubtitleValidationError, validate_subtitle_content
 import zipfile
 
 def _is_production_environment() -> bool:
@@ -1261,6 +1262,11 @@ async def update_subtitle(task_id: str, edit: SubtitleEditRequest, lang: str = Q
     filepath = validate_path_traversal(os.path.join(UPLOAD_DIR, f"{task_id}_{lang_suffix}.{target_format}"), UPLOAD_DIR)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail=f"Subtitle '{target_format}' for language '{lang}' not found")
+
+    try:
+        validate_subtitle_content(edit.content, target_format)
+    except SubtitleValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.payload) from None
 
     try:
         write_text_atomic(filepath, edit.content)
