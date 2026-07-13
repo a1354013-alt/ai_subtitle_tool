@@ -60,7 +60,31 @@ services:
       - ./backend/uploads:/app/uploads
       - ./backend/outputs:/app/outputs
       - ./backend/tmp:/app/tmp
-    command: celery -A backend.celery_app:celery_app worker --loglevel=info
+    command: celery -A backend.celery_app:celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-1}
+    healthcheck:
+      disable: true
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - backend/.env.example
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      UPLOAD_DIR: /app/uploads
+      OUTPUT_DIR: /app/outputs
+      TEMP_DIR: /app/tmp
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/outputs:/app/outputs
+      - ./backend/tmp:/app/tmp
+    command: celery -A backend.celery_app:celery_app beat --loglevel=info
     healthcheck:
       disable: true
     depends_on:

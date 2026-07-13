@@ -4,11 +4,14 @@ WORKDIR /app
 
 # Runtime/build deps needed by this project:
 # - ffmpeg/ffprobe: video/audio processing
+# - fontconfig + fonts-noto-cjk: CJK subtitle burn-in support
 # - pkg-config + libav*-dev: kept for compatibility with audio/video Python deps
 # - build-essential/gcc/g++/git: required by some Python packages during install
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg \
+        fontconfig \
+        fonts-noto-cjk \
         build-essential \
         gcc \
         g++ \
@@ -26,7 +29,8 @@ RUN apt-get update \
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    SUBTITLE_FONT_NAME="Noto Sans CJK TC"
 
 COPY requirements.txt .
 COPY requirements.lock.txt .

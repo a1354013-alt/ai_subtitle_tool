@@ -101,15 +101,15 @@
             </div>
             <div v-if="task.error" class="task-error text-danger">{{ task.error }}</div>
             <div v-if="hasDownloads(task)" class="task-actions">
-              <a
+              <button
                 v-for="link in taskDownloadLinks(task)"
                 :key="link.key"
-                :href="link.href"
                 class="btn-link"
-                target="_blank"
+                type="button"
+                @click="openDownloadPath(link.path)"
               >
                 {{ link.label }}
-              </a>
+              </button>
             </div>
           </div>
         </div>
@@ -121,10 +121,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { getBatchStatus, uploadBatch, downloadBatch } from "@/api/batch";
-import { getAppCapabilities } from "@/api/capabilities";
+import { createBatchDownloadTicket, getBatchStatus, uploadBatch } from "@/api/batch";
 import { getAppConfig } from "@/api/config";
-import { buildApiUrl } from "@/api/client";
+import { createDownloadTicket } from "@/api/results";
 import type { AppCapabilities, AppConfig, BatchStatusResponse, BatchTaskResponse } from "@/types/api";
 import type { APIError } from "@/types/api";
 import { getTranslationStatusMessage, translationTargetsRequested } from "@/utils/translation";
@@ -174,6 +173,19 @@ let statusInterval: any = null;
 
 const isTranslationAvailable = computed(() => capabilities.value.translationEnabled);
 const translationStatusMessage = computed(() => getTranslationStatusMessage(capabilities.value, t));
+
+function capabilitiesFromConfig(value: AppConfig): AppCapabilities {
+  return {
+    provider: value.provider,
+    model: value.model,
+    translationEnabled: value.translationEnabled,
+    reason: value.reason,
+    message: value.message,
+    defaultTargetLanguage: value.defaultTargetLanguage,
+    availableModes: value.availableModes,
+    openaiConfigured: value.openaiConfigured,
+  };
+}
 
 function formatSupportedExtensions() {
   return config.value.supportedExtensions.join(", ");
@@ -276,9 +288,13 @@ async function fetchStatus() {
   }
 }
 
-function downloadZip() {
+async function downloadZip() {
   if (!batchId.value) return;
-  window.open(downloadBatch(batchId.value), "_blank");
+  window.open(await createBatchDownloadTicket(batchId.value), "_blank", "noopener");
+}
+
+async function openDownloadPath(path: string) {
+  window.open(await createDownloadTicket(path), "_blank", "noopener");
 }
 
 function normalizeStatus(status: string) {
@@ -309,7 +325,7 @@ function hasDownloads(task: BatchTaskResponse) {
 }
 
 function taskDownloadLinks(task: BatchTaskResponse) {
-  const links: Array<{ key: string; label: string; href: string }> = [];
+  const links: Array<{ key: string; label: string; path: string }> = [];
   const downloadUrls = task.download_urls;
   if (!downloadUrls) return links;
 
@@ -317,19 +333,19 @@ function taskDownloadLinks(task: BatchTaskResponse) {
     links.push({
       key: `${task.task_id}-video`,
       label: t("batch.video"),
-      href: buildApiUrl(downloadUrls.video),
+      path: downloadUrls.video,
     });
   }
 
   for (const [language, formats] of Object.entries(downloadUrls.subtitles ?? {})) {
     if (formats.srt) {
-      links.push({ key: `${task.task_id}-${language}-srt`, label: `${language} SRT`, href: buildApiUrl(formats.srt) });
+      links.push({ key: `${task.task_id}-${language}-srt`, label: `${language} SRT`, path: formats.srt });
     }
     if (formats.ass) {
-      links.push({ key: `${task.task_id}-${language}-ass`, label: `${language} ASS`, href: buildApiUrl(formats.ass) });
+      links.push({ key: `${task.task_id}-${language}-ass`, label: `${language} ASS`, path: formats.ass });
     }
     if (formats.vtt) {
-      links.push({ key: `${task.task_id}-${language}-vtt`, label: `${language} VTT`, href: buildApiUrl(formats.vtt) });
+      links.push({ key: `${task.task_id}-${language}-vtt`, label: `${language} VTT`, path: formats.vtt });
     }
   }
 
@@ -344,12 +360,12 @@ onUnmounted(() => {
 });
 
 onMounted(async () => {
-  const [configResult, capabilitiesResult] = await Promise.allSettled([getAppConfig(), getAppCapabilities()]);
-  if (configResult.status === "fulfilled") {
-    config.value = configResult.value;
-  }
-  if (capabilitiesResult.status === "fulfilled") {
-    capabilities.value = capabilitiesResult.value;
+  try {
+    const appConfig = await getAppConfig();
+    config.value = appConfig;
+    capabilities.value = capabilitiesFromConfig(appConfig);
+  } catch {
+    // Keep local defaults when the config endpoint is unavailable during smoke tests or offline demos.
   }
   applyDefaultTargetLanguage();
 });
@@ -400,9 +416,13 @@ onMounted(async () => {
   margin-top: 8px;
 }
 .btn-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
   color: var(--color-primary);
   text-decoration: none;
   font-size: 0.9em;
+  cursor: pointer;
 }
 .text-success { color: #4caf50; }
 .text-danger { color: #f44336; }

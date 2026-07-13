@@ -1,0 +1,33 @@
+name: Docker Compose Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build services
+        run: docker compose build backend worker beat frontend
+
+      - name: Start Redis/Celery/API stack
+        run: docker compose up -d redis backend worker beat
+
+      - name: Wait for backend readiness
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:9091/readyz; then
+              exit 0
+            fi
+            docker compose ps
+            sleep 2
+          done
+          docker compose logs backend worker beat redis
+          exit 1
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v

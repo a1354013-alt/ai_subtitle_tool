@@ -2,7 +2,9 @@
 
 import importlib
 import logging
+import os
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -211,11 +213,79 @@ def test_task_history_store_closes_connections(tmp_path):
     assert store.cleanup_old_records(retention_seconds=0) >= 0
 
 
+def test_cleanup_honors_retention_and_structured_counts(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    from backend.utils.cleanup_utils import cleanup_old_files, create_task_lock
+
+    upload_dir = tmp_path / "uploads"
+    output_dir = tmp_path / "outputs"
+    temp_dir = tmp_path / "tmp"
+    batches_dir = upload_dir / "batches"
+    for path in (upload_dir, output_dir, temp_dir, batches_dir):
+        path.mkdir(parents=True)
+
+    old = 10_000
+    now = 20_000
+    old_artifact = upload_dir / "old_final.mp4"
+    recent_artifact = upload_dir / "recent_final.mp4"
+    active_artifact = upload_dir / "active_final.mp4"
+    stale_lock = upload_dir / "stale.lock"
+    old_zip = output_dir / "subtitle_batch_old.zip"
+    old_tmp = temp_dir / "leftover.tmp"
+    old_batch = batches_dir / "batch_12345678.json"
+    for path in (old_artifact, recent_artifact, active_artifact, stale_lock, old_zip, old_tmp, old_batch):
+        path.write_text("x", encoding="utf-8")
+
+    lock_path = Path(create_task_lock("active", str(upload_dir)))
+    for path in (old_artifact, active_artifact, stale_lock, old_zip, old_tmp, old_batch):
+        os.utime(path, (old, old))
+    os.utime(lock_path, (now, now))
+    os.utime(recent_artifact, (now, now))
+
+    monkeypatch.setattr("backend.utils.cleanup_utils.time.time", lambda: now)
+    monkeypatch.setattr("backend.utils.cleanup_utils.is_lock_stale", lambda path, threshold: str(path).endswith("stale.lock"))
+
+    counts = cleanup_old_files(
+        upload_dir=str(upload_dir),
+        output_dir=str(output_dir),
+        temp_dir=str(temp_dir),
+        retention_seconds=3600,
+    )
+
+    assert old_artifact.exists() is False
+    assert stale_lock.exists() is False
+    assert old_zip.exists() is False
+    assert old_tmp.exists() is False
+    assert old_batch.exists() is False
+    assert active_artifact.exists() is True
+    assert recent_artifact.exists() is True
+    assert counts["stale_locks_removed"] == 1
+    assert counts["batch_metadata_removed"] == 1
+    assert counts["preserved_locked"] >= 1
+
+
+def test_cleanup_dry_run_preserves_files(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    from backend.utils.cleanup_utils import cleanup_old_files
+
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    old_file = upload_dir / "old_error.json"
+    old_file.write_text("{}", encoding="utf-8")
+    os.utime(old_file, (1, 1))
+    monkeypatch.setattr("backend.utils.cleanup_utils.time.time", lambda: 10_000)
+
+    counts = cleanup_old_files(upload_dir=str(upload_dir), output_dir=str(tmp_path / "out"), temp_dir=str(tmp_path / "tmp"), retention_seconds=60, dry_run=True)
+
+    assert old_file.exists() is True
+    assert counts["dry_run"] is True
+    assert counts["files_removed"] == 1
+
+
 @pytest.mark.anyio
 async def test_readyz_does_not_require_openai_key(monkeypatch: pytest.MonkeyPatch, tmp_path):
     main = _reload_main(monkeypatch, tmp_path)
     monkeypatch.setattr(main.settings, "OPENAI_API_KEY", "")
     monkeypatch.setattr(main, "run_media_command", lambda *a, **k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(main, "_check_subtitle_font", lambda: {"available": True, "detail": "fake"})
 
     class FakeRedisClient:
         def ping(self):
@@ -267,6 +337,37 @@ def test_api_capabilities_reports_ollama_status(monkeypatch: pytest.MonkeyPatch,
         "availableModes": ["transcribe", "translate"],
         "openaiConfigured": False,
     }
+
+
+def test_ollama_capability_cache_expires_and_recovers(monkeypatch: pytest.MonkeyPatch):
+    import backend.services.llm_capabilities as caps
+
+    calls: list[bool] = []
+    current_time = 1_000.0
+
+    monkeypatch.setattr(caps.settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(caps.settings, "OLLAMA_BASE_URL", "http://ollama")
+    monkeypatch.setattr(caps.settings, "OLLAMA_MODEL", "model")
+    monkeypatch.setattr(caps.settings, "OLLAMA_CAPABILITY_CACHE_TTL_SECONDS", 10)
+    monkeypatch.setattr(caps.time, "time", lambda: current_time)
+    caps._OLLAMA_CACHE.clear()
+
+    def probe():
+        calls.append(True)
+        return len(calls) > 1, None
+
+    monkeypatch.setattr(caps, "_probe_ollama_tags", probe)
+
+    first = caps.get_llm_capability_status()
+    second = caps.get_llm_capability_status()
+    assert first.translation_enabled is False
+    assert second.translation_enabled is False
+    assert len(calls) == 1
+
+    current_time = 1_011.0
+    third = caps.get_llm_capability_status()
+    assert third.translation_enabled is True
+    assert len(calls) == 2
 
 
 def test_api_config_uses_capability_status_instead_of_openai_key(monkeypatch: pytest.MonkeyPatch, tmp_path):

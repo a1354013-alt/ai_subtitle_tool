@@ -78,7 +78,12 @@ describe("UploadForm", () => {
   });
 
   it("does not submit translation targets when Ollama is unavailable", async () => {
-    mockGetAppCapabilities.mockResolvedValueOnce({
+    mockGetAppConfig.mockResolvedValueOnce({
+      maxUploadSizeMb: 1,
+      maxBatchFiles: 20,
+      supportedExtensions: [".mp4"],
+      batchUploadEnabled: true,
+      subtitleFormats: ["srt", "ass", "vtt"],
       provider: "ollama",
       model: "gemma3:12b",
       translationEnabled: false,
@@ -104,5 +109,6 @@ describe("UploadForm", () => {
     expect(wrapper.emitted("submit")).toBeUndefined();
     expect(wrapper.text()).toContain("Ollama");
     expect(wrapper.text()).not.toContain("OpenAI API Key");
+    expect(mockGetAppCapabilities).not.toHaveBeenCalled();
   });
 });

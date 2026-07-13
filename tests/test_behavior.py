@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import importlib
 import io
 import json
@@ -180,7 +180,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
         self.assertEqual(ass_path.read_text(encoding="utf-8"), "OLD_ASS")
         remove_mock.assert_called()
 
-        # final.mp4 不存在時，下載影片應回 404（符合現行規格）
+        # final.mp4 銝??冽?嚗?頛蔣????404嚗泵?銵??潘?
         with (
             patch.object(main.os.path, "exists", return_value=False),
             self.assertRaises(main.HTTPException) as ctx,
@@ -188,7 +188,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
             _run(main.download_result(task_id=task_id, lang=None, format=None))
         self.assertEqual(ctx.exception.status_code, 404)
 
-        # GET /subtitle 應回指定格式內容
+        # GET /subtitle ?????澆??批捆
         get_srt = _run(main.get_subtitle(task_id=task_id, lang=lang, format="srt"))
         self.assertEqual(get_srt["content"], new_srt)
 
@@ -209,8 +209,8 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
 
         def _spy_replace(src: str, dst: str):
             calls.append((src, dst))
-            # 不真的 replace（避免環境限制），只驗證呼叫與最終檔案內容
-            # 以 copy 的方式模擬「替換完成」的結果
+            # 銝???replace嚗?憓??塚?嚗撽??澆??蝯?獢摰?
+            # 隞?copy ?撘芋?研????蝯?
             Path(dst).write_text(Path(src).read_text(encoding="utf-8"), encoding="utf-8")
             return None
 
@@ -250,7 +250,7 @@ class TestSubtitleAndDownloadEndpoints(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 500)
         self.assertEqual(srt_path.read_text(encoding="utf-8"), "OLD")
-        # 暫存檔清理失敗只應記錄 log，不應影響 API 行為；此測試只關注原檔不被破壞
+        # ?怠?瑼??仃?????log嚗??蔣??API 銵嚗迨皜祈岫?芷?瘜典?瑼?鋡怎憯?
 
     def test_update_subtitle_invalid_format_is_400(self):
         tmpdir = _make_tmpdir()
@@ -438,7 +438,7 @@ class TestPathTraversalAndManifest(unittest.TestCase):
         main = _load_app_with_upload_dir(str(tmpdir))
         task_id = str(uuid.uuid4())
 
-        # 模擬 uploads 目錄內的檔案列表（語言後綴含 '.'）
+        # 璅⊥ uploads ?桅??抒?瑼??”嚗?閮敺韌??'.'嚗?
         fake_files = [f"{task_id}_English.UK.ass"]
 
         class _FakeAsyncResult:
@@ -750,7 +750,7 @@ class TestCleanupOldFiles(unittest.TestCase):
             patch.object(cu.os.path, "isfile", return_value=True),
             patch.object(cu.os, "remove") as remove_mock,
         ):
-            cu.cleanup_old_files(upload_dir="X")
+            cu.cleanup_old_files(upload_dir="X", retention_seconds=24 * 3600)
 
         # A valid lock must prevent deletion of task files.
         removed_paths = " ".join(str(c.args[0]) for c in remove_mock.call_args_list)
@@ -777,7 +777,7 @@ class TestCleanupOldFiles(unittest.TestCase):
             patch.object(cu.os.path, "isfile", return_value=True),
             patch.object(cu.os, "remove") as remove_mock,
         ):
-            cu.cleanup_old_files(upload_dir="X")
+            cu.cleanup_old_files(upload_dir="X", retention_seconds=24 * 3600)
 
         removed_paths = [str(c.args[0]) for c in remove_mock.call_args_list]
         self.assertTrue(any(p.endswith(lock_name) for p in removed_paths))
@@ -805,7 +805,7 @@ class TestCleanupOldFiles(unittest.TestCase):
             patch.object(cu.os, "remove") as remove_mock,
             patch.object(cu.shutil, "rmtree") as rmtree_mock,
         ):
-            cu.cleanup_old_files(upload_dir="X")
+            cu.cleanup_old_files(upload_dir="X", retention_seconds=24 * 3600)
 
         removed_paths = [str(c.args[0]) for c in remove_mock.call_args_list]
         rmtree_paths = [str(c.args[0]) for c in rmtree_mock.call_args_list]
@@ -818,14 +818,15 @@ class TestCleanupOldFiles(unittest.TestCase):
         entries = ["task_history.sqlite3", "task_history.sqlite3-wal", "task_history.sqlite3-shm", "batches"]
         with (
             patch.object(cu.os, "listdir", return_value=entries),
-            patch.object(cu.os.path, "exists", return_value=True),
+            patch.object(cu.os.path, "exists", side_effect=lambda p: str(p) == "X"),
             patch.object(cu.os.path, "getmtime", return_value=time.time() - (25 * 3600)),
             patch.object(cu.os.path, "isdir", return_value=True),
             patch.object(cu.os.path, "isfile", return_value=True),
             patch.object(cu.os, "remove") as remove_mock,
             patch.object(cu.shutil, "rmtree") as rmtree_mock,
         ):
-            cu.cleanup_old_files(upload_dir="X")
+            cu.cleanup_old_files(upload_dir="X", retention_seconds=24 * 3600)
 
         remove_mock.assert_not_called()
         rmtree_mock.assert_not_called()
+

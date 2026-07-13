@@ -4,14 +4,19 @@ import shutil
 import uuid
 import json
 import time
+import base64
+import hashlib
+import hmac
 from collections import deque
 from pathlib import Path
 from typing import Any, List, Optional
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from .models.status import TaskStatus as TaskStatusEnum
 from .storage.task_history import TaskHistoryStore, duration_seconds_since
@@ -64,9 +69,17 @@ def _docs_path(path: str) -> str | None:
     return None if _is_production_environment() else path
 
 
+def _project_version() -> str:
+    version_path = Path(__file__).resolve().parents[1] / "VERSION"
+    try:
+        return version_path.read_text(encoding="utf-8").strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
 app = FastAPI(
     title="AI Video Subtitle Tool",
-    version="1.0.0",
+    version=_project_version(),
     description="Automated video subtitle generation with translation and editing capabilities.",
     docs_url=_docs_path("/docs"),
     redoc_url=_docs_path("/redoc"),
@@ -76,6 +89,7 @@ logger = logging.getLogger(__name__)
 _RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
 AUTH_EXEMPT_PATHS = {"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"}
 RATE_LIMIT_EXEMPT_PREFIXES = ("/status/",)
+DOWNLOAD_TICKET_PATHS = ("/download/",)
 
 
 @app.exception_handler(HTTPException)
@@ -97,6 +111,85 @@ class _TestingAsyncResult:
 
 def _is_test_environment() -> bool:
     return os.getenv("PYTEST_CURRENT_TEST") is not None or os.getenv("TESTING", "").lower() == "true"
+
+
+def _download_ticket_secret() -> bytes:
+    configured = (settings.AUTH_TOKEN or "").strip()
+    if configured:
+        return configured.encode("utf-8")
+    return b"development-download-ticket-secret"
+
+
+def _canonical_download_path(path: str, query_params: dict[str, str]) -> str:
+    filtered = {k: v for k, v in query_params.items() if k != "ticket"}
+    query = urlencode(sorted(filtered.items()))
+    return f"{path}?{query}" if query else path
+
+
+def _sign_download_ticket(canonical_path: str, expires_at: int) -> str:
+    payload = f"{expires_at}:{canonical_path}".encode("utf-8")
+    digest = hmac.new(_download_ticket_secret(), payload, hashlib.sha256).digest()
+    raw = f"{expires_at}:".encode("utf-8") + digest
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _verify_download_ticket(canonical_path: str, ticket: str | None) -> bool:
+    if not ticket:
+        return False
+    try:
+        padded = ticket + "=" * (-len(ticket) % 4)
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        expires_raw, digest = raw.split(b":", 1)
+        expires_at = int(expires_raw.decode("ascii"))
+    except Exception:
+        return False
+    if expires_at < int(time.time()):
+        return False
+    expected = hmac.new(
+        _download_ticket_secret(),
+        f"{expires_at}:{canonical_path}".encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return hmac.compare_digest(digest, expected)
+
+
+def _request_has_valid_download_ticket(request: Request) -> bool:
+    path = request.url.path
+    if not (path.startswith(DOWNLOAD_TICKET_PATHS) or (path.startswith("/batch/") and path.endswith("/download"))):
+        return False
+    canonical_path = _canonical_download_path(path, dict(request.query_params))
+    return _verify_download_ticket(canonical_path, request.query_params.get("ticket"))
+
+
+def _persist_task_state(
+    task_id: str,
+    status: TaskStatusEnum | str,
+    *,
+    progress: Optional[int] = None,
+    message: Optional[str] = None,
+    warnings: Optional[list[str]] = None,
+    error_code: Optional[str] = None,
+    suggestion: Optional[str] = None,
+    result_task_id: Optional[str] = None,
+    duration_seconds: Optional[float] = None,
+) -> None:
+    normalized = status.value if isinstance(status, TaskStatusEnum) else str(status)
+    try:
+        if duration_seconds is None and normalized in {"SUCCESS", "FAILURE", "CANCELED"}:
+            duration_seconds = duration_seconds_since(TASK_HISTORY.get_created_at(task_id))
+        TASK_HISTORY.update_status(
+            task_id=task_id,
+            status=normalized,
+            duration_seconds=duration_seconds,
+            progress=progress,
+            message=message,
+            warnings=warnings,
+            error_code=error_code,
+            suggestion=suggestion,
+            result_task_id=result_task_id,
+        )
+    except Exception:
+        logger.warning("Failed to persist task state: %s", task_id, exc_info=True)
 
 
 def _ensure_openai_configured_for_targets(target_langs: list[str]) -> None:
@@ -180,7 +273,8 @@ async def security_middleware(request: Request, call_next):
             auth_header = request.headers.get("Authorization", "")
             bearer = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
             header_token = request.headers.get("X-API-Token", "").strip()
-            if not configured or (bearer != configured and header_token != configured):
+            ticket_ok = _request_has_valid_download_ticket(request)
+            if not configured or (bearer != configured and header_token != configured) and not ticket_ok:
                 return JSONResponse(status_code=401, content={"detail": "Invalid or missing API token"})
 
         if settings.RATE_LIMIT_PER_IP > 0 and not _is_rate_limit_exempt_path(path):
@@ -258,6 +352,43 @@ def _task_has_local_artifacts(task_id: str) -> bool:
     return False
 
 
+def _success_result_url(result_task_id: str) -> str:
+    storage = get_storage_backend()
+    result_url = storage.get_url(f"{result_task_id}_final.mp4")
+    return result_url or f"/results/{result_task_id}"
+
+
+def _response_from_history(task_id: str, entry) -> TaskStatusResponse:
+    status = TaskStatusEnum(entry.status) if entry.status in TaskStatusEnum._value2member_map_ else TaskStatusEnum.PENDING
+    result_task_id = entry.result_task_id
+    result_url = _success_result_url(result_task_id or task_id) if status == TaskStatusEnum.SUCCESS else None
+    return TaskStatusResponse(
+        task_id=task_id,
+        status=status,
+        progress=entry.progress,
+        message=entry.message,
+        result_url=result_url,
+        result_task_id=result_task_id,
+        warnings=entry.warnings,
+        error_code=entry.error_code,
+        suggestion=entry.suggestion,
+    )
+
+
+def _response_from_local_artifacts(task_id: str) -> Optional[TaskStatusResponse]:
+    has_video, available_files = _scan_task_artifacts(task_id)
+    if not has_video and not available_files:
+        return None
+    return TaskStatusResponse(
+        task_id=task_id,
+        status=TaskStatusEnum.SUCCESS,
+        progress=100,
+        message="Completed",
+        result_url=_success_result_url(task_id),
+        warnings=[],
+    )
+
+
 def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> None:
     if _is_test_environment():
         logger.info("Skipping Celery enqueue in test environment for task_id=%s", task_id)
@@ -271,15 +402,15 @@ def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> 
 
     if hasattr(process_video_task, "apply_async"):
         # Determine queue based on video duration if available
-        queue = "default"
+        queue = "transcription"
         try:
             from moviepy.editor import VideoFileClip
             video = VideoFileClip(file_path)
             duration = video.duration
             video.close()
             if duration < 60:
-                queue = "high_priority"
-                logger.info("Routing task %s to high_priority queue (duration: %.2fs)", task_id, duration)
+                queue = "transcription"
+                logger.info("Routing task %s to transcription queue (duration: %.2fs)", task_id, duration)
         except Exception as e:
             logger.warning("Failed to determine video duration for queue routing: %s", e)
 
@@ -306,9 +437,8 @@ def _enqueue_rebuild_final_task(
         raise HTTPException(status_code=503, detail="Task worker unavailable")
 
     if hasattr(rebuild_final_video_task, "apply_async"):
-        # Rebuild tasks are usually fast and user-triggered, so we put them in high_priority
         rebuild_final_video_task.apply_async(
-            args=[task_id, lang_suffix, subtitle_format], task_id=rebuild_task_id, queue="high_priority"
+            args=[task_id, lang_suffix, subtitle_format], task_id=rebuild_task_id, queue="rebuild"
         )
         return rebuild_task_id
 
@@ -331,6 +461,14 @@ def _validate_uploaded_video_file(file: UploadFile) -> str:
     safe_filename = validate_upload_metadata(file.filename, file.content_type)
     validate_upload_size(file.file, MAX_UPLOAD_SIZE_MB)
     return safe_filename
+
+
+def _uploaded_file_size(file: UploadFile) -> int:
+    current = file.file.tell()
+    file.file.seek(0, os.SEEK_END)
+    size = file.file.tell()
+    file.file.seek(current)
+    return size
 
 
 def _validate_saved_video_file(file_path: str) -> None:
@@ -429,6 +567,19 @@ async def get_app_capabilities():
     return AppCapabilitiesResponse(**_capability_response_payload())
 
 
+@app.get("/download-ticket")
+async def create_download_ticket(path: str = Query(..., description="Download path beginning with /download/ or /batch/")):
+    path_part, _, query = path.partition("?")
+    if not (path_part.startswith("/download/") or (path_part.startswith("/batch/") and path_part.endswith("/download"))):
+        raise HTTPException(status_code=400, detail="Download tickets can only be issued for download paths")
+    query_params = dict(parse_qsl(query, keep_blank_values=True))
+    canonical_path = _canonical_download_path(path_part, query_params)
+    expires_at = int(time.time()) + settings.DOWNLOAD_TICKET_TTL_SECONDS
+    ticket = _sign_download_ticket(canonical_path, expires_at)
+    separator = "&" if "?" in path else "?"
+    return {"url": f"{path}{separator}ticket={ticket}", "expires_at": expires_at}
+
+
 def check_system_dependencies():
     """Check critical dependencies on startup."""
     from .utils.error_messages import ERROR_MESSAGES
@@ -481,6 +632,38 @@ def check_system_dependencies():
             ERROR_MESSAGES["redis_not_running"]["message"],
             ERROR_MESSAGES["redis_not_running"]["suggestion"])
 
+    # 4. Check configured subtitle font (best effort outside production)
+    font_status = _check_subtitle_font()
+    if not font_status["available"]:
+        log = logger.error if production else logger.warning
+        log(
+            "Configured subtitle font could not be resolved: %s. Detail: %s",
+            settings.SUBTITLE_FONT_NAME,
+            font_status["detail"],
+        )
+
+
+def _check_subtitle_font() -> dict[str, Any]:
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["fc-match", settings.SUBTITLE_FONT_NAME],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {"font": settings.SUBTITLE_FONT_NAME, "available": False, "detail": "fontconfig fc-match is not installed"}
+    except Exception as exc:
+        return {"font": settings.SUBTITLE_FONT_NAME, "available": False, "detail": str(exc)}
+
+    output = (result.stdout or "").strip()
+    if result.returncode != 0 or not output:
+        return {"font": settings.SUBTITLE_FONT_NAME, "available": False, "detail": result.stderr.strip() or "fc-match returned no match"}
+    return {"font": settings.SUBTITLE_FONT_NAME, "available": True, "detail": output}
+
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -525,6 +708,15 @@ async def readyz():
             "code": "ffmpeg_not_found",
             "message": ERROR_MESSAGES["ffmpeg_not_found"]["message"],
             "suggestion": ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"]
+        })
+
+    font_status = _check_subtitle_font()
+    if not font_status["available"]:
+        errors.append({
+            "code": "subtitle_font_unavailable",
+            "message": f"Configured subtitle font is unavailable: {settings.SUBTITLE_FONT_NAME}",
+            "suggestion": "Install fontconfig and a CJK-capable font package, or set SUBTITLE_FONT_NAME to an installed font.",
+            "detail": font_status["detail"],
         })
 
     if errors:
@@ -678,11 +870,7 @@ async def get_status(task_id: str):
             warnings.extend(task_result.result.get("warnings", []) or [])
 
         result_owner_task_id = result_task_id or task_id
-        storage = get_storage_backend()
-        # Try to get S3 URL first, fallback to local results page
-        result_url = storage.get_url(f"{result_owner_task_id}_final.mp4")
-        if not result_url:
-            result_url = f"/results/{result_owner_task_id}"
+        result_url = _success_result_url(result_owner_task_id)
         status = TaskStatusEnum.SUCCESS
     elif status == "FAILURE":
         if isinstance(task_result.info, dict) and task_result.info.get("error_code"):
@@ -699,13 +887,24 @@ async def get_status(task_id: str):
         suggestion = failure_payload["suggestion"]
         status = TaskStatusEnum.FAILURE
     elif status == "PENDING":
+        persisted = TASK_HISTORY.get(task_id)
+        if persisted and persisted.status in {
+            TaskStatusEnum.SUCCESS.value,
+            TaskStatusEnum.FAILURE.value,
+            TaskStatusEnum.CANCELED.value,
+            TaskStatusEnum.PROCESSING.value,
+        }:
+            return _response_from_history(task_id, persisted)
+
         artifact_payload = _failure_payload_from_artifact(task_id)
         if artifact_payload:
             error_code = artifact_payload["error_code"]
             message = artifact_payload["message"]
             suggestion = artifact_payload["suggestion"]
             status = TaskStatusEnum.FAILURE
-        elif TASK_HISTORY.get_created_at(task_id) is None and not _task_has_local_artifacts(task_id):
+        elif local_response := _response_from_local_artifacts(task_id):
+            return local_response
+        elif persisted is None:
             error_info = get_error_response("task_not_found")
             raise HTTPException(
                 status_code=404,
@@ -736,13 +935,16 @@ async def get_status(task_id: str):
             status = TaskStatusEnum.PROCESSING
 
     # Best-effort status tracking for "Recent Tasks"
-    try:
-        duration = None
-        if status in (TaskStatusEnum.SUCCESS, TaskStatusEnum.FAILURE, TaskStatusEnum.CANCELED):
-            duration = duration_seconds_since(TASK_HISTORY.get_created_at(task_id))
-        TASK_HISTORY.update_status(task_id=task_id, status=status.value, duration_seconds=duration)
-    except Exception:
-        logger.warning("Failed to update task history (non-fatal)", exc_info=True)
+    _persist_task_state(
+        task_id,
+        status,
+        progress=progress,
+        message=message,
+        warnings=warnings,
+        error_code=error_code,
+        suggestion=suggestion,
+        result_task_id=result_task_id,
+    )
 
     return TaskStatusResponse(
         task_id=task_id,
@@ -760,6 +962,16 @@ async def get_status(task_id: str):
 @app.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str):
     task_id = validate_task_id(task_id)
+    if TASK_HISTORY.get(task_id) is None and not _task_has_local_artifacts(task_id):
+        error_info = get_error_response("task_not_found")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "task_not_found",
+                "message": error_info["message"],
+                "suggestion": error_info["suggestion"],
+            },
+        )
 
     # Mark as canceled first so any polling becomes deterministic immediately.
     mark_task_canceled(UPLOAD_DIR, task_id)
@@ -771,11 +983,15 @@ async def cancel_task(task_id: str):
     except Exception:
         logger.warning("Failed to revoke task (non-fatal): %s", task_id, exc_info=True)
 
-    try:
-        duration = duration_seconds_since(TASK_HISTORY.get_created_at(task_id))
-        TASK_HISTORY.update_status(task_id=task_id, status=TaskStatusEnum.CANCELED.value, duration_seconds=duration)
-    except Exception:
-        logger.warning("Failed to record canceled status (non-fatal): %s", task_id, exc_info=True)
+    _persist_task_state(
+        task_id,
+        TaskStatusEnum.CANCELED,
+        progress=0,
+        message="Task canceled by user",
+        warnings=[],
+        error_code="task_canceled",
+        suggestion="Restart the task if you still need subtitle generation for this file.",
+    )
 
     return {"status": "canceled", "task_id": task_id}
 
@@ -844,6 +1060,13 @@ async def batch_upload_videos(
     parallel: bool = Form(True, description="Use parallel processing for long videos"),
 ):
     validate_batch_files(files, MAX_BATCH_FILES)
+    total_size = sum(_uploaded_file_size(file) for file in files)
+    max_total_bytes = settings.MAX_BATCH_TOTAL_SIZE_MB * 1024 * 1024
+    if total_size > max_total_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Combined batch size exceeds MAX_BATCH_TOTAL_SIZE_MB={settings.MAX_BATCH_TOTAL_SIZE_MB}",
+        )
 
     langs = validate_target_langs(target_langs)
     normalized_subtitle_format = validate_subtitle_format(subtitle_format)

@@ -1,4 +1,5 @@
 import { apiRequest, buildApiUrl, UPLOAD_TIMEOUT_MS } from "@/api/client";
+import { createDownloadTicket } from "@/api/results";
 import type { BatchStatusResponse, BatchUploadResponse } from "@/types/api";
 
 export async function uploadBatch(formData: FormData): Promise<BatchUploadResponse> {
@@ -16,4 +17,12 @@ export async function getBatchStatus(batchId: string): Promise<BatchStatusRespon
 
 export function downloadBatch(batchId: string): string {
   return buildApiUrl(`/batch/${encodeURIComponent(batchId)}/download`);
+}
+
+export function downloadBatchPath(batchId: string): string {
+  return `/batch/${encodeURIComponent(batchId)}/download`;
+}
+
+export async function createBatchDownloadTicket(batchId: string): Promise<string> {
+  return createDownloadTicket(downloadBatchPath(batchId));
 }

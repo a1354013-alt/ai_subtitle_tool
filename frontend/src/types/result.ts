@@ -40,4 +40,5 @@ export type DownloadItem = {
   description?: string;
   available: boolean;
   url?: string;
+  path?: string;
 };

@@ -72,6 +72,9 @@ SENSITIVE_ENV_PATHS = frozenset({
     "backend/.env",
     "frontend/.env",
 })
+ZIP_TIMESTAMP = (2024, 1, 1, 0, 0, 0)
+FILE_MODE = 0o644
+EXECUTABLE_MODE = 0o755
 
 
 def _is_env_file(rel_posix: str) -> bool:
@@ -110,32 +113,35 @@ def build_release_zip(repo_root: Path, out_path: Path) -> None:
     except ValueError:
         out_rel_posix = None
 
+    entries: list[tuple[Path, str]] = []
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        # Prune excluded directories in-place to prevent descending into them
+        dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDED_DIR_NAMES)
+        for filename in sorted(filenames):
+            abs_path = Path(dirpath) / filename
+            rel_path = abs_path.relative_to(repo_root)
+            rel_posix = rel_path.as_posix()
+
+            # Skip the output zip file itself
+            if out_rel_posix is not None and rel_posix == out_rel_posix:
+                continue
+
+            parts = rel_posix.split("/")
+            if parts[0] in EXCLUDED_DIR_NAMES:
+                continue
+            if _is_env_file(rel_posix):
+                continue
+            if _is_excluded(rel_posix):
+                continue
+            entries.append((abs_path, rel_posix))
+
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for dirpath, dirnames, filenames in os.walk(repo_root):
-            # Prune excluded directories in-place to prevent descending into them
-            dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_NAMES]
-
-            for filename in filenames:
-                abs_path = Path(dirpath) / filename
-                rel_path = abs_path.relative_to(repo_root)
-                rel_posix = rel_path.as_posix()
-
-                # Skip the output zip file itself
-                if out_rel_posix is not None and rel_posix == out_rel_posix:
-                    continue
-                
-                # Skip if any top-level directory part is excluded
-                parts = rel_posix.split("/")
-                if parts[0] in EXCLUDED_DIR_NAMES:
-                    continue
-                
-                # Skip environment files and other excluded content
-                if _is_env_file(rel_posix):
-                    continue
-                if _is_excluded(rel_posix):
-                    continue
-
-                zf.write(abs_path, rel_posix)
+        for abs_path, rel_posix in sorted(entries, key=lambda item: item[1]):
+            info = zipfile.ZipInfo(rel_posix, date_time=ZIP_TIMESTAMP)
+            mode = EXECUTABLE_MODE if os.access(abs_path, os.X_OK) else FILE_MODE
+            info.external_attr = (mode & 0xFFFF) << 16
+            with open(abs_path, "rb") as f:
+                zf.writestr(info, f.read(), compress_type=zipfile.ZIP_DEFLATED)
 
 
 def _assert_release_zip_clean(out_path: Path) -> None:

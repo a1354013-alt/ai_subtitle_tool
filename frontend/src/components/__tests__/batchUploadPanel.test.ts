@@ -6,13 +6,15 @@ import type { BatchStatusResponse } from "@/types/api";
 const {
   mockUploadBatch,
   mockGetBatchStatus,
-  mockDownloadBatch,
+  mockCreateBatchDownloadTicket,
+  mockCreateDownloadTicket,
   mockGetAppConfig,
   mockGetAppCapabilities,
 } = vi.hoisted(() => ({
   mockUploadBatch: vi.fn(),
   mockGetBatchStatus: vi.fn(),
-  mockDownloadBatch: vi.fn((batchId: string) => `/batch/${batchId}/download`),
+  mockCreateBatchDownloadTicket: vi.fn(async (batchId: string) => `/batch/${batchId}/download?ticket=t`),
+  mockCreateDownloadTicket: vi.fn(async (path: string) => `${path}${path.includes("?") ? "&" : "?"}ticket=t`),
   mockGetAppConfig: vi.fn(),
   mockGetAppCapabilities: vi.fn(),
 }));
@@ -20,7 +22,7 @@ const {
 vi.mock("@/api/batch", () => ({
   uploadBatch: mockUploadBatch,
   getBatchStatus: mockGetBatchStatus,
-  downloadBatch: mockDownloadBatch,
+  createBatchDownloadTicket: mockCreateBatchDownloadTicket,
 }));
 
 vi.mock("@/api/config", () => ({
@@ -29,6 +31,10 @@ vi.mock("@/api/config", () => ({
 
 vi.mock("@/api/capabilities", () => ({
   getAppCapabilities: mockGetAppCapabilities,
+}));
+
+vi.mock("@/api/results", () => ({
+  createDownloadTicket: mockCreateDownloadTicket,
 }));
 
 function makeBatchStatus(status: string): BatchStatusResponse {
@@ -115,9 +121,12 @@ describe("BatchUploadPanel", () => {
   beforeEach(() => {
     mockUploadBatch.mockReset();
     mockGetBatchStatus.mockReset();
-    mockDownloadBatch.mockReset();
+    mockCreateBatchDownloadTicket.mockReset();
+    mockCreateDownloadTicket.mockReset();
     mockGetAppConfig.mockReset();
     mockGetAppCapabilities.mockReset();
+    mockCreateBatchDownloadTicket.mockImplementation(async (batchId: string) => `/batch/${batchId}/download?ticket=t`);
+    mockCreateDownloadTicket.mockImplementation(async (path: string) => `${path}${path.includes("?") ? "&" : "?"}ticket=t`);
   });
 
   afterEach(() => {
@@ -131,25 +140,28 @@ describe("BatchUploadPanel", () => {
     const wrapper = await submitBatchWithStatus("SUCCESS");
 
     expect(wrapper.text()).toContain("Completed");
-    const links = wrapper.findAll(".task-actions a");
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const links = wrapper.findAll(".task-actions button");
     expect(links).toHaveLength(4);
-    expect(links[0].attributes("href")).toBe("/download/task-1");
-    expect(links[1].attributes("href")).toBe("/download/task-1?lang=English&format=srt");
-    expect(links[2].attributes("href")).toBe("/download/task-1?lang=English&format=ass");
-    expect(links[3].attributes("href")).toBe("/download/task-1?lang=English&format=vtt");
+    await links[0].trigger("click");
+    expect(mockCreateDownloadTicket).toHaveBeenCalledWith("/download/task-1");
+    openSpy.mockRestore();
   });
 
-  it("uses configured API base URL for SUCCESS download buttons", async () => {
+  it("requests a signed batch ZIP ticket before opening", async () => {
     vi.stubEnv("VITE_API_BASE_URL", "http://127.0.0.1:8891");
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 
     const wrapper = await submitBatchWithStatus("SUCCESS");
 
-    const links = wrapper.findAll(".task-actions a");
-    expect(links).toHaveLength(4);
-    expect(links[0].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1");
-    expect(links[1].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1?lang=English&format=srt");
-    expect(links[2].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1?lang=English&format=ass");
-    expect(links[3].attributes("href")).toBe("http://127.0.0.1:8891/download/task-1?lang=English&format=vtt");
+    const zipButton = wrapper.find(".batch-header button");
+    expect(zipButton).toBeTruthy();
+    await zipButton.trigger("click");
+    await flushPromises();
+
+    expect(mockCreateBatchDownloadTicket).toHaveBeenCalledWith("batch-123");
+    expect(openSpy).toHaveBeenCalledWith("/batch/batch-123/download?ticket=t", "_blank", "noopener");
+    openSpy.mockRestore();
   });
 
   it("shows failed styling for FAILURE", async () => {
@@ -215,7 +227,12 @@ describe("BatchUploadPanel", () => {
   });
 
   it("shows Ollama status instead of hardcoded OpenAI key warning", async () => {
-    mockGetAppCapabilities.mockResolvedValueOnce({
+    mockGetAppConfig.mockResolvedValueOnce({
+      maxUploadSizeMb: 2048,
+      maxBatchFiles: 20,
+      supportedExtensions: [".mp4", ".mkv", ".avi", ".mov"],
+      batchUploadEnabled: true,
+      subtitleFormats: ["srt", "ass", "vtt"],
       provider: "ollama",
       model: "gemma3:12b",
       translationEnabled: true,
@@ -231,5 +248,6 @@ describe("BatchUploadPanel", () => {
     expect(wrapper.text()).toContain("Ollama");
     expect(wrapper.text()).toContain("gemma3:12b");
     expect(wrapper.text()).not.toContain("OpenAI API Key");
+    expect(mockGetAppCapabilities).not.toHaveBeenCalled();
   });
 });

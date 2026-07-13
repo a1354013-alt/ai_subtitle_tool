@@ -36,6 +36,9 @@ CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
 UPLOAD_DIR=./backend/uploads
 OUTPUT_DIR=./backend/outputs
 TEMP_DIR=./backend/tmp
+TASK_CLEANUP_DAYS=7
+SUBTITLE_FONT_NAME=Noto Sans CJK TC
+CELERY_WORKER_CONCURRENCY=1
 ```
 
 Run services:
@@ -43,6 +46,7 @@ Run services:
 ```bash
 redis-server
 celery -A backend.celery_app:celery_app worker --loglevel=info
+celery -A backend.celery_app:celery_app beat --loglevel=info
 uvicorn backend.main:app --host 127.0.0.1 --port 8891 --reload
 ```
 
@@ -64,6 +68,8 @@ VITE_API_BASE_URL=http://127.0.0.1:8891
 VITE_APP_TITLE=AI Subtitle Tool
 ```
 
+Do not treat `VITE_API_TOKEN` as a protected server secret. If backend token auth is enabled, browser fetch requests may send it as a convenience header, while direct downloads use short-lived signed tickets.
+
 ## Docker Startup
 
 ```bash
@@ -72,6 +78,8 @@ cp frontend/.env.example frontend/.env
 docker compose config
 docker compose up --build
 ```
+
+Docker starts Redis, API, worker, and a separate Celery beat service. Beat owns scheduled cleanup; the worker is not started with `-B`. The backend image installs fontconfig plus Noto CJK fonts for CJK subtitle burn-in diagnostics.
 
 Expected URLs:
 

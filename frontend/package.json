@@ -1,7 +1,7 @@
 {
   "name": "ai-subtitle-tool-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0-rc2",
   "type": "module",
   "engines": {
     "node": ">=20 <21"
@@ -17,7 +17,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "axios": "^1.16.0",
     "pinia": "^2.1.7",
     "vue": "^3.4.38",
     "vue-i18n": "^11.4.0",

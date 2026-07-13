@@ -82,7 +82,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { getAppCapabilities } from "@/api/capabilities";
 import { getAppConfig } from "@/api/config";
 import type { AppCapabilities, AppConfig } from "@/types/api";
 import type { SubtitleFormat } from "@/types/subtitle";
@@ -148,6 +147,19 @@ const translationPlaceholder = computed(() => {
 
 const translationStatusMessage = computed(() => getTranslationStatusMessage(capabilities.value, t));
 
+function capabilitiesFromConfig(value: AppConfig): AppCapabilities {
+  return {
+    provider: value.provider,
+    model: value.model,
+    translationEnabled: value.translationEnabled,
+    reason: value.reason,
+    message: value.message,
+    defaultTargetLanguage: value.defaultTargetLanguage,
+    availableModes: value.availableModes,
+    openaiConfigured: value.openaiConfigured,
+  };
+}
+
 function validateSelectedFile(selected: File | null): string {
   if (!selected) return "";
   const extension = selected.name.includes(".") ? `.${selected.name.split(".").pop()!.toLowerCase()}` : "";
@@ -198,12 +210,12 @@ async function onSubmit() {
 }
 
 onMounted(async () => {
-  const [configResult, capabilitiesResult] = await Promise.allSettled([getAppConfig(), getAppCapabilities()]);
-  if (configResult.status === "fulfilled") {
-    config.value = configResult.value;
-  }
-  if (capabilitiesResult.status === "fulfilled") {
-    capabilities.value = capabilitiesResult.value;
+  try {
+    const appConfig = await getAppConfig();
+    config.value = appConfig;
+    capabilities.value = capabilitiesFromConfig(appConfig);
+  } catch {
+    // Keep local defaults when the config endpoint is unavailable during smoke tests or offline demos.
   }
   applyDefaultTargetLanguage();
 });

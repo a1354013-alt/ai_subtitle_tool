@@ -1,4 +1,4 @@
-import os
+﻿import os
 from types import SimpleNamespace
 
 try:
@@ -118,23 +118,24 @@ CELERY_CONFIG = dict(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    # 統一使用 UTC，顯示層再轉換為本地時區
     enable_utc=True,
     timezone="UTC",
-    # 任務超時設定
-    task_soft_time_limit=1800,  # 30 分鐘
-    task_time_limit=2100,       # 35 分鐘
-    # 佇列設定
+    task_soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT,
+    task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
+    worker_concurrency=settings.CELERY_WORKER_CONCURRENCY,
     task_default_queue="default",
     task_queues={
-        "default": {
-            "exchange": "default",
-            "routing_key": "default",
-        },
-        "high_priority": {
-            "exchange": "high_priority",
-            "routing_key": "high_priority",
-        },
+        "default": {"exchange": "default", "routing_key": "default"},
+        "transcription": {"exchange": "transcription", "routing_key": "transcription"},
+        "rebuild": {"exchange": "rebuild", "routing_key": "rebuild"},
+        "maintenance": {"exchange": "maintenance", "routing_key": "maintenance"},
+    },
+    task_routes={
+        "backend.tasks.process_video_task": {"queue": "transcription"},
+        "backend.tasks.transcribe_segment_task": {"queue": "transcription"},
+        "backend.tasks.merge_and_finalize_task": {"queue": "transcription"},
+        "backend.tasks.rebuild_final_video_task": {"queue": "rebuild"},
+        "backend.tasks.cleanup_old_files": {"queue": "maintenance"},
     },
     beat_schedule={
         "cleanup-old-files-every-hour": {
@@ -143,6 +144,7 @@ CELERY_CONFIG = dict(
         },
     },
 )
+
 if hasattr(celery_app.conf, "update"):
     celery_app.conf.update(CELERY_CONFIG)
 else:
@@ -163,3 +165,4 @@ task_eager_propagates = (
 
 celery_app.conf.task_always_eager = task_always_eager
 celery_app.conf.task_eager_propagates = task_eager_propagates
+

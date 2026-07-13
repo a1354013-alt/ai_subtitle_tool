@@ -11,7 +11,9 @@
             <div v-if="it.description" class="desc">{{ it.description }}</div>
           </div>
           <div>
-            <a v-if="it.available && it.url" class="btn primary" :href="it.url">{{ $t('download.button') }}</a>
+            <button v-if="it.available && (it.path || it.url)" class="btn primary" type="button" @click="download(it)">
+              {{ $t('download.button') }}
+            </button>
             <button v-else class="btn" disabled>Not available</button>
           </div>
         </div>
@@ -21,9 +23,15 @@
 </template>
 
 <script setup lang="ts">
+import { createDownloadTicket } from "@/api/results";
 import type { DownloadItem } from "@/types/result";
 
 defineProps<{ items: DownloadItem[] }>();
+
+async function download(item: DownloadItem) {
+  const url = item.path ? await createDownloadTicket(item.path) : item.url;
+  if (url) window.open(url, "_blank", "noopener");
+}
 </script>
 
 <style scoped>

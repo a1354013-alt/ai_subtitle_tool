@@ -58,7 +58,7 @@ Local demo defaults keep API authentication disabled. When `REQUIRE_AUTH_TOKEN=t
 
 1. **Recommended**: Set `REQUIRE_AUTH_TOKEN=true` and a strong `AUTH_TOKEN`
 2. **Alternative**: Deploy behind reverse proxy with authentication
-3. **Frontend**: Set `VITE_API_TOKEN` so browser requests include `X-API-Token`
+3. **Frontend**: If you choose the built-in SPA token mode, `VITE_API_TOKEN` makes fetch requests include `X-API-Token`. It is embedded in the browser bundle and is not a protected server secret.
 
 ### Rate Limiting
 `RATE_LIMIT_PER_IP` is enforced by middleware for non-health API routes as a per-IP hourly limit. Set it to `0` to disable for local development, and use a positive integer for production. Consider reverse-proxy or Redis-based limiting for distributed deployments.
@@ -74,13 +74,13 @@ The following environment variables contain sensitive data:
 | `REDIS_URL` | Redis connection | Use authentication in production |
 | `CORS_ALLOWED_ORIGINS` | CORS policy | Configure per environment |
 | `AUTH_TOKEN` | API token auth | Required when `REQUIRE_AUTH_TOKEN=true` |
-| `VITE_API_TOKEN` | Frontend API token header | Build/runtime secret; do not commit real values |
+| `VITE_API_TOKEN` | Optional frontend API token header | Public browser-bundle value; do not treat as a server secret |
 
 `OPENAI_API_KEY` is optional for transcription-only usage and required when translation is requested. Missing OpenAI configuration should be treated as a translation feature warning, not as a general service startup failure.
 
-When `REQUIRE_AUTH_TOKEN=true`, non-health API routes require either `Authorization: Bearer <token>` or `X-API-Token: <token>`. `/healthz`, `/readyz`, `/api/docs`, `/api/redoc`, and `/openapi.json` are excluded for diagnostics and documentation. The frontend sends `X-API-Token` automatically when `VITE_API_TOKEN` is set.
+When `REQUIRE_AUTH_TOKEN=true`, non-health API routes require either `Authorization: Bearer <token>` or `X-API-Token: <token>`. `/healthz`, `/readyz`, `/api/docs`, `/api/redoc`, and `/openapi.json` are excluded for diagnostics and documentation. Direct browser downloads use short-lived signed download tickets issued by authenticated requests to `/download-ticket`; permanent `AUTH_TOKEN` values are not placed in download URLs.
 
-`STORAGE_BACKEND` controls storage selection explicitly. `STORAGE_BACKEND=local` always uses local storage; `STORAGE_BACKEND=s3` requires `S3_BUCKET`. Setting `S3_BUCKET` alone does not enable S3.
+`STORAGE_BACKEND` controls storage selection explicitly. `STORAGE_BACKEND=local` always uses local storage. `STORAGE_BACKEND=s3` requires `S3_BUCKET` and optional dependencies from `requirements.optional-s3.txt`; S3 remains experimental unless manifest, subtitle download, batch download, cleanup, and rebuild behavior have all been verified for that deployment.
 
 ### Best Practices
 1. Use `.env` files excluded from git (`.gitignore` includes `.env*`)

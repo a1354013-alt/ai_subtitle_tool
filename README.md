@@ -144,6 +144,8 @@ VITE_API_TOKEN=your-token
 VITE_APP_TITLE=AI Subtitle Tool
 ```
 
+`VITE_API_TOKEN` is a browser-bundle convenience value for same-operator deployments, not a protected server secret. When backend auth is enabled, direct downloads are opened with short-lived signed download tickets created by authenticated API requests.
+
 Local frontend page: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
 ## Testing
@@ -176,6 +178,8 @@ Notes:
 - Full `npm audit` can still report dev dependency advisories; those are tracked separately. dev dependency advisories are not production runtime risks unless they move into runtime dependencies.
 
 Auth and rate limiting are enforced by middleware when enabled. Local demo defaults keep auth off and set `RATE_LIMIT_PER_IP=0`. Production should set `REQUIRE_AUTH_TOKEN=true`, `AUTH_TOKEN`, and a positive `RATE_LIMIT_PER_IP`; safe status polling endpoints (`GET /status/{task_id}` and `GET /batch/{batch_id}/status`) are exempt from the global per-IP bucket so normal long-running jobs are not blocked by polling.
+
+Completed task status is durably persisted in `UPLOAD_DIR/task_history.sqlite3`, so successful or failed jobs remain visible after Redis result metadata expires. Scheduled cleanup uses `TASK_CLEANUP_DAYS` and should run through the dedicated Celery beat service in Docker.
 
 Docker contract:
 
@@ -297,9 +301,14 @@ Important variables:
 - `TEMP_DIR`
 - `MAX_UPLOAD_SIZE_MB`
 - `MAX_BATCH_FILES`
+- `MAX_BATCH_TOTAL_SIZE_MB`
+- `MAX_PARALLEL_SEGMENTS`
 - `REDIS_URL`
 - `CELERY_BROKER_URL`
 - `CELERY_RESULT_BACKEND`
+- `CELERY_WORKER_CONCURRENCY`
+- `CELERY_TASK_SOFT_TIME_LIMIT`
+- `CELERY_TASK_TIME_LIMIT`
 - `OPENAI_API_KEY`
 - `LLM_PROVIDER`
 - `OPENAI_MODEL`
@@ -310,6 +319,10 @@ Important variables:
 - `FFMPEG_BINARY`
 - `FFPROBE_BINARY`
 - `REPORT_EXPORT_TIMEOUT_SECONDS`
+- `SUBTITLE_FONT_NAME`
+- `TASK_CLEANUP_DAYS`
+- `DOWNLOAD_TICKET_TTL_SECONDS`
+- `OLLAMA_CAPABILITY_CACHE_TTL_SECONDS`
 - `FFMPEG_PRESET`
 - `STORAGE_BACKEND`
 - `S3_ENDPOINT`
@@ -323,7 +336,8 @@ Important variables:
 - `RATE_LIMIT_PER_IP` limits requests per IP per hour. `0` disables the middleware limit for local development; use a positive integer in production.
 - `FFMPEG_TIMEOUT_SECONDS` / `FFPROBE_TIMEOUT_SECONDS` bound media subprocess runtime.
 - `REPORT_EXPORT_TIMEOUT_SECONDS` bounds experimental PDF report conversion runtime; default is `120`.
-- Frontend deployments can set `VITE_API_TOKEN` to send `X-API-Token` automatically on every API request.
+- Frontend deployments can set `VITE_API_TOKEN` to send `X-API-Token` on fetch requests, but it is visible to browser users and must not be treated as a secret. Authenticated downloads use short-lived signed tickets.
+- GPU transcription workers should run with `CELERY_WORKER_CONCURRENCY=1` unless the deployment has been explicitly sized and tested for higher concurrency.
 
 Whisper model selection priority:
 

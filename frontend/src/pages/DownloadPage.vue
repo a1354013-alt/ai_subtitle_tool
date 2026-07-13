@@ -109,7 +109,7 @@ import ErrorAlert from "@/components/ErrorAlert.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import { useResultStore } from "@/stores/result";
 import type { DownloadItem } from "@/types/result";
-import { buildDownloadUrl } from "@/api/results";
+import { buildDownloadPath } from "@/api/results";
 import { usePreferencesStore } from "@/stores/preferences";
 import { rebuildFinalVideo } from "@/api/tasks";
 import type { SubtitleFormat } from "@/types/subtitle";
@@ -202,7 +202,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
     label: t("download.finalVideoLabel"),
     description: t("download.finalVideoDescription"),
     available: manifest.value.has_video,
-    url: manifest.value.has_video ? buildDownloadUrl(taskId.value) : undefined,
+    path: manifest.value.has_video ? buildDownloadPath(taskId.value) : undefined,
   });
 
   const langInfo = files.value.find((f) => f.lang === selectedLang.value);
@@ -215,7 +215,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
     label: `Subtitle (ASS) - ${selectedLang.value}`,
     description: langInfo?.translated === false ? t("download.translationFailedDescription") : undefined,
     available: hasAss,
-    url: hasAss ? buildDownloadUrl(taskId.value, "ass", selectedLang.value) : undefined,
+    path: hasAss ? buildDownloadPath(taskId.value, "ass", selectedLang.value) : undefined,
   });
 
   items.push({
@@ -223,7 +223,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
     label: `Subtitle (SRT) - ${selectedLang.value}`,
     description: langInfo?.translated === false ? t("download.translationFailedDescription") : undefined,
     available: hasSrt,
-    url: hasSrt ? buildDownloadUrl(taskId.value, "srt", selectedLang.value) : undefined,
+    path: hasSrt ? buildDownloadPath(taskId.value, "srt", selectedLang.value) : undefined,
   });
 
   items.push({
@@ -231,7 +231,7 @@ const downloadItems = computed<DownloadItem[]>(() => {
     label: `Subtitle (VTT) - ${selectedLang.value}`,
     description: t("download.vttDescription"),
     available: hasVtt,
-    url: hasVtt ? buildDownloadUrl(taskId.value, "vtt", selectedLang.value) : undefined,
+    path: hasVtt ? buildDownloadPath(taskId.value, "vtt", selectedLang.value) : undefined,
   });
 
   return items;

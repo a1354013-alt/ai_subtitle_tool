@@ -3,6 +3,8 @@ import logging
 import os
 import shutil
 import time
+from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Iterable, Optional
 
 from .. import settings
@@ -14,6 +16,21 @@ METADATA_ENTRY_NAMES = {
     "task_history.sqlite3-shm",
     "batches",
 }
+
+
+@dataclass
+class CleanupCounts:
+    files_removed: int = 0
+    dirs_removed: int = 0
+    stale_locks_removed: int = 0
+    batch_metadata_removed: int = 0
+    task_history_records_removed: int = 0
+    preserved_locked: int = 0
+    errors: int = 0
+    dry_run: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 def _default_upload_dir() -> str:
@@ -88,9 +105,12 @@ def _iter_upload_entries(upload_dir: str) -> Iterable[str]:
 
 def cleanup_old_files(
     upload_dir: Optional[str] = None,
-    retention_seconds: int = 24 * 3600,
+    output_dir: Optional[str] = None,
+    temp_dir: Optional[str] = None,
+    retention_seconds: Optional[int] = None,
     stale_lock_threshold_seconds: int = 3600,
-) -> None:
+    dry_run: bool = False,
+) -> dict:
     """
     Delete old unlocked files/dirs under upload_dir and cleanup database records.
 
@@ -100,19 +120,25 @@ def cleanup_old_files(
     - Deletes database records older than retention_seconds.
     """
     upload_dir = upload_dir or _default_upload_dir()
+    output_dir = output_dir or settings.get_output_dir()
+    temp_dir = temp_dir or settings.get_temp_dir()
+    if retention_seconds is None:
+        retention_seconds = settings.TASK_CLEANUP_DAYS * 24 * 3600
+    counts = CleanupCounts(dry_run=dry_run)
     if not os.path.exists(upload_dir):
-        return
+        return counts.to_dict()
 
     # 0) Cleanup database records
     try:
-        from pathlib import Path
         from ..storage.task_history import TaskHistoryStore
         db_path = Path(upload_dir) / "task_history.sqlite3"
         if db_path.exists():
             store = TaskHistoryStore(db_path)
-            count = store.cleanup_old_records(retention_seconds)
+            count = 0 if dry_run else store.cleanup_old_records(retention_seconds)
+            counts.task_history_records_removed = count
             logger.info("Cleaned up %d old task history records", count)
     except Exception as e:
+        counts.errors += 1
         logger.warning("Failed to cleanup task history records: %s", e, exc_info=True)
 
     now = time.time()
@@ -134,41 +160,79 @@ def cleanup_old_files(
     # 2) remove stale locks (best-effort)
     for lock_path in stale_locks:
         try:
-            os.remove(lock_path)
+            if not dry_run:
+                os.remove(lock_path)
+            counts.stale_locks_removed += 1
         except OSError:
+            counts.errors += 1
             logger.warning("Failed to remove stale lock: %s", lock_path, exc_info=True)
 
+    def _remove_path(path: str, *, batch_metadata: bool = False) -> None:
+        try:
+            if not dry_run:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                elif os.path.isfile(path):
+                    os.remove(path)
+            if batch_metadata:
+                counts.batch_metadata_removed += 1
+            elif os.path.isdir(path):
+                counts.dirs_removed += 1
+            else:
+                counts.files_removed += 1
+        except OSError:
+            counts.errors += 1
+            logger.warning("Cleanup failed for: %s", path, exc_info=True)
+
+    def _cleanup_dir(root_dir: str, *, preserve_metadata: bool = False, batch_metadata: bool = False) -> None:
+        if not os.path.exists(root_dir):
+            return
+        for filename in _iter_upload_entries(root_dir):
+            if preserve_metadata and filename in METADATA_ENTRY_NAMES:
+                continue
+            if filename.endswith(".lock"):
+                continue
+
+            locked = False
+            for bid in valid_locked_ids:
+                if filename.startswith(f"{bid}_") or filename.startswith(bid + "."):
+                    locked = True
+                    break
+            if locked:
+                counts.preserved_locked += 1
+                continue
+
+            file_path = os.path.join(root_dir, filename)
+            try:
+                mtime = os.path.getmtime(file_path)
+            except OSError:
+                counts.errors += 1
+                logger.warning("Failed to read mtime; skipping: %s", file_path, exc_info=True)
+                continue
+
+            if now - mtime <= retention_seconds:
+                continue
+
+            _remove_path(file_path, batch_metadata=batch_metadata)
+
     # 3) cleanup old entries
-    for filename in _iter_upload_entries(upload_dir):
-        if filename in METADATA_ENTRY_NAMES:
-            continue
-        if filename.endswith(".lock"):
-            continue
+    _cleanup_dir(upload_dir, preserve_metadata=True)
+    _cleanup_dir(output_dir)
+    _cleanup_dir(temp_dir)
 
-        # Skip anything associated with a valid lock (prefix match).
-        locked = False
-        for bid in valid_locked_ids:
-            if filename.startswith(f"{bid}_") or filename.startswith(bid + "."):
-                locked = True
-                break
-        if locked:
-            continue
+    batches_dir = os.path.join(upload_dir, "batches")
+    if os.path.exists(batches_dir):
+        for filename in _iter_upload_entries(batches_dir):
+            if not filename.endswith(".json"):
+                continue
+            file_path = os.path.join(batches_dir, filename)
+            try:
+                mtime = os.path.getmtime(file_path)
+            except OSError:
+                counts.errors += 1
+                continue
+            if now - mtime > retention_seconds:
+                _remove_path(file_path, batch_metadata=True)
 
-        file_path = os.path.join(upload_dir, filename)
-        try:
-            mtime = os.path.getmtime(file_path)
-        except OSError:
-            logger.warning("Failed to read mtime; skipping: %s", file_path, exc_info=True)
-            continue
-
-        if now - mtime <= retention_seconds:
-            continue
-
-        try:
-            if os.path.isdir(file_path):
-                shutil.rmtree(file_path)
-            elif os.path.isfile(file_path):
-                os.remove(file_path)
-        except OSError:
-            logger.warning("Cleanup failed for: %s", file_path, exc_info=True)
+    return counts.to_dict()
 

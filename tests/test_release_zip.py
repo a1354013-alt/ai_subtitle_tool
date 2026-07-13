@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -67,3 +69,19 @@ def test_release_zip_excludes_sensitive_and_generated_content(tmp_path: Path):
     assert "scripts/stop-dev.ps1" not in names
     assert "release.zip" not in names
     assert "release-check.zip" not in names
+
+
+def test_release_zip_is_reproducible_when_source_mtimes_change(tmp_path: Path):
+    first = tmp_path / "first.zip"
+    second = tmp_path / "second.zip"
+    touched = REPO_ROOT / "README.md"
+    original_times = (touched.stat().st_atime, touched.stat().st_mtime)
+
+    try:
+        make_release_zip.build_release_zip(REPO_ROOT, first)
+        os.utime(touched, (original_times[0] + 17, original_times[1] + 17))
+        make_release_zip.build_release_zip(REPO_ROOT, second)
+    finally:
+        os.utime(touched, original_times)
+
+    assert hashlib.sha256(first.read_bytes()).hexdigest() == hashlib.sha256(second.read_bytes()).hexdigest()

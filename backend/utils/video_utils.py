@@ -103,11 +103,16 @@ def burn_subtitles(video_path, subtitle_path, output_path):
     實作兩階段策略：先嘗試快速燒錄，失敗則使用保守參數 Fallback。
     """
     abs_subtitle_path = os.path.abspath(subtitle_path).replace("\\", "/").replace(":", "\\:").replace("'", r"\'")
+    font_name = settings.SUBTITLE_FONT_NAME.replace("'", r"\'")
+    force_style = (
+        f"FontName={font_name},FontSize=12,PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2"
+    )
     
     # 第一階段：快速燒錄 (aac)
     cmd_fast = [
         settings.FFMPEG_BINARY, "-y", "-i", video_path,
-        "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
+        "-vf", f"subtitles='{abs_subtitle_path}':force_style='{force_style}'",
         *get_hwaccel_params(),
         output_path
     ]
@@ -119,7 +124,7 @@ def burn_subtitles(video_path, subtitle_path, output_path):
         # 第二階段：保守參數 Fallback
         cmd_fallback = [
             settings.FFMPEG_BINARY, "-y", "-i", video_path,
-            "-vf", f"subtitles='{abs_subtitle_path}':force_style='FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2'",
+            "-vf", f"subtitles='{abs_subtitle_path}':force_style='{force_style}'",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
             output_path

@@ -1,6 +1,8 @@
 import os
 from datetime import timedelta
 
+from .. import settings
+
 
 def escape_ass_text(text: str) -> str:
     return text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")
@@ -15,7 +17,7 @@ def format_ass_timestamp(seconds: float):
     millis = int(td.microseconds / 10000)  # ASS 使用百分之一秒
     return f"{hours}:{minutes:02}:{secs:02}.{millis:02}"
 
-def generate_ass(segments, output_path: str, title="AI Subtitles"):
+def generate_ass(segments, output_path: str, title="AI Subtitles", font_name: str | None = None):
     """
     生成 ASS 格式字幕檔案。
     
@@ -27,6 +29,7 @@ def generate_ass(segments, output_path: str, title="AI Subtitles"):
     Returns:
         output_path
     """
+    font_name = font_name or settings.SUBTITLE_FONT_NAME
     header = f"""[Script Info]
 Title: {title}
 ScriptType: v4.00+
@@ -36,7 +39,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+Style: Default,{font_name},24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

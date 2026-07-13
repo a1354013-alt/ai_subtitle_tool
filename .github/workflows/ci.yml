@@ -8,8 +8,12 @@ on:
 
 jobs:
   ci:
-    name: CI
+    name: CI Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,10 +21,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
 
       - name: Set up Node
+        if: matrix.python-version == '3.11'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -77,30 +82,47 @@ jobs:
         run: python -m pytest -q
 
       - name: Install frontend dependencies
+        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm ci
 
       - name: Lint frontend
+        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run lint
 
       - name: Typecheck frontend
+        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run typecheck
 
       - name: Run frontend tests
+        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run test:ci
 
       - name: Build frontend
+        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run build
 
+      - name: Audit frontend production dependencies
+        if: matrix.python-version == '3.11'
+        working-directory: frontend
+        run: npm audit --omit=dev
+
       - name: Verify delivery zip-only
+        if: matrix.python-version == '3.11'
         run: python scripts/verify_delivery.py --zip-only
 
       - name: Build checked release zip
+        if: matrix.python-version == '3.11'
         run: python scripts/make_release_zip.py --out release.zip --check
 
       - name: Verify release zip
+        if: matrix.python-version == '3.11'
         run: python scripts/verify_release_zip.py release.zip
+
+      - name: Validate Docker configuration
+        if: matrix.python-version == '3.11'
+        run: python scripts/verify_docker_config.py

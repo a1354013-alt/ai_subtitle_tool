@@ -259,6 +259,88 @@ async def test_status_contract_failure_exposes_error_code_and_suggestion(app_cli
 
 
 @pytest.mark.anyio
+async def test_status_uses_durable_success_when_redis_returns_pending(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "11111111-1111-1111-1111-111111111111"
+
+    main.TASK_HISTORY.upsert_created(task_id=task_id, filename="demo.mp4", status="PENDING")
+    main.TASK_HISTORY.update_status(
+        task_id,
+        "SUCCESS",
+        progress=100,
+        message="Completed without polling",
+        warnings=["persisted warning"],
+    )
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("PENDING"))
+
+    response = await client.get(f"/status/{task_id}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "SUCCESS"
+    assert body["progress"] == 100
+    assert body["message"] == "Completed without polling"
+    assert body["warnings"] == ["persisted warning"]
+
+
+@pytest.mark.anyio
+async def test_status_uses_durable_failure_when_redis_returns_pending(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "22222222-2222-2222-2222-222222222222"
+
+    main.TASK_HISTORY.upsert_created(task_id=task_id, filename="demo.mp4", status="PENDING")
+    main.TASK_HISTORY.update_status(
+        task_id,
+        "FAILURE",
+        progress=0,
+        message="ffmpeg missing",
+        error_code="ffmpeg_not_found",
+        suggestion="Install ffmpeg",
+    )
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("PENDING"))
+
+    response = await client.get(f"/status/{task_id}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "FAILURE"
+    assert body["error_code"] == "ffmpeg_not_found"
+    assert body["suggestion"] == "Install ffmpeg"
+
+
+@pytest.mark.anyio
+async def test_status_uses_local_artifacts_when_redis_state_is_lost(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "33333333-3333-3333-3333-333333333333"
+    Path(main.UPLOAD_DIR, f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("PENDING"))
+
+    response = await client.get(f"/status/{task_id}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "SUCCESS"
+    assert body["result_url"] == f"/results/{task_id}"
+
+
+@pytest.mark.anyio
+async def test_worker_completion_persists_without_status_polling(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    import backend.tasks as tasks
+
+    task_id = "33333333-3333-3333-3333-333333333334"
+    main.TASK_HISTORY.upsert_created(task_id=task_id, filename="demo.mp4", status="PENDING")
+    tasks._record_task_state(task_id, "SUCCESS", progress=100, message="Completed", warnings=["from worker"])
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("PENDING"))
+
+    response = await client.get(f"/status/{task_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "SUCCESS"
+    assert response.json()["warnings"] == ["from worker"]
+
+
+@pytest.mark.anyio
 async def test_status_contract_failure_prefers_info_payload(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
     task_id = "99999999-9999-9999-9999-999999999998"
@@ -458,6 +540,83 @@ async def test_subtitle_get_put_and_download_vtt(app_client, monkeypatch: pytest
     assert r3.status_code == 200
     assert r3.headers["content-type"].startswith("text/vtt")
     assert "WEBVTT" in r3.text
+
+
+@pytest.mark.anyio
+async def test_protected_download_rejects_without_header_or_ticket(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "12345678-1234-1234-1234-123456789abc"
+    Path(main.UPLOAD_DIR, f"{task_id}_final.mp4").write_bytes(b"video")
+    monkeypatch.setattr(main.settings, "REQUIRE_AUTH_TOKEN", True)
+    monkeypatch.setattr(main.settings, "AUTH_TOKEN", "secret")
+
+    response = await client.get(f"/download/{task_id}")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_protected_download_accepts_short_lived_ticket(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "12345678-1234-1234-1234-123456789abd"
+    Path(main.UPLOAD_DIR, f"{task_id}_final.mp4").write_bytes(b"video")
+    monkeypatch.setattr(main.settings, "REQUIRE_AUTH_TOKEN", True)
+    monkeypatch.setattr(main.settings, "AUTH_TOKEN", "secret")
+    monkeypatch.setattr(main.settings, "DOWNLOAD_TICKET_TTL_SECONDS", 60)
+
+    ticket_response = await client.get(
+        "/download-ticket",
+        params={"path": f"/download/{task_id}"},
+        headers={"X-API-Token": "secret"},
+    )
+    assert ticket_response.status_code == 200, ticket_response.text
+
+    download_response = await client.get(ticket_response.json()["url"])
+
+    assert download_response.status_code == 200
+    assert download_response.content == b"video"
+
+
+@pytest.mark.anyio
+async def test_protected_batch_download_accepts_short_lived_ticket(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "12345678-1234-1234-1234-123456789abe"
+    Path(main.UPLOAD_DIR, f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+    batch_id = main.BATCH_MANAGER.create_batch([{"task_id": task_id, "filename": "demo.mp4", "status": "SUCCESS"}])
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("SUCCESS"))
+    monkeypatch.setattr(main.settings, "REQUIRE_AUTH_TOKEN", True)
+    monkeypatch.setattr(main.settings, "AUTH_TOKEN", "secret")
+
+    denied = await client.get(f"/batch/{batch_id}/download")
+    assert denied.status_code == 401
+
+    ticket_response = await client.get(
+        "/download-ticket",
+        params={"path": f"/batch/{batch_id}/download"},
+        headers={"X-API-Token": "secret"},
+    )
+    assert ticket_response.status_code == 200, ticket_response.text
+
+    download_response = await client.get(ticket_response.json()["url"])
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"].startswith("application/zip")
+
+
+@pytest.mark.anyio
+async def test_protected_subtitle_download_accepts_short_lived_ticket(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "12345678-1234-1234-1234-123456789abf"
+    Path(main.UPLOAD_DIR, f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+    monkeypatch.setattr(main.settings, "REQUIRE_AUTH_TOKEN", True)
+    monkeypatch.setattr(main.settings, "AUTH_TOKEN", "secret")
+    path = f"/download/{task_id}?lang=English&format=srt"
+
+    ticket_response = await client.get("/download-ticket", params={"path": path}, headers={"X-API-Token": "secret"})
+    assert ticket_response.status_code == 200, ticket_response.text
+
+    download_response = await client.get(ticket_response.json()["url"])
+    assert download_response.status_code == 200
+    assert download_response.text.replace("\r\n", "\n") == VALID_SRT
 
 
 @pytest.mark.anyio
@@ -749,6 +908,7 @@ async def test_cancel_contract_marks_task_canceled(app_client, monkeypatch: pyte
         def revoke(self, terminate: bool = False):
             return None
 
+    main.TASK_HISTORY.upsert_created(task_id=task_id, filename="demo.mp4", status="PENDING")
     monkeypatch.setattr(main, "_get_async_result", lambda _tid: _AR())
 
     r = await client.post(f"/tasks/{task_id}/cancel")
@@ -761,3 +921,14 @@ async def test_cancel_contract_marks_task_canceled(app_client, monkeypatch: pyte
     assert body["status"] == "CANCELED"
     assert body["error_code"] == "task_canceled"
     assert body["suggestion"]
+
+
+@pytest.mark.anyio
+async def test_cancel_unknown_task_rejects_without_creating_history(app_client):
+    client, main, _tmp = app_client
+    task_id = "55555555-5555-5555-5555-555555555556"
+
+    response = await client.post(f"/tasks/{task_id}/cancel")
+
+    assert response.status_code == 404
+    assert main.TASK_HISTORY.get(task_id) is None

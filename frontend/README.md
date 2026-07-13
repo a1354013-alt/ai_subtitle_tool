@@ -54,6 +54,8 @@ Example:
 VITE_API_BASE_URL=http://127.0.0.1:8891
 ```
 
+`VITE_API_TOKEN`, when set, is added to fetch requests as `X-API-Token`. It is embedded in the browser bundle and is not a protected secret. Download buttons first request a short-lived signed URL from `/download-ticket`, then open that ticketed URL for final videos, subtitle files, and batch ZIPs.
+
 ## Business Rules (UI)
 
 - Subtitle editing updates only the subtitle file; it does NOT rebuild/burn the video.

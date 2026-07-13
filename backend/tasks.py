@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+from pathlib import Path
 
 try:
     from celery import chord
@@ -23,6 +24,56 @@ from .utils.media_process import run_media_command
 from .utils.storage_utils import get_storage_backend
 
 logger = logging.getLogger(__name__)
+
+
+def _task_history():
+    from .storage.task_history import TaskHistoryStore
+
+    return TaskHistoryStore(Path(settings.get_upload_dir()) / "task_history.sqlite3")
+
+
+def _record_task_state(
+    task_id: str | None,
+    status: str,
+    *,
+    progress: int | None = None,
+    message: str | None = None,
+    warnings: list[str] | None = None,
+    error_code: str | None = None,
+    suggestion: str | None = None,
+    result_task_id: str | None = None,
+) -> None:
+    if not task_id:
+        return
+    try:
+        _task_history().update_status(
+            task_id,
+            status,
+            progress=progress,
+            message=message,
+            warnings=warnings,
+            error_code=error_code,
+            suggestion=suggestion,
+            result_task_id=result_task_id,
+        )
+    except Exception:
+        logger.warning("Failed to persist worker task state: %s", task_id, exc_info=True)
+
+
+def _update_worker_state(task, task_id: str | None, *, state: str, meta: dict) -> None:
+    if hasattr(task, "update_state"):
+        task.update_state(state=state, meta=meta)
+    status = "PROCESSING" if state == "PROGRESS" else state
+    _record_task_state(
+        task_id,
+        status,
+        progress=int(meta.get("progress", 0) or 0),
+        message=str(meta.get("status") or meta.get("message") or ""),
+        warnings=meta.get("warnings") if isinstance(meta.get("warnings"), list) else None,
+        error_code=meta.get("error_code"),
+        suggestion=meta.get("suggestion"),
+        result_task_id=meta.get("result_task_id"),
+    )
 
 
 def _record_storage_upload(storage, local_path: str, remote_path: str, warnings: list[str]) -> None:
@@ -276,9 +327,22 @@ def transcribe_segment_task(segment_data: dict, model_size: str):
 
 @celery_app.task(bind=True)
 def merge_and_finalize_task(self, segment_results, video_path, options, segments_dir=None):
-    return finalize_pipeline(
-        segment_results, video_path, options, update_state_func=self.update_state, segments_dir=segments_dir
+    business_id = (options or {}).get("business_id")
+    result = finalize_pipeline(
+        segment_results,
+        video_path,
+        options,
+        update_state_func=lambda state, meta: _update_worker_state(self, business_id, state=state, meta=meta),
+        segments_dir=segments_dir,
     )
+    _record_task_state(
+        business_id,
+        "SUCCESS",
+        progress=100,
+        message="Completed",
+        warnings=result.get("warnings", []) if isinstance(result, dict) else [],
+    )
+    return result
 
 
 @celery_app.task(bind=True)
@@ -289,6 +353,7 @@ def process_video_task(self, video_path: str, options: dict = None):
         raise ValueError("options.business_id is required")
 
     create_task_lock(business_id, settings.get_upload_dir())
+    _record_task_state(business_id, "PROCESSING", progress=0, message="Worker started", warnings=[])
 
     try:
         from .utils.video_utils import remove_silence
@@ -307,7 +372,7 @@ def process_video_task(self, video_path: str, options: dict = None):
         if is_task_canceled(upload_dir, business_id):
             raise RuntimeError("Task canceled")
         if do_remove_silence:
-            self.update_state(state="PROGRESS", meta={"progress": 5, "status": "Removing silence..."})
+            _update_worker_state(self, business_id, state="PROGRESS", meta={"progress": 5, "status": "Removing silence..."})
             silence_removed_video = f"{base_path}_no_silence.mp4"
             current_video = remove_silence(video_path, silence_removed_video)
 
@@ -322,8 +387,12 @@ def process_video_task(self, video_path: str, options: dict = None):
                 parallel = False  # Fallback to non-parallel mode
 
             if parallel:
-                self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Splitting video..."})
+                _update_worker_state(self, business_id, state="PROGRESS", meta={"progress": 10, "status": "Splitting video..."})
                 video_segments = split_video(current_video)
+                if len(video_segments) > settings.MAX_PARALLEL_SEGMENTS:
+                    raise ValueError(
+                        f"Video split produced {len(video_segments)} segments, exceeding MAX_PARALLEL_SEGMENTS={settings.MAX_PARALLEL_SEGMENTS}"
+                    )
                 segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
                 # Inherit the current task's queue for sub-tasks
                 current_queue = self.request.delivery_info.get("routing_key", "default")
@@ -332,11 +401,24 @@ def process_video_task(self, video_path: str, options: dict = None):
                 workflow = chord(header, callback)
                 return self.replace(workflow)
 
-        self.update_state(state="PROGRESS", meta={"progress": 20, "status": "Transcribing..."})
+        _update_worker_state(self, business_id, state="PROGRESS", meta={"progress": 20, "status": "Transcribing..."})
         srt_path = f"{base_path}.srt"
         segments = transcribe_video(current_video, srt_path, model_size=model_size)
         payload = build_full_video_payload(segments, duration)
-        return finalize_pipeline([payload], current_video, options, update_state_func=self.update_state)
+        result = finalize_pipeline(
+            [payload],
+            current_video,
+            options,
+            update_state_func=lambda state, meta: _update_worker_state(self, business_id, state=state, meta=meta),
+        )
+        _record_task_state(
+            business_id,
+            "SUCCESS",
+            progress=100,
+            message="Completed",
+            warnings=result.get("warnings", []) if isinstance(result, dict) else [],
+        )
+        return result
 
     except Exception as e:
         try:
@@ -361,13 +443,15 @@ def process_video_task(self, video_path: str, options: dict = None):
         upload_dir = settings.get_upload_dir()
         write_task_error_artifact(business_id, upload_dir, failure_payload)
         
-        self.update_state(
+        _update_worker_state(
+            self,
+            business_id,
             state="FAILURE",
             meta={
                 "progress": 0,
                 "status": "FAILED",
                 **failure_payload
-            }
+            },
         )
         raise
 
@@ -393,6 +477,7 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
     rebuild_task_id = str(getattr(getattr(self, "request", None), "id", "") or task_id)
 
     try:
+        _record_task_state(rebuild_task_id, "PROCESSING", progress=0, message="Rebuild worker started", result_task_id=task_id)
         if is_task_canceled(upload_dir, task_id):
             raise RuntimeError("Task canceled")
 
@@ -413,15 +498,34 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
             raise FileNotFoundError("Subtitle file not found for rebuild")
 
         out_path = f"{base_path}_final.mp4"
-        self.update_state(state="PROGRESS", meta={"progress": 10, "status": "Rebuilding final video..."})
+        _update_worker_state(
+            self,
+            rebuild_task_id,
+            state="PROGRESS",
+            meta={"progress": 10, "status": "Rebuilding final video...", "result_task_id": task_id},
+        )
         burn_subtitles(video_path, subtitle_path, out_path)
 
         warnings: list[str] = []
         storage = get_storage_backend()
         _record_storage_upload(storage, out_path, f"{task_id}_final.mp4", warnings)
 
-        self.update_state(state="PROGRESS", meta={"progress": 100, "status": "Completed"})
-        return {"warnings": list(dict.fromkeys(warnings)), "result_task_id": task_id}
+        final_warnings = list(dict.fromkeys(warnings))
+        _update_worker_state(
+            self,
+            rebuild_task_id,
+            state="PROGRESS",
+            meta={"progress": 100, "status": "Completed", "warnings": final_warnings, "result_task_id": task_id},
+        )
+        _record_task_state(
+            rebuild_task_id,
+            "SUCCESS",
+            progress=100,
+            message="Completed",
+            warnings=final_warnings,
+            result_task_id=task_id,
+        )
+        return {"warnings": final_warnings, "result_task_id": task_id}
     except Exception as e:
         error_code = handle_known_error(e)
         error_info = get_error_response(error_code)
@@ -433,7 +537,9 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
         write_task_error_artifact(rebuild_task_id, upload_dir, failure_payload)
         if rebuild_task_id != task_id:
             write_task_error_artifact(task_id, upload_dir, failure_payload)
-        self.update_state(
+        _update_worker_state(
+            self,
+            rebuild_task_id,
             state="FAILURE",
             meta={
                 "progress": 0,

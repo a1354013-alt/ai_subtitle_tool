@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 from urllib import error, request
@@ -15,6 +16,7 @@ SUPPORTED_PROVIDERS = {"openai", "ollama", "none"}
 OPENAI_TRANSLATION_REQUIRED_MESSAGE = "OPENAI_API_KEY is required when translation targets are requested."
 OLLAMA_UNAVAILABLE_MESSAGE = "Ollama is not reachable. Confirm OLLAMA_BASE_URL and that Ollama is running."
 TRANSLATION_DISABLED_MESSAGE = "Translation is disabled because LLM_PROVIDER=none."
+_OLLAMA_CACHE: dict[tuple[str, str], tuple[float, LLMCapabilityStatus]] = {}
 
 
 @dataclass(frozen=True)
@@ -104,8 +106,16 @@ def _ollama_status() -> LLMCapabilityStatus:
             openai_configured=False,
         )
 
+    cache_key = (_normalized_ollama_base_url(), model)
+    ttl = settings.OLLAMA_CAPABILITY_CACHE_TTL_SECONDS
+    now = time.time()
+    if ttl > 0:
+        cached = _OLLAMA_CACHE.get(cache_key)
+        if cached and now - cached[0] < ttl:
+            return cached[1]
+
     reachable, detail = _probe_ollama_tags()
-    return LLMCapabilityStatus(
+    status = LLMCapabilityStatus(
         provider="ollama",
         model=model,
         translation_enabled=reachable,
@@ -115,6 +125,9 @@ def _ollama_status() -> LLMCapabilityStatus:
         available_modes=["transcribe"] + (["translate"] if reachable else []),
         openai_configured=False,
     )
+    if ttl > 0:
+        _OLLAMA_CACHE[cache_key] = (now, status)
+    return status
 
 
 def _none_status() -> LLMCapabilityStatus:
