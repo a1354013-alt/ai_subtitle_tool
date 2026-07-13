@@ -8,6 +8,7 @@ For one-click local development, open the repository root in VS Code and press F
 
 - Frontend: `http://127.0.0.1:5173`
 - Backend API docs: `http://127.0.0.1:8891/docs`
+- Backend ReDoc: `http://127.0.0.1:8891/redoc`
 - Backend health: `http://127.0.0.1:8891/healthz`
 
 F5 creates `.venv` with Python 3.11 or 3.12 when needed, installs `requirements.lock.txt`, runs frontend `npm ci` when needed, creates `backend/.env` and `frontend/.env` from examples, and sets `VITE_API_BASE_URL=http://127.0.0.1:8891`. Redis on `127.0.0.1:6379` is used when available; Docker Redis is tried next; if Redis cannot be started, local F5 uses Celery eager mode and skips the worker.
@@ -123,6 +124,10 @@ python scripts/verify_release_zip.py release.zip
 ```
 
 `python scripts/verify_delivery.py --full` is the pre-release closed-loop check. It runs Python version validation, backend dependency preflight, backend compile/tests, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, `npm audit --omit=dev`, then rebuilds and re-validates the release zip.
+
+The source CI workflow is `.github/workflows/ci.yml` and is intentionally excluded from release ZIP archives. Its delivery job runs release source validation, release ZIP creation and verification, deterministic ZIP comparison, Docker delivery-contract verification, and `docker compose config`; it does not claim `docker compose up` unless a separate smoke workflow starts containers.
+
+Use [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) for final `1.0.0-rc3` manual smoke validation. Do not create the stable `v1.0.0` tag until the real Docker, Redis, Celery, FFmpeg, CJK burn-in, download, cancellation, cleanup, and recovery checks have passed.
 
 Local storage is the fully supported storage mode for release deployments. `STORAGE_BACKEND=s3` is experimental; rebuild-final uploads rebuilt `{task_id}_final.mp4` to object storage, subtitle edits attempt to delete stale stored final videos, and `S3_UPLOAD_REQUIRED=true` makes rebuild upload failures fail the task.
 

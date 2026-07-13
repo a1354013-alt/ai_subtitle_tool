@@ -49,6 +49,14 @@ def test_backend_dependency_preflight_reports_missing_celery(monkeypatch: pytest
     assert "python -m pip install -r requirements.lock.txt" in message
 
 
+def test_release_versions_are_consistent():
+    verify_delivery._verify_version_consistency(REPO_ROOT)
+
+
+def test_ci_workflow_required_by_delivery_verification_exists():
+    verify_delivery._verify_ci_workflow(REPO_ROOT)
+
+
 @pytest.mark.parametrize("version", [(3, 11, 0), (3, 12, 7)])
 def test_supported_python_versions_are_allowed(version: tuple[int, int, int]):
     assert runtime_requirements.is_supported_python_version(version) is True

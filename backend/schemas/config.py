@@ -13,6 +13,7 @@ class AppCapabilitiesResponse(BaseModel):
 
 
 class AppConfigResponse(BaseModel):
+    version: str
     maxUploadSizeMb: int
     maxBatchFiles: int
     supportedExtensions: list[str]

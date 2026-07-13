@@ -14,6 +14,7 @@ export type ErrorResponse = {
 };
 
 export type AppConfig = {
+  version: string;
   maxUploadSizeMb: number;
   maxBatchFiles: number;
   supportedExtensions: string[];

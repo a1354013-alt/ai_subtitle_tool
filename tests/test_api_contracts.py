@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import asyncio
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -74,6 +76,7 @@ async def test_app_config_contract(app_client):
     r = await client.get("/api/config")
     assert r.status_code == 200
     body = r.json()
+    assert body["version"] == (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
     assert body["maxUploadSizeMb"] == 2048
     assert ".mp4" in body["supportedExtensions"]
     assert body["batchUploadEnabled"] is True
@@ -156,6 +159,7 @@ async def test_openapi_exposes_stable_contract_fields(app_client):
     assert "AppConfigResponse" in schemas
     assert "TaskResultManifest" in schemas
     assert "BatchStatusResponse" in schemas
+    assert "version" in schemas["AppConfigResponse"]["properties"]
     assert "maxUploadSizeMb" in schemas["AppConfigResponse"]["properties"]
     assert "translations" in schemas["TaskResultManifest"]["properties"]
 
@@ -230,6 +234,54 @@ async def test_status_contract_processing_and_success(app_client, monkeypatch: p
     assert body2["progress"] == 100
     assert body2["result_url"] == f"/results/{task_id}"
     assert body2["warnings"] == ["w2"]
+
+
+@pytest.mark.anyio
+async def test_slow_status_resolution_does_not_block_healthz(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "01010101-0101-0101-0101-010101010101"
+
+    def slow_resolve(_task_id: str):
+        time.sleep(0.25)
+        return main.TaskStatusResponse(task_id=task_id, status=main.TaskStatusEnum.PENDING, progress=0)
+
+    monkeypatch.setattr(main, "_resolve_task_state", slow_resolve)
+
+    status_task = asyncio.create_task(client.get(f"/status/{task_id}"))
+    await asyncio.sleep(0.02)
+    started = time.perf_counter()
+    health_response = await client.get("/healthz")
+    elapsed = time.perf_counter() - started
+    status_response = await status_task
+
+    assert health_response.status_code == 200
+    assert elapsed < 0.2
+    assert status_response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_slow_subtitle_read_does_not_block_healthz(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "02020202-0202-0202-0202-020202020202"
+    Path(main.UPLOAD_DIR, f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+
+    def slow_read(path: str):
+        time.sleep(0.25)
+        return Path(path).read_text(encoding="utf-8")
+
+    monkeypatch.setattr(main, "_read_text_file", slow_read)
+
+    subtitle_task = asyncio.create_task(client.get(f"/subtitle/{task_id}", params={"lang": "English", "format": "srt"}))
+    await asyncio.sleep(0.02)
+    started = time.perf_counter()
+    health_response = await client.get("/healthz")
+    elapsed = time.perf_counter() - started
+    subtitle_response = await subtitle_task
+
+    assert health_response.status_code == 200
+    assert elapsed < 0.2
+    assert subtitle_response.status_code == 200
+    assert "hello" in subtitle_response.json()["content"]
 
 
 @pytest.mark.anyio

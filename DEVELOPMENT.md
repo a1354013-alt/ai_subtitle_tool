@@ -12,6 +12,7 @@ Local endpoints:
 
 - Frontend page: [http://127.0.0.1:5173](http://127.0.0.1:5173)
 - Backend API docs: [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
+- Backend ReDoc: [http://127.0.0.1:8891/redoc](http://127.0.0.1:8891/redoc)
 - Backend health: [http://127.0.0.1:8891/healthz](http://127.0.0.1:8891/healthz)
 
 Python 3.11 or 3.12 is required.
@@ -65,6 +66,10 @@ npm ci
 cd ..
 python scripts/verify_delivery.py --full
 ```
+
+The source CI workflow is `.github/workflows/ci.yml`. It runs backend tests on Python 3.11 and 3.12, frontend validation on Node.js 20, delivery validation, deterministic ZIP comparison, Docker contract validation, and `docker compose config`. The real Redis/Celery/FFmpeg/CJK integration job is opt-in through workflow dispatch.
+
+Before promoting a release candidate, run the manual steps in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md). Do not infer Faster-Whisper, Redis, Celery, Docker, FFmpeg, GPU, or CJK success from mocked unit tests.
 
 Production dependency audit:
 

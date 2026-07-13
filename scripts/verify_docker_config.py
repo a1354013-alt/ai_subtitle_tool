@@ -40,9 +40,14 @@ def verify(repo_root: Path) -> None:
         "redis:",
         "backend:",
         "worker:",
+        "beat:",
         "frontend:",
         "backend/.env.example",
         "VITE_API_BASE_URL",
+        "celery -A backend.celery_app:celery_app beat",
+        "./backend/uploads:/app/uploads",
+        "./backend/outputs:/app/outputs",
+        "./backend/tmp:/app/tmp",
     )
     for token in required_tokens:
         if token not in compose:
@@ -57,6 +62,11 @@ def verify(repo_root: Path) -> None:
     frontend_env_keys = _read_env_keys(frontend_env_path)
     if "VITE_API_BASE_URL" not in frontend_env_keys:
         raise SystemExit("frontend/.env.example missing VITE_API_BASE_URL")
+
+    dockerfile = (repo_root / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    for token in ("fontconfig", "fonts-noto-cjk", "SUBTITLE_FONT_NAME"):
+        if token not in dockerfile:
+            raise SystemExit(f"backend/Dockerfile missing required CJK font configuration token: {token}")
 
     print("docker config verification passed")
 

@@ -151,8 +151,11 @@ def _assert_release_zip_clean(out_path: Path) -> None:
     forbidden_dir_names = {"tmp", "temp", "data_tmp", "uploads", "outputs"}
 
     required = {
+        "VERSION",
+        "CHANGELOG.md",
         "README.md",
         "DEPLOYMENT.md",
+        "SECURITY.md",
         "docker-compose.yml",
         "backend/.env.example",
         "frontend/.env.example",

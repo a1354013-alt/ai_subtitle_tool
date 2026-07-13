@@ -140,6 +140,7 @@ const removeSilence = ref(false);
 const validationError = ref("");
 const pollingError = ref("");
 const config = ref<AppConfig>({
+  version: "0.0.0",
   maxUploadSizeMb: 2048,
   maxBatchFiles: 20,
   supportedExtensions: [".mp4", ".mkv", ".avi", ".mov"],

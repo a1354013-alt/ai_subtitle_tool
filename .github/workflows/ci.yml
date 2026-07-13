@@ -8,13 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       run_integration:
-        description: "Run Redis/Celery/FFmpeg/CJK integration checks"
+        description: "Run real Redis/Celery/FFmpeg/CJK integration checks"
         required: false
         default: "false"
 
 jobs:
-  ci:
-    name: CI Python ${{ matrix.python-version }}
+  backend-tests:
+    name: Backend tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,16 +30,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
-      - name: Set up Node
-        if: matrix.python-version == '3.11'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk
+          fc-cache -f
 
       - name: Start Redis with retry and health check
         run: |
@@ -75,74 +70,120 @@ jobs:
           docker logs redis-ci || true
           exit 1
 
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
-
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
+      - name: Install locked Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock.txt
 
       - name: Compile Python modules
         run: python -m compileall -q backend tests scripts benchmarks test_hwaccel.py test_report.py
 
-      - name: Run backend tests (pytest)
-        run: python -m pytest -q
+      - name: Run complete backend tests with coverage
+        run: python -m pytest -q --cov=backend --cov=scripts --cov-report=term-missing -ra
+
+      - name: Stop Redis
+        if: always()
+        run: docker rm -f redis-ci >/dev/null 2>&1 || true
+
+  frontend-validation:
+    name: Frontend validation (Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
-        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm ci
 
       - name: Lint frontend
-        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run lint
 
       - name: Typecheck frontend
-        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run typecheck
 
       - name: Run frontend tests
-        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run test:ci
 
       - name: Build frontend
-        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm run build
 
       - name: Audit frontend production dependencies
-        if: matrix.python-version == '3.11'
         working-directory: frontend
         run: npm audit --omit=dev
 
-      - name: Verify delivery zip-only
-        if: matrix.python-version == '3.11'
+  delivery-validation:
+    name: Delivery validation
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-validation]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk
+          fc-cache -f
+
+      - name: Install locked Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run release source validation
         run: python scripts/verify_delivery.py --zip-only
 
       - name: Build checked release zip
-        if: matrix.python-version == '3.11'
         run: python scripts/make_release_zip.py --out release.zip --check
 
       - name: Verify release zip
-        if: matrix.python-version == '3.11'
         run: python scripts/verify_release_zip.py release.zip
 
       - name: Verify deterministic release zip SHA-256
-        if: matrix.python-version == '3.11'
         run: |
           python scripts/make_release_zip.py --out release-first.zip --check
+          touch -d "2001-01-01T00:00:00Z" README.md CHANGELOG.md VERSION frontend/package.json
           python scripts/make_release_zip.py --out release-second.zip --check
           sha256sum release-first.zip release-second.zip
           test "$(sha256sum release-first.zip | cut -d' ' -f1)" = "$(sha256sum release-second.zip | cut -d' ' -f1)"
 
-      - name: Validate Docker configuration
-        if: matrix.python-version == '3.11'
+      - name: Verify Docker delivery contract
         run: python scripts/verify_docker_config.py
 
-  integration:
-    name: Optional Redis/Celery/FFmpeg/CJK integration
+      - name: Validate Docker Compose syntax
+        run: docker compose config
+
+  real-service-integration:
+    name: Optional real Redis/Celery/FFmpeg/CJK integration
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.run_integration == 'true'
     steps:
@@ -155,10 +196,13 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg fontconfig fonts-noto-cjk redis-server
+      - name: Install real integration system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-noto-cjk redis-server
+          fc-cache -f
 
-      - name: Start Redis
+      - name: Start Redis for real integration tests
         run: |
           sudo service redis-server start
           redis-cli ping
@@ -166,12 +210,15 @@ jobs:
           echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> "${GITHUB_ENV}"
           echo "CELERY_RESULT_BACKEND=redis://localhost:6379/1" >> "${GITHUB_ENV}"
 
-      - name: Install Python dependencies
+      - name: Install locked Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.lock.txt
 
-      - name: Run integration tests
+      - name: Run mocked/default tests with skip reporting
+        run: python -m pytest -q -m "not integration" -ra
+
+      - name: Run real integration tests
         env:
           RUN_CJK_BURNIN_SMOKE: "1"
-        run: python -m pytest -q -m integration
+        run: python -m pytest -q -m integration -ra

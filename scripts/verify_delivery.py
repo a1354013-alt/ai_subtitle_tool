@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,10 @@ from verify_docker_config import verify as verify_docker_config
 
 
 REQUIRED_FILES = {
+    ".github/workflows/ci.yml",
     ".gitattributes",
+    "CHANGELOG.md",
+    "VERSION",
     "README.md",
     "DEPLOYMENT.md",
     "docker-compose.yml",
@@ -38,9 +42,11 @@ REQUIRED_FILES = {
     ".vscode/launch.json",
     ".vscode/tasks.json",
     ".vscode/extensions.json",
+    "docs/RELEASE_CHECKLIST.md",
 }
 
 RELEASE_REQUIRED_FILES = REQUIRED_FILES - {
+    ".github/workflows/ci.yml",
     "scripts/dev_bootstrap.py",
     "scripts/dev_start.py",
     "scripts/start-dev.cmd",
@@ -50,6 +56,7 @@ RELEASE_REQUIRED_FILES = REQUIRED_FILES - {
     ".vscode/launch.json",
     ".vscode/tasks.json",
     ".vscode/extensions.json",
+    "docs/RELEASE_CHECKLIST.md",
 }
 
 FORBIDDEN_GITIGNORE_PATTERNS = (
@@ -101,14 +108,59 @@ FORBIDDEN_ZIP_MARKERS = (
     "scripts/stop-dev.ps1",
 )
 
+REQUIRED_CI_TOKENS = (
+    "Backend tests (Python",
+    'python-version: ["3.11", "3.12"]',
+    "python -m pip install -r requirements.lock.txt",
+    "python -m compileall -q backend tests scripts benchmarks test_hwaccel.py test_report.py",
+    "python -m pytest -q --cov=backend --cov=scripts --cov-report=term-missing -ra",
+    'node-version: "20"',
+    "npm ci",
+    "npm run lint",
+    "npm run typecheck",
+    "npm run test:ci",
+    "npm run build",
+    "npm audit --omit=dev",
+    "python scripts/verify_delivery.py --zip-only",
+    "python scripts/make_release_zip.py --out release.zip --check",
+    "python scripts/verify_release_zip.py release.zip",
+    "Verify deterministic release zip SHA-256",
+    "python scripts/verify_docker_config.py",
+    "docker compose config",
+    "RUN_CJK_BURNIN_SMOKE",
+)
+
+REQUIRED_DOCKER_TOKENS = (
+    "redis:",
+    "backend:",
+    "worker:",
+    "beat:",
+    "frontend:",
+    "celery -A backend.celery_app:celery_app beat",
+    "./backend/uploads:/app/uploads",
+    "./backend/outputs:/app/outputs",
+    "./backend/tmp:/app/tmp",
+)
+
 EXIT_PYTHON_VERSION_ERROR = 20
 EXIT_BACKEND_DEPENDENCY_ERROR = 21
 EXIT_NODE_VERSION_ERROR = 22
 
 BACKEND_DEPENDENCY_MODULES = (
+    ("fastapi", "fastapi"),
+    ("uvicorn", "uvicorn"),
     ("celery", "celery"),
+    ("redis", "redis"),
+    ("moviepy", "moviepy"),
+    ("faster-whisper", "faster_whisper"),
+    ("openai", "openai"),
+    ("tenacity", "tenacity"),
+    ("pydantic", "pydantic"),
+    ("python-dotenv", "dotenv"),
     ("pytest", "pytest"),
+    ("pytest-cov", "pytest_cov"),
     ("pytest-timeout", "pytest_timeout"),
+    ("httpx", "httpx"),
 )
 
 
@@ -239,6 +291,58 @@ def _iter_markdown_docs(repo_root: Path) -> list[Path]:
     ]
 
 
+def _iter_source_files(repo_root: Path) -> list[Path]:
+    ignored_parts = {
+        ".git",
+        ".tmp",
+        ".venv",
+        "node_modules",
+        "dist",
+        "build",
+        "__pycache__",
+        ".pytest_cache",
+        "uploads",
+        "outputs",
+        "tmp",
+        "temp",
+    }
+    allowed_suffixes = {
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".vue",
+        ".json",
+        ".md",
+        ".yml",
+        ".yaml",
+        ".txt",
+        ".ini",
+        ".ps1",
+        ".cmd",
+        ".dockerignore",
+        ".gitignore",
+    }
+    files: list[Path] = []
+    for path in sorted(repo_root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(repo_root)
+        if ignored_parts.intersection(relative.parts):
+            continue
+        if path.name in {"VERSION", "make_release_zip"} or path.suffix.lower() in allowed_suffixes:
+            files.append(path)
+    return files
+
+
+def _verify_no_conflict_markers(repo_root: Path) -> None:
+    markers = ("<" * 7, "=" * 7, ">" * 7)
+    for path in _iter_source_files(repo_root):
+        for line in _read_text(path).splitlines():
+            if any(line.startswith(marker) for marker in markers):
+                raise SystemExit(f"stale conflict marker found in {path.relative_to(repo_root).as_posix()}")
+
+
 def _verify_gitignore(repo_root: Path) -> None:
     """Verify .gitignore does not contain forbidden patterns and has required patterns."""
     gitignore_path = repo_root / ".gitignore"
@@ -275,6 +379,42 @@ def _verify_required_files(repo_root: Path) -> None:
     missing = sorted(path for path in REQUIRED_FILES if not (repo_root / path).exists())
     if missing:
         raise SystemExit(f"required files missing: {', '.join(missing)}")
+
+
+def _verify_version_consistency(repo_root: Path) -> None:
+    version = _read_text(repo_root / "VERSION").strip()
+    if not version:
+        raise SystemExit("VERSION must not be empty")
+
+    package_json = json.loads(_read_text(repo_root / "frontend" / "package.json"))
+    package_lock = json.loads(_read_text(repo_root / "frontend" / "package-lock.json"))
+    found = {
+        "VERSION": version,
+        "frontend/package.json": str(package_json.get("version", "")),
+        "frontend/package-lock.json": str(package_lock.get("version", "")),
+        "frontend/package-lock.json packages['']": str(package_lock.get("packages", {}).get("", {}).get("version", "")),
+    }
+    mismatched = {name: value for name, value in found.items() if value != version}
+    if mismatched:
+        detail = ", ".join(f"{name}={value!r}" for name, value in sorted(mismatched.items()))
+        raise SystemExit(f"version mismatch against VERSION={version!r}: {detail}")
+
+    readme = _read_text(repo_root / "README.md")
+    changelog = _read_text(repo_root / "CHANGELOG.md")
+    if f"## {version}" not in changelog:
+        raise SystemExit(f"CHANGELOG.md missing release section for {version}")
+    if "/api/config" not in readme:
+        raise SystemExit("README.md must document /api/config metadata")
+
+
+def _verify_ci_workflow(repo_root: Path) -> None:
+    ci_path = repo_root / ".github" / "workflows" / "ci.yml"
+    if not ci_path.exists():
+        raise SystemExit(".github/workflows/ci.yml is missing")
+    ci_text = _read_text(ci_path)
+    missing = [token for token in REQUIRED_CI_TOKENS if token not in ci_text]
+    if missing:
+        raise SystemExit(f".github/workflows/ci.yml missing required release gate tokens: {', '.join(missing)}")
 
 
 def _verify_docs(repo_root: Path) -> None:
@@ -332,6 +472,14 @@ def _verify_docker_contract(repo_root: Path) -> None:
     for token in ("services:", "backend:", "worker:", "frontend:", "backend/.env.example"):
         if token not in compose_text:
             raise SystemExit(f"docker-compose.yml missing required token: {token}")
+    for token in REQUIRED_DOCKER_TOKENS:
+        if token not in compose_text:
+            raise SystemExit(f"docker-compose.yml missing required Docker release contract token: {token}")
+
+    dockerfile_text = _read_text(repo_root / "backend" / "Dockerfile")
+    for token in ("fontconfig", "fonts-noto-cjk", "SUBTITLE_FONT_NAME"):
+        if token not in dockerfile_text:
+            raise SystemExit(f"backend/Dockerfile missing required CJK font configuration token: {token}")
 
 
 def _verify_zip_contents(out_path: Path) -> None:
@@ -351,9 +499,33 @@ def _verify_zip_contents(out_path: Path) -> None:
             raise SystemExit(f"required file missing from release zip: {required}")
 
 
+def _verify_deterministic_release_zip(repo_root: Path) -> None:
+    tmp_dir = repo_root / ".tmp" / "release-determinism"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    first = tmp_dir / "first.zip"
+    second = tmp_dir / "second.zip"
+    touched = repo_root / "README.md"
+    original_times = (touched.stat().st_atime, touched.stat().st_mtime)
+    try:
+        build_release_zip(repo_root, first)
+        os.utime(touched, (original_times[0] + 31, original_times[1] + 31))
+        build_release_zip(repo_root, second)
+    finally:
+        os.utime(touched, original_times)
+
+    first_hash = hashlib.sha256(first.read_bytes()).hexdigest()
+    second_hash = hashlib.sha256(second.read_bytes()).hexdigest()
+    if first_hash != second_hash:
+        raise SystemExit(f"release zip is nondeterministic: {first_hash} != {second_hash}")
+    print(f"deterministic release zip sha256: {first_hash}", flush=True)
+
+
 def run_zip_only(repo_root: Path) -> Path:
     _verify_gitignore(repo_root)
     _verify_required_files(repo_root)
+    _verify_no_conflict_markers(repo_root)
+    _verify_version_consistency(repo_root)
+    _verify_ci_workflow(repo_root)
     _verify_docs(repo_root)
     _verify_frontend_scripts(repo_root)
     _verify_gitattributes(repo_root)
@@ -481,6 +653,7 @@ def run_full(repo_root: Path, *, ci_fast: bool = False) -> None:
         label="release-zip-verify",
         timeout_seconds=60,
     )
+    _verify_deterministic_release_zip(repo_root)
     
     print("full delivery verification passed", flush=True)
 

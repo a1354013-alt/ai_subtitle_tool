@@ -352,6 +352,30 @@ def _task_has_local_artifacts(task_id: str) -> bool:
     return False
 
 
+def _check_upload_dir_writable() -> None:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    test_path = os.path.join(UPLOAD_DIR, ".readyz_write_test")
+    with open(test_path, "w", encoding="utf-8") as f:
+        f.write("ok")
+    os.remove(test_path)
+
+
+def _check_redis_ready() -> None:
+    import redis as _redis
+
+    r = _redis.Redis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
+    r.ping()
+
+
+def _check_ffmpeg_ready() -> None:
+    run_media_command([settings.FFMPEG_BINARY, "-version"], timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
+
+
+def _read_text_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 def _success_result_url(result_task_id: str) -> str:
     storage = get_storage_backend()
     result_url = storage.get_url(f"{result_task_id}_final.mp4")
@@ -696,6 +720,7 @@ async def healthz():
 async def get_app_config():
     capabilities = _capability_response_payload()
     return AppConfigResponse(
+        version=_project_version(),
         maxUploadSizeMb=settings.MAX_UPLOAD_SIZE_MB,
         maxBatchFiles=settings.MAX_BATCH_FILES,
         supportedExtensions=list(settings.SUPPORTED_VIDEO_EXTENSIONS),
@@ -870,19 +895,13 @@ async def readyz():
 
     # Upload dir check
     try:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-        test_path = os.path.join(UPLOAD_DIR, ".readyz_write_test")
-        with open(test_path, "w", encoding="utf-8") as f:
-            f.write("ok")
-        os.remove(test_path)
+        await run_in_threadpool(_check_upload_dir_writable)
     except Exception as e:
         errors.append({"code": "upload_dir_error", "message": f"UPLOAD_DIR not writable: {e}"})
 
     # Redis check
     try:
-        import redis as _redis
-        r = _redis.Redis.from_url(settings.REDIS_URL, socket_connect_timeout=2)
-        r.ping()
+        await run_in_threadpool(_check_redis_ready)
     except Exception:
         errors.append({
             "code": "redis_not_running",
@@ -892,7 +911,7 @@ async def readyz():
         
     # ffmpeg check
     try:
-        run_media_command([settings.FFMPEG_BINARY, "-version"], timeout=settings.FFMPEG_TIMEOUT_SECONDS, check=True)
+        await run_in_threadpool(_check_ffmpeg_ready)
     except Exception:
         errors.append({
             "code": "ffmpeg_not_found",
@@ -1004,10 +1023,11 @@ async def upload_video(
 @app.get("/status/{task_id}", response_model=TaskStatusResponse)
 async def get_status(task_id: str):
     task_id = validate_task_id(task_id)
-    response = _resolve_task_state(task_id)
+    response = await run_in_threadpool(_resolve_task_state, task_id)
 
     # Best-effort status tracking for "Recent Tasks"
-    _persist_task_state(
+    await run_in_threadpool(
+        _persist_task_state,
         task_id,
         response.status,
         progress=response.progress,
@@ -1023,7 +1043,8 @@ async def get_status(task_id: str):
 @app.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str):
     task_id = validate_task_id(task_id)
-    if TASK_HISTORY.get(task_id) is None and not _task_has_local_artifacts(task_id):
+    has_known_task = await run_in_threadpool(lambda: TASK_HISTORY.get(task_id) is not None or _task_has_local_artifacts(task_id))
+    if not has_known_task:
         error_info = get_error_response("task_not_found")
         raise HTTPException(
             status_code=404,
@@ -1035,16 +1056,17 @@ async def cancel_task(task_id: str):
         )
 
     # Mark as canceled first so any polling becomes deterministic immediately.
-    mark_task_canceled(UPLOAD_DIR, task_id)
+    await run_in_threadpool(mark_task_canceled, UPLOAD_DIR, task_id)
 
     # Best-effort revoke; may not terminate a running task depending on worker settings.
     try:
-        task_result = _get_async_result(task_id)
-        task_result.revoke(terminate=False)
+        task_result = await run_in_threadpool(_get_async_result, task_id)
+        await run_in_threadpool(task_result.revoke, terminate=False)
     except Exception:
         logger.warning("Failed to revoke task (non-fatal): %s", task_id, exc_info=True)
 
-    _persist_task_state(
+    await run_in_threadpool(
+        _persist_task_state,
         task_id,
         TaskStatusEnum.CANCELED,
         progress=0,
@@ -1068,7 +1090,8 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
 
     rebuild_task_id = str(uuid.uuid4())
     try:
-        TASK_HISTORY.upsert_created(
+        await run_in_threadpool(
+            TASK_HISTORY.upsert_created,
             task_id=rebuild_task_id,
             filename=f"Rebuild final video for {task_id}",
             status=TaskStatusEnum.PENDING.value,
@@ -1078,7 +1101,8 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
         raise HTTPException(status_code=500, detail="Failed to record rebuild task history") from None
 
     try:
-        _enqueue_rebuild_final_task(
+        await run_in_threadpool(
+            _enqueue_rebuild_final_task,
             task_id=task_id,
             lang_suffix=lang_suffix,
             subtitle_format=subtitle_format,
@@ -1086,14 +1110,14 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
         )
     except HTTPException:
         try:
-            TASK_HISTORY.update_status(task_id=rebuild_task_id, status=TaskStatusEnum.FAILURE.value)
+            await run_in_threadpool(TASK_HISTORY.update_status, task_id=rebuild_task_id, status=TaskStatusEnum.FAILURE.value)
         except Exception:
             logger.warning("Failed to mark rebuild task history as failed: %s", rebuild_task_id, exc_info=True)
         raise
     except Exception:
         logger.error("Failed to enqueue rebuild task: %s", rebuild_task_id, exc_info=True)
         try:
-            TASK_HISTORY.update_status(task_id=rebuild_task_id, status=TaskStatusEnum.FAILURE.value)
+            await run_in_threadpool(TASK_HISTORY.update_status, task_id=rebuild_task_id, status=TaskStatusEnum.FAILURE.value)
         except Exception:
             logger.warning("Failed to mark rebuild task history as failed: %s", rebuild_task_id, exc_info=True)
         raise HTTPException(status_code=503, detail="Failed to enqueue rebuild task") from None
@@ -1104,7 +1128,7 @@ async def rebuild_final(task_id: str, lang: str = Query(..., description="Langua
 @app.get("/tasks/recent", response_model=list[RecentTask])
 async def get_recent_tasks():
     try:
-        entries = TASK_HISTORY.list_recent(limit=20)
+        entries = await run_in_threadpool(TASK_HISTORY.list_recent, limit=20)
         return [RecentTask(**e.to_dict()) for e in entries]
     except Exception:
         logger.error("Failed to read task history", exc_info=True)
@@ -1207,7 +1231,7 @@ async def batch_upload_videos(
 @app.get("/batch/{batch_id}/status", response_model=BatchStatusResponse)
 async def get_batch_status(batch_id: str):
     try:
-        batch = BATCH_MANAGER.get_batch(batch_id)
+        batch = await run_in_threadpool(BATCH_MANAGER.get_batch, batch_id)
     except InvalidBatchIdError:
         raise HTTPException(status_code=400, detail="Invalid batch_id format") from None
     if not batch:
@@ -1407,7 +1431,7 @@ def _build_batch_zip_file(batch, zip_path: str) -> None:
 @app.get("/batch/{batch_id}/download")
 async def download_batch_zip(batch_id: str):
     try:
-        batch = BATCH_MANAGER.get_batch(batch_id)
+        batch = await run_in_threadpool(BATCH_MANAGER.get_batch, batch_id)
     except InvalidBatchIdError:
         raise HTTPException(status_code=400, detail="Invalid batch_id format") from None
     if not batch:
@@ -1424,7 +1448,7 @@ async def download_batch_zip(batch_id: str):
 async def get_results_manifest(task_id: str):
     task_id = validate_task_id(task_id)
     try:
-        status_resp = _resolve_task_state(task_id)
+        status_resp = await run_in_threadpool(_resolve_task_state, task_id)
     except HTTPException as exc:
         if exc.status_code != 404:
             raise
@@ -1441,7 +1465,7 @@ async def get_results_manifest(task_id: str):
     result_owner_task_id = status_resp.result_task_id or task_id
 
     has_video, available_files = await run_in_threadpool(_scan_task_artifacts, result_owner_task_id)
-    task_result = _get_async_result(task_id)
+    task_result = await run_in_threadpool(_get_async_result, task_id)
     translations_by_lang = _translation_info_from_result(task_result.result)
     enriched_files: List[FileInfo] = []
     for file_info in available_files:
@@ -1495,7 +1519,7 @@ async def download_result(
     lang_suffix = validate_lang(lang)
 
     if format == "vtt":
-        vtt = load_vtt_from_srt(UPLOAD_DIR, task_id, lang_suffix, lang)
+        vtt = await run_in_threadpool(load_vtt_from_srt, UPLOAD_DIR, task_id, lang_suffix, lang)
         filename = f"subtitle_{task_id}_{lang_suffix}.vtt"
         return Response(
             content=vtt,
@@ -1535,7 +1559,7 @@ async def get_subtitle(
         raise HTTPException(status_code=400, detail="format must be 'ass', 'srt', or 'vtt'")
 
     if format == "vtt":
-        vtt = load_vtt_from_srt(UPLOAD_DIR, task_id, lang_suffix, lang)
+        vtt = await run_in_threadpool(load_vtt_from_srt, UPLOAD_DIR, task_id, lang_suffix, lang)
         filename = f"{task_id}_{lang_suffix}.vtt"
         return {"content": vtt, "format": "vtt", "filename": filename}
 
@@ -1544,8 +1568,8 @@ async def get_subtitle(
         filename = f"{task_id}_{lang_suffix}.{ext}"
         path = validate_path_traversal(os.path.join(UPLOAD_DIR, filename), UPLOAD_DIR)
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return {"content": f.read(), "format": ext, "filename": filename}
+            content = await run_in_threadpool(_read_text_file, path)
+            return {"content": content, "format": ext, "filename": filename}
 
     if format:
         raise HTTPException(status_code=404, detail=f"Subtitle '{format}' for language '{lang}' not found")
@@ -1571,7 +1595,7 @@ async def update_subtitle(task_id: str, edit: SubtitleEditRequest, lang: str = Q
         raise HTTPException(status_code=400, detail=exc.payload) from None
 
     try:
-        write_text_atomic(filepath, edit.content)
+        await run_in_threadpool(write_text_atomic, filepath, edit.content)
     except OSError:
         logger.error("Failed to write subtitle file: %s", filepath, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to write subtitle file")

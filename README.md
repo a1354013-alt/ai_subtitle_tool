@@ -51,6 +51,7 @@ Services:
 5. Wait for the concise success summary, then open:
    - Frontend: [http://127.0.0.1:5173](http://127.0.0.1:5173)
    - API docs: [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
+   - ReDoc: [http://127.0.0.1:8891/redoc](http://127.0.0.1:8891/redoc)
    - Health: [http://127.0.0.1:8891/healthz](http://127.0.0.1:8891/healthz)
 
 Stop the F5 stack with Ctrl+C in the launch terminal or the VS Code task `dev:stop`. On Windows, the stop task calls `scripts/stop-dev.cmd`, which stops processes bound to local dev ports `8891` and `5173` plus Celery commands for this project.
@@ -123,6 +124,7 @@ Health endpoints:
 - `GET /readyz`
 - `GET /api/config`
 - API docs: [http://127.0.0.1:8891/docs](http://127.0.0.1:8891/docs)
+- ReDoc: [http://127.0.0.1:8891/redoc](http://127.0.0.1:8891/redoc)
 
 ## Local Development: Frontend
 
@@ -207,7 +209,7 @@ python benchmarks/run_benchmarks.py --smoke
 
 ## Release Packaging
 
-- GitHub Actions workflow exists in the source repository but is excluded from release archives.
+- GitHub Actions workflow exists at `.github/workflows/ci.yml` in the source repository but is excluded from release archives.
 
 
 Use the Python script as the single source of truth:
@@ -229,6 +231,13 @@ python scripts/verify_delivery.py --full
 
 `--zip-only` validates docs, Docker/release inputs, and the clean release archive.
 `--full` additionally runs Python compile checks, backend dependency preflight, backend pytest, frontend `npm ci`, `lint`, `typecheck`, `test:ci`, `build`, production `npm audit --omit=dev`, then rebuilds and verifies `release.zip`.
+
+Final release procedure:
+
+1. Keep `VERSION`, `frontend/package.json`, `frontend/package-lock.json`, FastAPI metadata, `/api/config`, `CHANGELOG.md`, and release docs synchronized to the current release candidate.
+2. Run the backend, frontend, release, deterministic ZIP, Docker contract, and `docker compose config` gates listed in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+3. Run the real Docker Compose startup, Redis/Celery, FFmpeg, CJK burn-in, download, cancellation, rebuild, recovery, and cleanup smoke checks in the checklist.
+4. Only after those real checks pass, create the stable `v1.0.0` tag. `1.0.0-rc3` is not the stable release tag.
 
 If backend dependencies are missing, `--full` stops before pytest with a clear preflight error such as:
 
@@ -428,7 +437,7 @@ Response includes:
 - `reason`: a machine-readable reason when translation is unavailable
 - `availableModes`: list of available modes (`["transcribe"]` or `["transcribe", "translate"]`)
 
-`/api/config` mirrors the same capability fields alongside upload-size and subtitle-format settings. If translation is not configured, uploading with multiple languages fails with a provider-specific error message, while `Original` still works.
+`/api/config` mirrors the same capability fields alongside upload-size, subtitle-format, and release `version` settings. If translation is not configured, uploading with multiple languages fails with a provider-specific error message, while `Original` still works.
 
 ## Known Limitations
 
