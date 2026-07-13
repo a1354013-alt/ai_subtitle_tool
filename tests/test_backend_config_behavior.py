@@ -213,6 +213,116 @@ def test_task_history_store_closes_connections(tmp_path):
     assert store.cleanup_old_records(retention_seconds=0) >= 0
 
 
+def test_task_history_pending_upsert_does_not_reset_terminal_state(tmp_path):
+    from backend.storage.task_history import TaskHistoryStore
+
+    store = TaskHistoryStore(tmp_path / "history.sqlite3")
+    store.upsert_created("task-1", "demo.mp4")
+    store.update_status("task-1", "SUCCESS", duration_seconds=1.5, progress=100, message="Completed")
+    store.upsert_created("task-1", "demo.mp4", status="PENDING")
+
+    entry = store.get("task-1")
+    assert entry is not None
+    assert entry.status == "SUCCESS"
+    assert entry.progress == 100
+
+
+def test_task_history_success_clears_stale_failure_metadata(tmp_path):
+    from backend.storage.task_history import TaskHistoryStore
+
+    store = TaskHistoryStore(tmp_path / "history.sqlite3")
+    store.upsert_created("task-1", "demo.mp4")
+    store.update_status("task-1", "FAILURE", error_code="old_error", suggestion="old suggestion")
+    store.update_status("task-1", "SUCCESS", duration_seconds=1.0, progress=100, message="Completed")
+
+    entry = store.get("task-1")
+    assert entry is not None
+    assert entry.status == "SUCCESS"
+    assert entry.error_code is None
+    assert entry.suggestion is None
+
+
+def test_expected_segment_count_boundaries(monkeypatch: pytest.MonkeyPatch):
+    from backend.utils.split_utils import expected_segment_count
+
+    assert expected_segment_count(30, segment_length=30, overlap=2) == 1
+    assert expected_segment_count(58, segment_length=30, overlap=2) == 2
+    assert expected_segment_count(59, segment_length=30, overlap=2) == 2
+    assert expected_segment_count(60, segment_length=30, overlap=2) == 2
+    assert expected_segment_count(64, segment_length=30, overlap=2) == 3
+
+
+def test_cjk_font_check_requires_exact_family(monkeypatch: pytest.MonkeyPatch):
+    import subprocess
+    from types import SimpleNamespace
+    import backend.main as main
+
+    monkeypatch.setattr(main.settings, "SUBTITLE_FONT_NAME", "Definitely Missing Font")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="DejaVu Sans\n/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf\n",
+            stderr="",
+        ),
+    )
+
+    status = main._check_subtitle_font()
+
+    assert status["requested_family"] == "Definitely Missing Font"
+    assert status["resolved_family"] == "DejaVu Sans"
+    assert status["exact_match"] is False
+    assert status["available"] is False
+
+
+def test_cjk_font_check_accepts_exact_family(monkeypatch: pytest.MonkeyPatch):
+    import subprocess
+    from types import SimpleNamespace
+    import backend.main as main
+
+    monkeypatch.setattr(main.settings, "SUBTITLE_FONT_NAME", "Noto Sans CJK TC")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="Noto Sans CJK TC,Noto Sans CJK JP\n/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc\n",
+            stderr="",
+        ),
+    )
+
+    status = main._check_subtitle_font()
+
+    assert status["resolved_family"].startswith("Noto Sans CJK TC")
+    assert status["exact_match"] is True
+    assert status["available"] is True
+
+
+def test_parallel_failure_persists_terminal_state_and_cleans_lock_and_segments(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    import backend.tasks as tasks
+    from backend.utils.cleanup_utils import create_task_lock
+
+    upload_dir = tmp_path / "uploads"
+    segments_dir = tmp_path / "segments"
+    upload_dir.mkdir()
+    segments_dir.mkdir()
+    (segments_dir / "seg_000.mp4").write_bytes(b"partial")
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    lock_path = Path(create_task_lock("task-1", str(upload_dir)))
+    tasks._task_history().upsert_created("task-1", "demo.mp4")
+
+    tasks._persist_parallel_failure("task-1", RuntimeError("segment failed"), str(segments_dir))
+
+    entry = tasks._task_history().get("task-1")
+    assert entry is not None
+    assert entry.status == "FAILURE"
+    assert entry.duration_seconds is not None
+    assert (upload_dir / "task-1_error.json").exists()
+    assert not lock_path.exists()
+    assert not segments_dir.exists()
+
+
 def test_cleanup_honors_retention_and_structured_counts(monkeypatch: pytest.MonkeyPatch, tmp_path):
     from backend.utils.cleanup_utils import cleanup_old_files, create_task_lock
 

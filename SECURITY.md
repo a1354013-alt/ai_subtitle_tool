@@ -78,7 +78,7 @@ The following environment variables contain sensitive data:
 
 `OPENAI_API_KEY` is optional for transcription-only usage and required when translation is requested. Missing OpenAI configuration should be treated as a translation feature warning, not as a general service startup failure.
 
-When `REQUIRE_AUTH_TOKEN=true`, non-health API routes require either `Authorization: Bearer <token>` or `X-API-Token: <token>`. `/healthz`, `/readyz`, `/api/docs`, `/api/redoc`, and `/openapi.json` are excluded for diagnostics and documentation. Direct browser downloads use short-lived signed download tickets issued by authenticated requests to `/download-ticket`; permanent `AUTH_TOKEN` values are not placed in download URLs.
+When `REQUIRE_AUTH_TOKEN=true`, non-health API routes require either `Authorization: Bearer <token>` or `X-API-Token: <token>`. `/healthz`, `/readyz`, `/docs`, `/redoc`, and `/openapi.json` are excluded for diagnostics and documentation. Direct browser downloads use short-lived signed download tickets issued by authenticated requests to `/download-ticket`; permanent `AUTH_TOKEN` values are not placed in download URLs.
 
 `STORAGE_BACKEND` controls storage selection explicitly. `STORAGE_BACKEND=local` always uses local storage. `STORAGE_BACKEND=s3` requires `S3_BUCKET` and optional dependencies from `requirements.optional-s3.txt`; S3 remains experimental unless manifest, subtitle download, batch download, cleanup, and rebuild behavior have all been verified for that deployment.
 

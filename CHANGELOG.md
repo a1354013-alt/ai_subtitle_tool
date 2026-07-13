@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-rc3
+
+- Added a shared task-state resolver across status, results, and batch flows so durable terminal history remains authoritative when Redis result metadata is lost.
+- Fixed enqueue/history ordering, worker-side terminal timing persistence, rebuild cancellation ownership, CJK font exact-match validation, atomic batch ZIP creation, and parallel segment count preflight.
+- Expanded CI with deterministic release ZIP SHA-256 comparison and an opt-in Redis/FFmpeg/CJK integration job.
+- Clarified Docker static checks, real Compose smoke validation, CJK integration opt-in behavior, and documentation routes.
+
 ## 1.0.0-rc2
 
 - Added durable task-state persistence for progress, terminal status, warnings, errors, result ownership, and timing metadata.

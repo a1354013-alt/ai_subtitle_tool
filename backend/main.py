@@ -362,11 +362,12 @@ def _response_from_history(task_id: str, entry) -> TaskStatusResponse:
     status = TaskStatusEnum(entry.status) if entry.status in TaskStatusEnum._value2member_map_ else TaskStatusEnum.PENDING
     result_task_id = entry.result_task_id
     result_url = _success_result_url(result_task_id or task_id) if status == TaskStatusEnum.SUCCESS else None
+    message = entry.message or ("Waiting for worker..." if status == TaskStatusEnum.PENDING else None)
     return TaskStatusResponse(
         task_id=task_id,
         status=status,
         progress=entry.progress,
-        message=entry.message,
+        message=message,
         result_url=result_url,
         result_task_id=result_task_id,
         warnings=entry.warnings,
@@ -377,7 +378,7 @@ def _response_from_history(task_id: str, entry) -> TaskStatusResponse:
 
 def _response_from_local_artifacts(task_id: str) -> Optional[TaskStatusResponse]:
     has_video, available_files = _scan_task_artifacts(task_id)
-    if not has_video and not available_files:
+    if not has_video:
         return None
     return TaskStatusResponse(
         task_id=task_id,
@@ -387,6 +388,155 @@ def _response_from_local_artifacts(task_id: str) -> Optional[TaskStatusResponse]
         result_url=_success_result_url(task_id),
         warnings=[],
     )
+
+
+def _resolve_task_state(task_id: str) -> TaskStatusResponse:
+    if is_task_canceled(UPLOAD_DIR, task_id):
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.CANCELED,
+            progress=0,
+            message="Task canceled by user",
+            result_url=None,
+            warnings=[],
+            error_code="task_canceled",
+            suggestion="Restart the task if you still need subtitle generation for this file.",
+        )
+
+    task_result = _get_async_result(task_id)
+    celery_status = task_result.status
+
+    if celery_status == "PROGRESS":
+        info = task_result.info or {}
+        progress = 0
+        message = ""
+        warnings: list[str] = []
+        result_task_id = None
+        if isinstance(info, dict):
+            progress = int(info.get("progress", 0) or 0)
+            message = str(info.get("status", "") or info.get("message", "") or "")
+            if isinstance(info.get("warnings"), list):
+                warnings = list(info["warnings"])
+            if info.get("result_task_id"):
+                result_task_id = validate_task_id(str(info["result_task_id"]))
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.PROCESSING,
+            progress=progress,
+            message=message,
+            result_task_id=result_task_id,
+            warnings=warnings,
+        )
+
+    if celery_status == "SUCCESS":
+        warnings: list[str] = []
+        result_task_id = None
+        if isinstance(task_result.result, dict):
+            raw_result_task_id = task_result.result.get("result_task_id")
+            if raw_result_task_id:
+                result_task_id = validate_task_id(str(raw_result_task_id))
+            warnings = list(task_result.result.get("warnings", []) or [])
+        result_owner_task_id = result_task_id or task_id
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.SUCCESS,
+            progress=100,
+            message="Completed",
+            result_url=_success_result_url(result_owner_task_id),
+            result_task_id=result_task_id,
+            warnings=warnings,
+        )
+
+    if celery_status in {"FAILURE", "REVOKED"}:
+        if isinstance(task_result.info, dict) and task_result.info.get("error_code"):
+            failure_payload = _coerce_failure_payload(task_result.info)
+        elif isinstance(task_result.result, dict) and task_result.result.get("error_code"):
+            failure_payload = _coerce_failure_payload(task_result.result)
+        elif _failure_payload_from_artifact(task_id):
+            failure_payload = _failure_payload_from_artifact(task_id) or {}
+        else:
+            fallback = "Task was revoked" if celery_status == "REVOKED" else task_result.result or task_result.info
+            failure_payload = _coerce_failure_payload(fallback)
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.FAILURE,
+            progress=0,
+            message=failure_payload["message"],
+            warnings=[],
+            error_code=failure_payload["error_code"],
+            suggestion=failure_payload["suggestion"],
+        )
+
+    if celery_status != "PENDING":
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.PROCESSING,
+            progress=0,
+            message=str(celery_status or "Processing"),
+            warnings=[],
+        )
+
+    persisted = TASK_HISTORY.get(task_id)
+    if persisted and persisted.status in {
+        TaskStatusEnum.SUCCESS.value,
+        TaskStatusEnum.FAILURE.value,
+        TaskStatusEnum.CANCELED.value,
+        TaskStatusEnum.PROCESSING.value,
+        TaskStatusEnum.PENDING.value,
+    }:
+        return _response_from_history(task_id, persisted)
+
+    artifact_payload = _failure_payload_from_artifact(task_id)
+    if artifact_payload:
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.FAILURE,
+            progress=0,
+            message=artifact_payload["message"],
+            warnings=[],
+            error_code=artifact_payload["error_code"],
+            suggestion=artifact_payload["suggestion"],
+        )
+
+    if local_response := _response_from_local_artifacts(task_id):
+        return local_response
+
+    if _task_has_local_artifacts(task_id):
+        return TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.PENDING,
+            progress=0,
+            message="Waiting for worker...",
+            warnings=[],
+        )
+
+    error_info = get_error_response("task_not_found")
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error_code": "task_not_found",
+            "message": error_info["message"],
+            "suggestion": error_info["suggestion"],
+        },
+    )
+
+
+def _mark_enqueue_failure(task_id: str, exc: Exception) -> None:
+    error_code = "enqueue_failed"
+    message = f"Failed to enqueue task: {exc}"
+    suggestion = "Confirm Redis and Celery are running, then retry the upload."
+    try:
+        TASK_HISTORY.update_status(
+            task_id=task_id,
+            status=TaskStatusEnum.FAILURE.value,
+            progress=0,
+            message=message,
+            warnings=[],
+            error_code=error_code,
+            suggestion=suggestion,
+        )
+    except Exception:
+        logger.warning("Failed to mark enqueue failure: %s", task_id, exc_info=True)
 
 
 def _enqueue_process_video_task(file_path: str, options: dict, task_id: str) -> None:
@@ -644,25 +794,65 @@ def check_system_dependencies():
 
 
 def _check_subtitle_font() -> dict[str, Any]:
+    requested_family = settings.SUBTITLE_FONT_NAME
     try:
         import subprocess
 
         result = subprocess.run(
-            ["fc-match", settings.SUBTITLE_FONT_NAME],
+            ["fc-match", "-f", "%{family}\n%{file}\n", requested_family],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
     except FileNotFoundError:
-        return {"font": settings.SUBTITLE_FONT_NAME, "available": False, "detail": "fontconfig fc-match is not installed"}
+        return {
+            "font": requested_family,
+            "requested_family": requested_family,
+            "resolved_family": None,
+            "resolved_file": None,
+            "exact_match": False,
+            "available": False,
+            "detail": "fontconfig fc-match is not installed",
+        }
     except Exception as exc:
-        return {"font": settings.SUBTITLE_FONT_NAME, "available": False, "detail": str(exc)}
+        return {
+            "font": requested_family,
+            "requested_family": requested_family,
+            "resolved_family": None,
+            "resolved_file": None,
+            "exact_match": False,
+            "available": False,
+            "detail": str(exc),
+        }
 
     output = (result.stdout or "").strip()
     if result.returncode != 0 or not output:
-        return {"font": settings.SUBTITLE_FONT_NAME, "available": False, "detail": result.stderr.strip() or "fc-match returned no match"}
-    return {"font": settings.SUBTITLE_FONT_NAME, "available": True, "detail": output}
+        return {
+            "font": requested_family,
+            "requested_family": requested_family,
+            "resolved_family": None,
+            "resolved_file": None,
+            "exact_match": False,
+            "available": False,
+            "detail": result.stderr.strip() or "fc-match returned no match",
+        }
+    lines = output.splitlines()
+    resolved_family = lines[0].strip() if lines else ""
+    resolved_file = lines[1].strip() if len(lines) > 1 else ""
+    requested = requested_family.casefold().strip()
+    resolved_names = [item.casefold().strip() for item in resolved_family.split(",")]
+    exact_match = requested in resolved_names
+    detail = output if exact_match else f"fc-match resolved '{requested_family}' to '{resolved_family}'"
+    return {
+        "font": requested_family,
+        "requested_family": requested_family,
+        "resolved_family": resolved_family,
+        "resolved_file": resolved_file or None,
+        "exact_match": exact_match,
+        "available": exact_match,
+        "detail": detail,
+    }
 
 from contextlib import asynccontextmanager
 
@@ -710,7 +900,7 @@ async def readyz():
             "suggestion": ERROR_MESSAGES["ffmpeg_not_found"]["suggestion"]
         })
 
-    font_status = _check_subtitle_font()
+    font_status = await run_in_threadpool(_check_subtitle_font)
     if not font_status["available"]:
         errors.append({
             "code": "subtitle_font_unavailable",
@@ -746,7 +936,7 @@ async def upload_video(
 
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
     except HTTPException:
         raise
     except Exception as e:
@@ -771,7 +961,7 @@ async def upload_video(
         file.file.close()
 
     try:
-        _validate_saved_video_file(file_path)
+        await run_in_threadpool(_validate_saved_video_file, file_path)
     except Exception as e:
         try:
             os.remove(file_path)
@@ -790,36 +980,23 @@ async def upload_video(
     }
 
     try:
-        _enqueue_process_video_task(file_path, options, task_id)
-    except HTTPException:
-        try:
-            os.remove(file_path)
-        except Exception:
-            pass
-        raise
-    except Exception as e:
-        try:
-            os.remove(file_path)
-        except Exception:
-            pass
-        
-        error_code = handle_known_error(e)
-        error_info = get_error_response(error_code)
-        return JSONResponse(
-            status_code=400,
-            content={
-                "success": False,
-                "error_code": error_code,
-                "message": error_info["message"],
-                "suggestion": error_info["suggestion"]
-            }
-        )
-
-    # Store recent task history for product continuity.
-    try:
         TASK_HISTORY.upsert_created(task_id=task_id, filename=safe_filename, status=TaskStatusEnum.PENDING.value)
     except Exception:
-        logger.warning("Failed to record task history (non-fatal)", exc_info=True)
+        logger.error("Failed to record task history before enqueue: %s", task_id, exc_info=True)
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to record task history") from None
+
+    try:
+        await run_in_threadpool(_enqueue_process_video_task, file_path, options, task_id)
+    except HTTPException as exc:
+        _mark_enqueue_failure(task_id, exc)
+        raise
+    except Exception as e:
+        _mark_enqueue_failure(task_id, e)
+        raise HTTPException(status_code=503, detail="Failed to enqueue task") from None
 
     return TaskStatusResponse(task_id=task_id, status=TaskStatusEnum.PENDING, progress=0)
 
@@ -827,136 +1004,20 @@ async def upload_video(
 @app.get("/status/{task_id}", response_model=TaskStatusResponse)
 async def get_status(task_id: str):
     task_id = validate_task_id(task_id)
-
-    if is_task_canceled(UPLOAD_DIR, task_id):
-        return TaskStatusResponse(
-            task_id=task_id,
-            status=TaskStatusEnum.CANCELED,
-            progress=0,
-            message="Task canceled by user",
-            result_url=None,
-            warnings=[],
-            error_code="task_canceled",
-            suggestion="Restart the task if you still need subtitle generation for this file.",
-        )
-
-    task_result = _get_async_result(task_id)
-
-    status = task_result.status
-    progress = 0
-    message = ""
-    result_url = None
-    result_task_id = None
-    warnings: List[str] = []
-    error_code: Optional[str] = None
-    suggestion: Optional[str] = None
-
-    if status == "PROGRESS":
-        info = task_result.info or {}
-        if isinstance(info, dict):
-            progress = int(info.get("progress", 0) or 0)
-            message = str(info.get("status", "") or "")
-            if "warnings" in info and isinstance(info["warnings"], list):
-                warnings.extend(info["warnings"])
-        status = TaskStatusEnum.PROCESSING
-    elif status == "SUCCESS":
-        progress = 100
-        message = "Completed"
-
-        if isinstance(task_result.result, dict):
-            raw_result_task_id = task_result.result.get("result_task_id")
-            if raw_result_task_id:
-                result_task_id = validate_task_id(str(raw_result_task_id))
-            warnings.extend(task_result.result.get("warnings", []) or [])
-
-        result_owner_task_id = result_task_id or task_id
-        result_url = _success_result_url(result_owner_task_id)
-        status = TaskStatusEnum.SUCCESS
-    elif status == "FAILURE":
-        if isinstance(task_result.info, dict) and task_result.info.get("error_code"):
-            failure_payload = _coerce_failure_payload(task_result.info)
-        elif isinstance(task_result.result, dict) and task_result.result.get("error_code"):
-            failure_payload = _coerce_failure_payload(task_result.result)
-        elif _failure_payload_from_artifact(task_id):
-            failure_payload = _failure_payload_from_artifact(task_id) or {}
-        else:
-            fallback_value = task_result.result if task_result.result is not None else task_result.info
-            failure_payload = _coerce_failure_payload(fallback_value)
-        error_code = failure_payload["error_code"]
-        message = failure_payload["message"]
-        suggestion = failure_payload["suggestion"]
-        status = TaskStatusEnum.FAILURE
-    elif status == "PENDING":
-        persisted = TASK_HISTORY.get(task_id)
-        if persisted and persisted.status in {
-            TaskStatusEnum.SUCCESS.value,
-            TaskStatusEnum.FAILURE.value,
-            TaskStatusEnum.CANCELED.value,
-            TaskStatusEnum.PROCESSING.value,
-        }:
-            return _response_from_history(task_id, persisted)
-
-        artifact_payload = _failure_payload_from_artifact(task_id)
-        if artifact_payload:
-            error_code = artifact_payload["error_code"]
-            message = artifact_payload["message"]
-            suggestion = artifact_payload["suggestion"]
-            status = TaskStatusEnum.FAILURE
-        elif local_response := _response_from_local_artifacts(task_id):
-            return local_response
-        elif persisted is None:
-            error_info = get_error_response("task_not_found")
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error_code": "task_not_found",
-                    "message": error_info["message"],
-                    "suggestion": error_info["suggestion"],
-                },
-            )
-        else:
-            message = "Waiting for worker..."
-            status = TaskStatusEnum.PENDING
-    elif status == "REVOKED":
-        failure_payload = _failure_payload_from_artifact(task_id) or _coerce_failure_payload("Task was revoked")
-        error_code = failure_payload["error_code"]
-        message = failure_payload["message"]
-        suggestion = failure_payload["suggestion"]
-        status = TaskStatusEnum.FAILURE
-    else:
-        # Any other Celery states are surfaced as PROCESSING for stability.
-        artifact_payload = _failure_payload_from_artifact(task_id)
-        if artifact_payload:
-            error_code = artifact_payload["error_code"]
-            message = artifact_payload["message"]
-            suggestion = artifact_payload["suggestion"]
-            status = TaskStatusEnum.FAILURE
-        else:
-            status = TaskStatusEnum.PROCESSING
+    response = _resolve_task_state(task_id)
 
     # Best-effort status tracking for "Recent Tasks"
     _persist_task_state(
         task_id,
-        status,
-        progress=progress,
-        message=message,
-        warnings=warnings,
-        error_code=error_code,
-        suggestion=suggestion,
-        result_task_id=result_task_id,
+        response.status,
+        progress=response.progress,
+        message=response.message,
+        warnings=response.warnings,
+        error_code=response.error_code,
+        suggestion=response.suggestion,
+        result_task_id=response.result_task_id,
     )
-
-    return TaskStatusResponse(
-        task_id=task_id,
-        status=status,
-        progress=progress,
-        message=message,
-        result_url=result_url,
-        result_task_id=result_task_id,
-        warnings=warnings,
-        error_code=error_code,
-        suggestion=suggestion,
-    )
+    return response
 
 
 @app.post("/tasks/{task_id}/cancel")
@@ -1086,8 +1147,8 @@ async def batch_upload_videos(
             _validate_uploaded_video_file(file)
 
             with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            _validate_saved_video_file(file_path)
+                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
+            await run_in_threadpool(_validate_saved_video_file, file_path)
 
             options = {
                 "business_id": task_id,
@@ -1125,14 +1186,15 @@ async def batch_upload_videos(
 
     for job in enqueue_jobs:
         try:
-            _enqueue_process_video_task(job["file_path"], job["options"], job["task_id"])
             TASK_HISTORY.upsert_created(
                 task_id=job["task_id"],
                 filename=job["filename"],
                 status=TaskStatusEnum.PENDING.value,
             )
+            await run_in_threadpool(_enqueue_process_video_task, job["file_path"], job["options"], job["task_id"])
         except Exception as e:
             logger.error("Failed to enqueue batch file %s: %s", job["filename"], e)
+            _mark_enqueue_failure(job["task_id"], e)
             for task in tasks_info:
                 if task.task_id == job["task_id"]:
                     task.status = TaskStatusEnum.FAILURE.value
@@ -1276,6 +1338,72 @@ def _scan_task_artifacts(task_id: str) -> tuple[bool, list[FileInfo]]:
         for lang_suffix, exts in sorted(lang_map.items(), key=lambda kv: kv[0].lower())
     ]
 
+
+def _build_batch_zip_file(batch, zip_path: str) -> None:
+    tmp_path = f"{zip_path}.tmp-{uuid.uuid4().hex}"
+    failed_tasks = []
+
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
+            for task in batch.tasks:
+                try:
+                    status_resp = _resolve_task_state(task.task_id)
+                except Exception as e:
+                    failed_tasks.append({"task_id": task.task_id, "filename": task.filename, "error": str(e)})
+                    continue
+
+                result_owner_task_id = status_resp.result_task_id or task.task_id
+                if status_resp.status == TaskStatusEnum.SUCCESS:
+                    wrote_artifact = False
+                    for local_file in sorted(Path(UPLOAD_DIR).glob(f"{result_owner_task_id}_*.srt")):
+                        lang_suffix = local_file.stem.replace(f"{result_owner_task_id}_", "", 1)
+                        zipf.write(
+                            local_file,
+                            arcname=_build_batch_archive_name(task.filename, task.task_id, ".srt", lang_suffix),
+                        )
+                        wrote_artifact = True
+                        write_vtt_for_srt_to_zip(
+                            zipf,
+                            local_file,
+                            _build_batch_archive_name(task.filename, task.task_id, ".vtt", lang_suffix),
+                        )
+                        wrote_artifact = True
+                    for local_file in sorted(Path(UPLOAD_DIR).glob(f"{result_owner_task_id}_*.ass")):
+                        lang_suffix = local_file.stem.replace(f"{result_owner_task_id}_", "", 1)
+                        zipf.write(
+                            local_file,
+                            arcname=_build_batch_archive_name(task.filename, task.task_id, ".ass", lang_suffix),
+                        )
+                        wrote_artifact = True
+
+                    video_path = os.path.join(UPLOAD_DIR, f"{result_owner_task_id}_final.mp4")
+                    if os.path.exists(video_path):
+                        zipf.write(video_path, arcname=_build_batch_archive_name(task.filename, task.task_id, ".mp4"))
+                        wrote_artifact = True
+                    if not wrote_artifact:
+                        failed_tasks.append({
+                            "task_id": task.task_id,
+                            "filename": task.filename,
+                            "error": "No subtitle or video artifacts found for completed task",
+                        })
+                elif status_resp.status in (TaskStatusEnum.FAILURE, TaskStatusEnum.CANCELED):
+                    failed_tasks.append({
+                        "task_id": task.task_id,
+                        "filename": task.filename,
+                        "error": status_resp.message,
+                    })
+
+            if failed_tasks:
+                zipf.writestr("failed_tasks.json", json.dumps(failed_tasks, indent=2))
+        os.replace(tmp_path, zip_path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                logger.warning("Failed to remove partial batch ZIP: %s", tmp_path, exc_info=True)
+
+
 @app.get("/batch/{batch_id}/download")
 async def download_batch_zip(batch_id: str):
     try:
@@ -1287,82 +1415,33 @@ async def download_batch_zip(batch_id: str):
     
     zip_filename = f"subtitle_batch_{batch_id}.zip"
     zip_path = os.path.join(OUTPUT_DIR, zip_filename)
-    
-    failed_tasks = []
-    
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        for task in batch.tasks:
-            try:
-                status_resp = await get_status(task.task_id)
-            except Exception as e:
-                failed_tasks.append({"task_id": task.task_id, "filename": task.filename, "error": str(e)})
-                continue
-
-            if status_resp.status == TaskStatusEnum.SUCCESS:
-                wrote_artifact = False
-                for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.srt")):
-                    lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
-                    zipf.write(
-                        local_file,
-                        arcname=_build_batch_archive_name(task.filename, task.task_id, ".srt", lang_suffix),
-                    )
-                    wrote_artifact = True
-                    write_vtt_for_srt_to_zip(
-                        zipf,
-                        local_file,
-                        _build_batch_archive_name(task.filename, task.task_id, ".vtt", lang_suffix),
-                    )
-                    wrote_artifact = True
-                for local_file in sorted(Path(UPLOAD_DIR).glob(f"{task.task_id}_*.ass")):
-                    lang_suffix = local_file.stem.replace(f"{task.task_id}_", "", 1)
-                    zipf.write(
-                        local_file,
-                        arcname=_build_batch_archive_name(task.filename, task.task_id, ".ass", lang_suffix),
-                    )
-                    wrote_artifact = True
-
-                video_path = os.path.join(UPLOAD_DIR, f"{task.task_id}_final.mp4")
-                if os.path.exists(video_path):
-                    zipf.write(video_path, arcname=_build_batch_archive_name(task.filename, task.task_id, ".mp4"))
-                    wrote_artifact = True
-                if not wrote_artifact:
-                    failed_tasks.append({
-                        "task_id": task.task_id,
-                        "filename": task.filename,
-                        "error": "No subtitle or video artifacts found for completed task",
-                    })
-            elif status_resp.status in (TaskStatusEnum.FAILURE, TaskStatusEnum.CANCELED):
-                failed_tasks.append({
-                    "task_id": task.task_id,
-                    "filename": task.filename,
-                    "error": status_resp.message
-                })
-        
-        if failed_tasks:
-            zipf.writestr("failed_tasks.json", json.dumps(failed_tasks, indent=2))
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    await run_in_threadpool(_build_batch_zip_file, batch, zip_path)
             
     return FileResponse(zip_path, media_type="application/zip", filename=zip_filename)
 
 @app.get("/results/{task_id}", response_model=TaskResultManifest, response_model_exclude_none=True)
 async def get_results_manifest(task_id: str):
     task_id = validate_task_id(task_id)
+    try:
+        status_resp = _resolve_task_state(task_id)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        has_video_probe, available_files_probe = await run_in_threadpool(_scan_task_artifacts, task_id)
+        if not has_video_probe and not available_files_probe:
+            raise
+        status_resp = TaskStatusResponse(
+            task_id=task_id,
+            status=TaskStatusEnum.PENDING,
+            progress=0,
+            message="Waiting for worker...",
+            warnings=[],
+        )
+    result_owner_task_id = status_resp.result_task_id or task_id
+
+    has_video, available_files = await run_in_threadpool(_scan_task_artifacts, result_owner_task_id)
     task_result = _get_async_result(task_id)
-
-    warnings: List[str] = []
-    if task_result.status == "SUCCESS" and isinstance(task_result.result, dict):
-        warnings = task_result.result.get("warnings", []) or []
-    elif task_result.status == "PROGRESS":
-        info = task_result.info or {}
-        if isinstance(info, dict) and "warnings" in info:
-            warnings = list(info.get("warnings") or [])
-
-    status = task_result.status
-    if is_task_canceled(UPLOAD_DIR, task_id):
-        task_status = TaskStatusEnum.CANCELED
-    else:
-        task_status = TaskStatusEnum.PROCESSING if status == "PROGRESS" else TaskStatusEnum(status) if status in TaskStatusEnum._value2member_map_ else TaskStatusEnum.PROCESSING
-
-    has_video, available_files = _scan_task_artifacts(task_id)
     translations_by_lang = _translation_info_from_result(task_result.result)
     enriched_files: List[FileInfo] = []
     for file_info in available_files:
@@ -1383,14 +1462,14 @@ async def get_results_manifest(task_id: str):
     artifacts_exist = has_video or bool(enriched_files)
     return TaskResultManifest(
         task_id=task_id,
-        task_status=task_status,
+        task_status=status_resp.status,
         has_video=has_video,
         subtitle_languages=[f.display_name for f in enriched_files],
         available_files=enriched_files,
-        warnings=warnings,
+        warnings=status_resp.warnings,
         translations=list(translations_by_lang.values()),
-        is_partial=(task_status == TaskStatusEnum.SUCCESS and not artifacts_exist),
-        orphaned_files_detected=(task_status != TaskStatusEnum.SUCCESS and artifacts_exist),
+        is_partial=(status_resp.status == TaskStatusEnum.SUCCESS and not artifacts_exist),
+        orphaned_files_detected=(status_resp.status != TaskStatusEnum.SUCCESS and artifacts_exist),
     )
 
 

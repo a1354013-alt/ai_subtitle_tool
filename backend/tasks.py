@@ -5,8 +5,11 @@ from pathlib import Path
 
 try:
     from celery import chord
+    from celery.signals import task_failure, task_revoked
 except ImportError:
     chord = None
+    task_failure = None
+    task_revoked = None
 
 from .celery_app import celery_app
 
@@ -46,9 +49,16 @@ def _record_task_state(
     if not task_id:
         return
     try:
-        _task_history().update_status(
+        store = _task_history()
+        duration_seconds = None
+        if status in {"SUCCESS", "FAILURE", "CANCELED"}:
+            from .storage.task_history import duration_seconds_since
+
+            duration_seconds = duration_seconds_since(store.get_created_at(task_id))
+        store.update_status(
             task_id,
             status,
+            duration_seconds=duration_seconds,
             progress=progress,
             message=message,
             warnings=warnings,
@@ -84,6 +94,47 @@ def _record_storage_upload(storage, local_path: str, remote_path: str, warnings:
     if settings.STORAGE_BACKEND == "s3" and settings.S3_UPLOAD_REQUIRED:
         raise RuntimeError(message)
     warnings.append(message)
+
+
+def _terminal_failure_payload(exc: BaseException | str):
+    from .utils.error_handler import handle_known_error, get_error_response
+    from .utils.task_control_utils import build_task_failure_payload
+
+    error_code = handle_known_error(exc if isinstance(exc, BaseException) else Exception(str(exc)))
+    error_info = get_error_response(error_code)
+    return build_task_failure_payload(
+        error_code=error_code,
+        message=error_info["message"],
+        suggestion=error_info["suggestion"],
+    )
+
+
+def _persist_parallel_failure(business_id: str | None, exc: BaseException | str, segments_dir: str | None = None) -> None:
+    if not business_id:
+        return
+    from .utils.task_control_utils import write_task_error_artifact
+
+    failure_payload = _terminal_failure_payload(exc)
+    upload_dir = settings.get_upload_dir()
+    write_task_error_artifact(business_id, upload_dir, failure_payload)
+    _record_task_state(
+        business_id,
+        "FAILURE",
+        progress=0,
+        message=failure_payload["message"],
+        warnings=[],
+        error_code=failure_payload["error_code"],
+        suggestion=failure_payload["suggestion"],
+    )
+    try:
+        remove_task_lock(business_id, upload_dir)
+    except Exception:
+        logger.warning("Failed to remove task lock after parallel failure: %s", business_id, exc_info=True)
+    if segments_dir and os.path.exists(segments_dir):
+        try:
+            shutil.rmtree(segments_dir)
+        except Exception:
+            logger.warning("Failed to remove segment directory after parallel failure: %s", segments_dir, exc_info=True)
 
 
 def finalize_pipeline(segment_results, video_path, options, update_state_func=None, segments_dir=None):
@@ -325,6 +376,12 @@ def transcribe_segment_task(segment_data: dict, model_size: str):
     return transcribe_segment(segment_data, model_size, transcribe_video)
 
 
+@celery_app.task
+def parallel_pipeline_failure_task(request=None, exc=None, traceback=None, business_id: str | None = None, segments_dir: str | None = None):
+    _persist_parallel_failure(business_id, exc or "Parallel segment pipeline failed", segments_dir=segments_dir)
+    return {"status": "FAILURE", "business_id": business_id}
+
+
 @celery_app.task(bind=True)
 def merge_and_finalize_task(self, segment_results, video_path, options, segments_dir=None):
     business_id = (options or {}).get("business_id")
@@ -388,6 +445,13 @@ def process_video_task(self, video_path: str, options: dict = None):
 
             if parallel:
                 _update_worker_state(self, business_id, state="PROGRESS", meta={"progress": 10, "status": "Splitting video..."})
+                from .utils.split_utils import expected_segment_count
+
+                expected_segments = expected_segment_count(duration)
+                if expected_segments > settings.MAX_PARALLEL_SEGMENTS:
+                    raise ValueError(
+                        f"Video would produce {expected_segments} segments, exceeding MAX_PARALLEL_SEGMENTS={settings.MAX_PARALLEL_SEGMENTS}"
+                    )
                 video_segments = split_video(current_video)
                 if len(video_segments) > settings.MAX_PARALLEL_SEGMENTS:
                     raise ValueError(
@@ -396,8 +460,15 @@ def process_video_task(self, video_path: str, options: dict = None):
                 segments_dir = f"{os.path.splitext(current_video)[0]}_segments"
                 # Inherit the current task's queue for sub-tasks
                 current_queue = self.request.delivery_info.get("routing_key", "default")
-                header = [transcribe_segment_task.s(seg, model_size).set(queue=current_queue) for seg in video_segments]
-                callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir).set(queue=current_queue)
+                for segment in video_segments:
+                    segment["business_id"] = business_id
+                    segment["segments_dir"] = segments_dir
+                errback = parallel_pipeline_failure_task.s(business_id=business_id, segments_dir=segments_dir).set(queue=current_queue)
+                header = [
+                    transcribe_segment_task.s(seg, model_size).set(queue=current_queue).on_error(errback)
+                    for seg in video_segments
+                ]
+                callback = merge_and_finalize_task.s(current_video, options, segments_dir=segments_dir).set(queue=current_queue).on_error(errback)
                 workflow = chord(header, callback)
                 return self.replace(workflow)
 
@@ -426,18 +497,8 @@ def process_video_task(self, video_path: str, options: dict = None):
         except Exception:
             logger.warning("Failed to remove task lock after exception: business_id=%s", business_id, exc_info=True)
         
-        from .utils.error_handler import handle_known_error, get_error_response
-        from .utils.task_control_utils import build_task_failure_payload, write_task_error_artifact
-        
-        error_code = handle_known_error(e)
-        error_info = get_error_response(error_code)
-        
-        # Build stable failure payload and write to artifact for persistence
-        failure_payload = build_task_failure_payload(
-            error_code=error_code,
-            message=error_info["message"],
-            suggestion=error_info["suggestion"]
-        )
+        from .utils.task_control_utils import write_task_error_artifact
+        failure_payload = _terminal_failure_payload(e)
         
         # Write to artifact file as backup (survives Celery meta override)
         upload_dir = settings.get_upload_dir()
@@ -478,7 +539,7 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
 
     try:
         _record_task_state(rebuild_task_id, "PROCESSING", progress=0, message="Rebuild worker started", result_task_id=task_id)
-        if is_task_canceled(upload_dir, task_id):
+        if is_task_canceled(upload_dir, rebuild_task_id):
             raise RuntimeError("Task canceled")
 
         # Prefer the silence-removed intermediate if it exists.
@@ -535,8 +596,6 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
             suggestion=error_info["suggestion"],
         )
         write_task_error_artifact(rebuild_task_id, upload_dir, failure_payload)
-        if rebuild_task_id != task_id:
-            write_task_error_artifact(task_id, upload_dir, failure_payload)
         _update_worker_state(
             self,
             rebuild_task_id,
@@ -548,3 +607,40 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
             },
         )
         raise
+
+
+if task_failure is not None:
+    @task_failure.connect
+    def _record_task_failure_signal(sender=None, task_id=None, exception=None, args=None, kwargs=None, **_extra):
+        task_name = getattr(sender, "name", "")
+        if task_name.endswith("transcribe_segment_task"):
+            segment_data = args[0] if args else {}
+            if isinstance(segment_data, dict):
+                _persist_parallel_failure(
+                    segment_data.get("business_id"),
+                    exception or "Segment task failed",
+                    segments_dir=segment_data.get("segments_dir"),
+                )
+        elif task_name.endswith("process_video_task"):
+            options = args[1] if args and len(args) > 1 else {}
+            if isinstance(options, dict):
+                _persist_parallel_failure(options.get("business_id"), exception or "Task failed")
+
+
+if task_revoked is not None:
+    @task_revoked.connect
+    def _record_task_revoked_signal(sender=None, request=None, expired=None, signum=None, terminated=None, **_extra):
+        task_name = getattr(sender, "name", "")
+        args = getattr(request, "args", None) or []
+        if task_name.endswith("transcribe_segment_task"):
+            segment_data = args[0] if args else {}
+            if isinstance(segment_data, dict):
+                _persist_parallel_failure(
+                    segment_data.get("business_id"),
+                    "Segment task was revoked or timed out",
+                    segments_dir=segment_data.get("segments_dir"),
+                )
+        elif task_name.endswith("process_video_task"):
+            options = args[1] if len(args) > 1 else {}
+            if isinstance(options, dict):
+                _persist_parallel_failure(options.get("business_id"), "Task was revoked or timed out")

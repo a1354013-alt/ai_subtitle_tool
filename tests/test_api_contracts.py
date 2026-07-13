@@ -313,6 +313,7 @@ async def test_status_uses_local_artifacts_when_redis_state_is_lost(app_client, 
     client, main, _tmp = app_client
     task_id = "33333333-3333-3333-3333-333333333333"
     Path(main.UPLOAD_DIR, f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+    Path(main.UPLOAD_DIR, f"{task_id}_final.mp4").write_bytes(b"video")
     monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("PENDING"))
 
     response = await client.get(f"/status/{task_id}")
@@ -867,6 +868,43 @@ async def test_rebuild_success_status_points_to_original_result_task(app_client,
 
 
 @pytest.mark.anyio
+async def test_pending_celery_result_uses_durable_success_for_status_and_results(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    task_id = "77777777-7777-7777-7777-777777777777"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / f"{task_id}_English.srt").write_text(VALID_SRT, encoding="utf-8")
+    (upload_dir / f"{task_id}_final.mp4").write_bytes(b"video")
+
+    main.TASK_HISTORY.upsert_created(task_id=task_id, filename="demo.mp4", status="PENDING")
+    main.TASK_HISTORY.update_status(
+        task_id,
+        "SUCCESS",
+        duration_seconds=2.5,
+        progress=100,
+        message="Completed by worker",
+        warnings=["persisted warning"],
+        result_task_id=task_id,
+    )
+    monkeypatch.setattr(main, "_get_async_result", lambda _tid: _make_async_result("PENDING"))
+
+    status_response = await client.get(f"/status/{task_id}")
+    results_response = await client.get(f"/results/{task_id}")
+
+    assert status_response.status_code == 200, status_response.text
+    assert results_response.status_code == 200, results_response.text
+    status_body = status_response.json()
+    results_body = results_response.json()
+    assert status_body["status"] == "SUCCESS"
+    assert status_body["warnings"] == ["persisted warning"]
+    assert status_body["result_task_id"] == task_id
+    assert results_body["task_status"] == "SUCCESS"
+    assert results_body["warnings"] == ["persisted warning"]
+    assert results_body["has_video"] is True
+    assert results_body["available_files"][0]["lang"] == "English"
+
+
+@pytest.mark.anyio
 async def test_successful_rebuild_updates_final_video_manifest(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
     import backend.tasks as tasks
@@ -897,6 +935,52 @@ async def test_successful_rebuild_updates_final_video_manifest(app_client, monke
 
     assert response.status_code == 200, response.text
     assert response.json()["has_video"] is True
+
+
+@pytest.mark.anyio
+async def test_rebuild_cancel_uses_rebuild_task_id_and_preserves_original_success(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    import backend.tasks as tasks
+    from backend.utils.task_control_utils import mark_task_canceled
+
+    original_task_id = "44444444-4444-4444-4444-444444444446"
+    rebuild_task_id = "66666666-6666-6666-6666-666666666667"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    main.TASK_HISTORY.upsert_created(task_id=original_task_id, filename="demo.mp4", status="PENDING")
+    main.TASK_HISTORY.update_status(original_task_id, "SUCCESS", progress=100, message="Completed")
+    mark_task_canceled(str(upload_dir), rebuild_task_id)
+    monkeypatch.setattr(tasks.rebuild_final_video_task.request, "id", rebuild_task_id, raising=False)
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    with pytest.raises(RuntimeError):
+        tasks.rebuild_final_video_task.run(original_task_id, "English", "srt")
+
+    original_status = await client.get(f"/status/{original_task_id}")
+    rebuild_status = await client.get(f"/status/{rebuild_task_id}")
+    assert original_status.json()["status"] == "SUCCESS"
+    assert rebuild_status.json()["status"] == "CANCELED"
+
+
+@pytest.mark.anyio
+async def test_rebuild_failure_artifact_belongs_only_to_rebuild_task(app_client, monkeypatch: pytest.MonkeyPatch):
+    _client, main, _tmp = app_client
+    import backend.tasks as tasks
+
+    original_task_id = "44444444-4444-4444-4444-444444444447"
+    rebuild_task_id = "66666666-6666-6666-6666-666666666668"
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("UPLOAD_DIR", str(upload_dir))
+    monkeypatch.setattr(tasks.rebuild_final_video_task.request, "id", rebuild_task_id, raising=False)
+    monkeypatch.setattr(tasks.rebuild_final_video_task, "update_state", lambda *args, **kwargs: None)
+
+    with pytest.raises(FileNotFoundError):
+        tasks.rebuild_final_video_task.run(original_task_id, "English", "srt")
+
+    assert (upload_dir / f"{rebuild_task_id}_error.json").exists()
+    assert not (upload_dir / f"{original_task_id}_error.json").exists()
 
 
 @pytest.mark.anyio

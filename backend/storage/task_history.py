@@ -52,6 +52,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
         "result_task_id": "ALTER TABLE task_history ADD COLUMN result_task_id TEXT;",
         "updated_at": "ALTER TABLE task_history ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';",
         "completed_at": "ALTER TABLE task_history ADD COLUMN completed_at TEXT;",
+        "duration_seconds": "ALTER TABLE task_history ADD COLUMN duration_seconds REAL;",
     }
     for column, ddl in migrations.items():
         if column not in existing_columns:
@@ -115,7 +116,12 @@ class TaskHistoryStore:
                 VALUES(?, ?, ?, 0, '', '[]', ?, ?, NULL)
                 ON CONFLICT(task_id) DO UPDATE SET
                   filename=excluded.filename,
-                  status=excluded.status,
+                  status=CASE
+                    WHEN excluded.status = 'PENDING'
+                     AND task_history.status IN ('PROCESSING', 'SUCCESS', 'FAILURE', 'CANCELED')
+                    THEN task_history.status
+                    ELSE excluded.status
+                  END,
                   created_at=excluded.created_at,
                   updated_at=excluded.updated_at;
                 """,
@@ -160,8 +166,8 @@ class TaskHistoryStore:
                     progress = COALESCE(?, progress),
                     message = COALESCE(?, message),
                     warnings = CASE WHEN ? THEN ? ELSE warnings END,
-                    error_code = COALESCE(?, error_code),
-                    suggestion = COALESCE(?, suggestion),
+                    error_code = CASE WHEN ? = 'SUCCESS' THEN NULL ELSE COALESCE(?, error_code) END,
+                    suggestion = CASE WHEN ? = 'SUCCESS' THEN NULL ELSE COALESCE(?, suggestion) END,
                     result_task_id = COALESCE(?, result_task_id),
                     updated_at = ?,
                     completed_at = COALESCE(?, completed_at),
@@ -174,7 +180,9 @@ class TaskHistoryStore:
                     message,
                     warnings is not None,
                     warnings_json,
+                    status,
                     error_code,
+                    status,
                     suggestion,
                     result_task_id,
                     now,

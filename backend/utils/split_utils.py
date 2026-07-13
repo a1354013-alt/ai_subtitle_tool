@@ -4,6 +4,26 @@ import re
 from ..models.segments import SimpleSegment
 from backend.utils.media_process import run_media_command
 
+
+def expected_segment_count(duration: float, segment_length: int = 30, overlap: int = 2) -> int:
+    if segment_length <= overlap:
+        raise ValueError(f"segment_length ({segment_length}s) must be > overlap ({overlap}s)")
+    if duration <= 0:
+        return 0
+
+    count = 0
+    start = 0.0
+    while start < duration:
+        count += 1
+        end = min(start + segment_length, duration)
+        if duration - end < 5 and end < duration:
+            end = duration
+        if end >= duration:
+            break
+        start = end - overlap
+    return count
+
+
 def split_video(video_path: str, segment_length: int = 30, overlap: int = 2):
     """
     將影片切成多個指定長度的片段，含重疊以確保邊界不遺漏。

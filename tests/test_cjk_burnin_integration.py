@@ -19,6 +19,7 @@ def test_cjk_subtitle_burnin_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
     font_status = main._check_subtitle_font()
     assert font_status["available"], font_status["detail"]
+    assert font_status["exact_match"], font_status
 
     source = tmp_path / "source.mp4"
     subtitles = tmp_path / "cjk.ass"
@@ -46,8 +47,9 @@ def test_cjk_subtitle_burnin_smoke(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         timeout=30,
         check=True,
     )
-    generate_ass([SimpleSegment(0, 1, "繁體中文 日本語かな漢字 English")], str(subtitles))
+    generate_ass([SimpleSegment(0, 1, "繁體中文字幕 日本語かな漢字 English")], str(subtitles))
     burn_subtitles(str(source), str(subtitles), str(output))
 
     assert output.exists()
     assert output.stat().st_size > 0
+    assert output.stat().st_size != source.stat().st_size

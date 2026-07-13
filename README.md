@@ -189,6 +189,14 @@ docker compose config
 docker compose up --build
 ```
 
+`scripts/verify_docker_config.py` and `docker compose config` are static contract checks. They validate files, environment keys, and Compose syntax, but they do not start the application stack. Use `docker compose up --build` when you need a real end-to-end container smoke run with Redis, the API, worker, beat, and frontend processes.
+
+CJK burn-in integration checks are skipped by default because they require FFmpeg, fontconfig, and an installed CJK font. Enable the real smoke test with:
+
+```bash
+RUN_CJK_BURNIN_SMOKE=1 python -m pytest -q -m integration tests/test_cjk_burnin_integration.py
+```
+
 Benchmark smoke:
 
 ```bash
