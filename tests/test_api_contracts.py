@@ -84,6 +84,26 @@ async def test_app_config_contract(app_client):
 
 
 @pytest.mark.anyio
+async def test_config_and_capabilities_build_payload_in_threadpool(app_client, monkeypatch: pytest.MonkeyPatch):
+    client, main, _tmp = app_client
+    calls: list[str] = []
+    original_run_in_threadpool = main.run_in_threadpool
+
+    async def recording_run_in_threadpool(func, *args, **kwargs):
+        calls.append(getattr(func, "__name__", repr(func)))
+        return await original_run_in_threadpool(func, *args, **kwargs)
+
+    monkeypatch.setattr(main, "run_in_threadpool", recording_run_in_threadpool)
+
+    config_response = await client.get("/api/config")
+    capabilities_response = await client.get("/api/capabilities")
+
+    assert config_response.status_code == 200
+    assert capabilities_response.status_code == 200
+    assert calls.count("_capability_response_payload") == 2
+
+
+@pytest.mark.anyio
 async def test_auth_token_middleware_enforces_non_health_routes(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
     monkeypatch.setattr(main.settings, "REQUIRE_AUTH_TOKEN", True)
@@ -178,8 +198,16 @@ async def test_development_docs_are_available(app_client):
 
 
 @pytest.mark.anyio
-async def test_upload_contract_returns_uuid_and_pending(app_client):
+async def test_upload_contract_returns_uuid_and_pending(app_client, monkeypatch: pytest.MonkeyPatch):
     client, main, _tmp = app_client
+    calls: list[str] = []
+    original_run_in_threadpool = main.run_in_threadpool
+
+    async def recording_run_in_threadpool(func, *args, **kwargs):
+        calls.append(getattr(func, "__name__", repr(func)))
+        return await original_run_in_threadpool(func, *args, **kwargs)
+
+    monkeypatch.setattr(main, "run_in_threadpool", recording_run_in_threadpool)
 
     r = await client.post(
         "/upload",
@@ -197,6 +225,7 @@ async def test_upload_contract_returns_uuid_and_pending(app_client):
     assert body["status"] == "PENDING"
     assert body["progress"] == 0
     assert re.match(r"^[0-9a-fA-F-]{36}$", body["task_id"])
+    assert "upsert_created" in calls
 
     # Upload should persist the file under UPLOAD_DIR.
     upload_dir = Path(main.UPLOAD_DIR)

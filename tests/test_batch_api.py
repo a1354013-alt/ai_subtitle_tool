@@ -57,6 +57,40 @@ def test_batch_upload_basic(batch_app, monkeypatch: pytest.MonkeyPatch):
     assert batch_file.exists()
 
 
+def test_batch_upload_metadata_writes_use_threadpool(batch_app, monkeypatch: pytest.MonkeyPatch):
+    client, main = batch_app
+    upload_dir = Path(main.UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    calls: list[str] = []
+    original_run_in_threadpool = main.run_in_threadpool
+
+    async def recording_run_in_threadpool(func, *args, **kwargs):
+        calls.append(getattr(func, "__name__", repr(func)))
+        return await original_run_in_threadpool(func, *args, **kwargs)
+
+    def fail_enqueue(*_args, **_kwargs):
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(main, "run_in_threadpool", recording_run_in_threadpool)
+    monkeypatch.setattr(main, "_enqueue_process_video_task", fail_enqueue)
+
+    video = upload_dir / "test.mp4"
+    video.write_bytes(b"dummy video content")
+    with video.open("rb") as f:
+        response = client.post(
+            "/batch/upload",
+            files=[("files", ("test.mp4", f, "video/mp4"))],
+            data={"target_langs": "Original", "burn_subtitles": "false"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["tasks"][0]["status"] == "FAILURE"
+    assert "create_batch" in calls
+    assert "upsert_created" in calls
+    assert "_mark_enqueue_failure" in calls
+    assert "update_task_status" in calls
+
+
 def test_batch_status_returns_new_download_urls(batch_app, monkeypatch: pytest.MonkeyPatch):
     client, main = batch_app
     tasks = [

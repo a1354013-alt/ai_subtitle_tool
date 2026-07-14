@@ -718,7 +718,7 @@ async def healthz():
 
 @app.get("/api/config", response_model=AppConfigResponse)
 async def get_app_config():
-    capabilities = _capability_response_payload()
+    capabilities = await run_in_threadpool(_capability_response_payload)
     return AppConfigResponse(
         version=_project_version(),
         maxUploadSizeMb=settings.MAX_UPLOAD_SIZE_MB,
@@ -739,7 +739,8 @@ async def get_app_config():
 
 @app.get("/api/capabilities", response_model=AppCapabilitiesResponse)
 async def get_app_capabilities():
-    return AppCapabilitiesResponse(**_capability_response_payload())
+    capabilities = await run_in_threadpool(_capability_response_payload)
+    return AppCapabilitiesResponse(**capabilities)
 
 
 @app.get("/download-ticket")
@@ -999,7 +1000,12 @@ async def upload_video(
     }
 
     try:
-        TASK_HISTORY.upsert_created(task_id=task_id, filename=safe_filename, status=TaskStatusEnum.PENDING.value)
+        await run_in_threadpool(
+            TASK_HISTORY.upsert_created,
+            task_id=task_id,
+            filename=safe_filename,
+            status=TaskStatusEnum.PENDING.value,
+        )
     except Exception:
         logger.error("Failed to record task history before enqueue: %s", task_id, exc_info=True)
         try:
@@ -1011,10 +1017,10 @@ async def upload_video(
     try:
         await run_in_threadpool(_enqueue_process_video_task, file_path, options, task_id)
     except HTTPException as exc:
-        _mark_enqueue_failure(task_id, exc)
+        await run_in_threadpool(_mark_enqueue_failure, task_id, exc)
         raise
     except Exception as e:
-        _mark_enqueue_failure(task_id, e)
+        await run_in_threadpool(_mark_enqueue_failure, task_id, e)
         raise HTTPException(status_code=503, detail="Failed to enqueue task") from None
 
     return TaskStatusResponse(task_id=task_id, status=TaskStatusEnum.PENDING, progress=0)
@@ -1206,11 +1212,12 @@ async def batch_upload_videos(
         finally:
             file.file.close()
 
-    batch_id = BATCH_MANAGER.create_batch([_model_dump(task) for task in tasks_info])
+    batch_id = await run_in_threadpool(BATCH_MANAGER.create_batch, [_model_dump(task) for task in tasks_info])
 
     for job in enqueue_jobs:
         try:
-            TASK_HISTORY.upsert_created(
+            await run_in_threadpool(
+                TASK_HISTORY.upsert_created,
                 task_id=job["task_id"],
                 filename=job["filename"],
                 status=TaskStatusEnum.PENDING.value,
@@ -1218,13 +1225,19 @@ async def batch_upload_videos(
             await run_in_threadpool(_enqueue_process_video_task, job["file_path"], job["options"], job["task_id"])
         except Exception as e:
             logger.error("Failed to enqueue batch file %s: %s", job["filename"], e)
-            _mark_enqueue_failure(job["task_id"], e)
+            await run_in_threadpool(_mark_enqueue_failure, job["task_id"], e)
             for task in tasks_info:
                 if task.task_id == job["task_id"]:
                     task.status = TaskStatusEnum.FAILURE.value
                     task.error = str(e)
                     break
-            BATCH_MANAGER.update_task_status(batch_id, job["task_id"], TaskStatusEnum.FAILURE.value, str(e))
+            await run_in_threadpool(
+                BATCH_MANAGER.update_task_status,
+                batch_id,
+                job["task_id"],
+                TaskStatusEnum.FAILURE.value,
+                str(e),
+            )
 
     return BatchUploadResponse(batch_id=batch_id, tasks=tasks_info)
 

@@ -11,6 +11,10 @@ on:
         description: "Run real Redis/Celery/FFmpeg/CJK integration checks"
         required: false
         default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
   backend-tests:
@@ -134,7 +138,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
 
       - name: Set up Node
@@ -171,10 +175,34 @@ jobs:
       - name: Verify deterministic release zip SHA-256
         run: |
           python scripts/make_release_zip.py --out release-first.zip --check
-          touch -d "2001-01-01T00:00:00Z" README.md CHANGELOG.md VERSION frontend/package.json
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          excluded_dirs = {
+              ".git", ".github", ".vscode", ".tmp", "__pycache__", "node_modules",
+              "dist", "build", ".vite", ".npm-cache", ".cache", "uploads",
+              "outputs", "temp", "tmp", "data_tmp", "segments", "release_out",
+              "release_pkg", ".release_staging", ".pytest_cache", ".mypy_cache",
+              ".ruff_cache", "htmlcov", ".venv", "venv", "env",
+          }
+          for path in Path(".").rglob("*"):
+              if not path.is_file():
+                  continue
+              if any(part in excluded_dirs for part in path.parts):
+                  continue
+              if path.suffix == ".zip":
+                  continue
+              os.utime(path, (978307200, 978307200))
+          PY
           python scripts/make_release_zip.py --out release-second.zip --check
-          sha256sum release-first.zip release-second.zip
-          test "$(sha256sum release-first.zip | cut -d' ' -f1)" = "$(sha256sum release-second.zip | cut -d' ' -f1)"
+          first="$(sha256sum release-first.zip | cut -d' ' -f1)"
+          second="$(sha256sum release-second.zip | cut -d' ' -f1)"
+          printf 'release-first.zip  %s\nrelease-second.zip %s\n' "$first" "$second"
+          if [ "$first" != "$second" ]; then
+            echo "::error::release zip SHA-256 changed after source-file mtime changes"
+            exit 1
+          fi
 
       - name: Verify Docker delivery contract
         run: python scripts/verify_docker_config.py
@@ -215,10 +243,55 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.lock.txt
 
-      - name: Run mocked/default tests with skip reporting
-        run: python -m pytest -q -m "not integration" -ra
+      - name: Verify FFmpeg availability
+        run: |
+          ffmpeg -version
+          ffprobe -version
+
+      - name: Start Celery worker and beat
+        run: |
+          python -m celery -A backend.celery_app:celery_app worker --loglevel=info --pool=solo --concurrency=1 > celery-worker.log 2>&1 &
+          echo "$!" > celery-worker.pid
+          python -m celery -A backend.celery_app:celery_app beat --loglevel=info > celery-beat.log 2>&1 &
+          echo "$!" > celery-beat.pid
+
+          for i in {1..30}; do
+            if python -m celery -A backend.celery_app:celery_app inspect ping --timeout=2; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "::error::Celery worker did not become ready"
+          cat celery-worker.log || true
+          cat celery-beat.log || true
+          exit 1
+
+      - name: Run real task-state integration checks
+        run: |
+          python -m pytest -q \
+            tests/test_e2e_smoke.py::test_e2e_upload_config_translation_check \
+            tests/test_e2e_smoke.py::test_e2e_single_language_works_without_openai \
+            tests/test_api_contracts.py::test_status_uses_local_artifacts_when_redis_state_is_lost \
+            tests/test_api_contracts.py::test_cancel_contract_marks_task_canceled \
+            -ra
 
       - name: Run real integration tests
         env:
           RUN_CJK_BURNIN_SMOKE: "1"
         run: python -m pytest -q -m integration -ra
+
+      - name: Stop Celery processes
+        if: always()
+        run: |
+          if [ -f celery-worker.pid ]; then kill "$(cat celery-worker.pid)" || true; fi
+          if [ -f celery-beat.pid ]; then kill "$(cat celery-beat.pid)" || true; fi
+          cat celery-worker.log || true
+          cat celery-beat.log || true
+
+      - name: Manual maintainer model-download tests
+        run: |
+          cat <<'EOF'
+          Faster-Whisper model-download transcription tests are intentionally not part of normal CI.
+          Maintainers should run them manually before final v1.0.0 acceptance when model cache/network budget is available.
+          EOF
