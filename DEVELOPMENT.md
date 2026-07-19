@@ -69,6 +69,32 @@ python scripts/verify_delivery.py --full
 
 The source CI workflow is `.github/workflows/ci.yml`. It runs backend tests on Python 3.11 and 3.12, frontend validation on Node.js 20, delivery validation, deterministic ZIP comparison, Docker contract validation, and `docker compose config`. The real Redis/Celery/FFmpeg/CJK integration job is opt-in through workflow dispatch.
 
+For the real integration workflow and local smoke runs, use dedicated runtime directories so cleanup coverage cannot touch unrelated artifacts:
+
+```powershell
+$env:INTEGRATION_TEST_MODE = "true"
+$env:CELERY_WORKER_CONCURRENCY = "1"
+$env:UPLOAD_DIR = ".integration-runtime/uploads"
+$env:OUTPUT_DIR = ".integration-runtime/outputs"
+$env:TEMP_DIR = ".integration-runtime/tmp"
+$env:INTEGRATION_WORK_DIR = ".integration-runtime/work"
+```
+
+Port notes:
+
+- Local F5/backend startup uses `http://127.0.0.1:8891`.
+- Docker Compose smoke uses `http://127.0.0.1:9091`.
+
+Opt-in integration commands:
+
+```powershell
+$env:RUN_CJK_BURNIN_SMOKE = "1"
+python -m pytest -q -m integration tests/test_cjk_burnin_integration.py -ra
+python scripts/run_real_integration_smoke.py --base-url http://127.0.0.1:8891
+```
+
+The smoke script requires `CELERY_WORKER_CONCURRENCY=1` for deterministic cancellation coverage. It writes generated sample videos under `INTEGRATION_WORK_DIR`; service logs stay wherever you redirect backend, worker, and beat stdout/stderr. Remove `.integration-runtime` after the run when you no longer need those artifacts.
+
 Before promoting a release candidate, run the manual steps in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md). Do not infer Faster-Whisper, Redis, Celery, Docker, FFmpeg, GPU, or CJK success from mocked unit tests.
 
 Production dependency audit:

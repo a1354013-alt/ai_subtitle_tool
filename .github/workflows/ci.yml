@@ -214,6 +214,22 @@ jobs:
     name: Optional real Redis/Celery/FFmpeg/CJK integration
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.run_integration == 'true'
+    env:
+      API_HOST: "127.0.0.1"
+      API_PORT: "8891"
+      REDIS_URL: "redis://127.0.0.1:6379/0"
+      CELERY_BROKER_URL: "redis://127.0.0.1:6379/0"
+      CELERY_RESULT_BACKEND: "redis://127.0.0.1:6379/1"
+      CELERY_WORKER_CONCURRENCY: "1"
+      WHISPER_MODEL: "tiny"
+      OPENAI_API_KEY: ""
+      INTEGRATION_TEST_MODE: "true"
+      INTEGRATION_RUNTIME_DIR: ".integration-runtime"
+      UPLOAD_DIR: ".integration-runtime/uploads"
+      OUTPUT_DIR: ".integration-runtime/outputs"
+      TEMP_DIR: ".integration-runtime/tmp"
+      INTEGRATION_WORK_DIR: ".integration-runtime/work"
+      INTEGRATION_LOG_PATHS: "backend.log:celery-worker.log:celery-beat.log:integration-smoke.log"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -248,12 +264,20 @@ jobs:
           ffmpeg -version
           ffprobe -version
 
-      - name: Start Celery worker and beat
+      - name: Prepare integration runtime directories
+        run: |
+          rm -rf "${INTEGRATION_RUNTIME_DIR}"
+          mkdir -p "${UPLOAD_DIR}" "${OUTPUT_DIR}" "${TEMP_DIR}" "${INTEGRATION_WORK_DIR}"
+
+      - name: Start backend API
+        run: |
+          python -m uvicorn backend.main:app --host "${API_HOST}" --port "${API_PORT}" > backend.log 2>&1 &
+          echo "$!" > backend.pid
+
+      - name: Start Celery worker with concurrency 1
         run: |
           python -m celery -A backend.celery_app:celery_app worker --loglevel=info --pool=solo --concurrency=1 > celery-worker.log 2>&1 &
           echo "$!" > celery-worker.pid
-          python -m celery -A backend.celery_app:celery_app beat --loglevel=info > celery-beat.log 2>&1 &
-          echo "$!" > celery-beat.pid
 
           for i in {1..30}; do
             if python -m celery -A backend.celery_app:celery_app inspect ping --timeout=2; then
@@ -264,8 +288,12 @@ jobs:
 
           echo "::error::Celery worker did not become ready"
           cat celery-worker.log || true
-          cat celery-beat.log || true
           exit 1
+
+      - name: Start Celery beat
+        run: |
+          python -m celery -A backend.celery_app:celery_app beat --loglevel=info > celery-beat.log 2>&1 &
+          echo "$!" > celery-beat.pid
 
       - name: Verify Celery beat startup
         run: |
@@ -279,20 +307,10 @@ jobs:
           cat celery-beat.log || true
           exit 1
 
-      - name: Start backend API
-        env:
-          API_HOST: "127.0.0.1"
-          API_PORT: "8891"
-          REDIS_URL: "redis://127.0.0.1:6379/0"
-          CELERY_BROKER_URL: "redis://127.0.0.1:6379/0"
-          CELERY_RESULT_BACKEND: "redis://127.0.0.1:6379/1"
-          WHISPER_MODEL: "tiny"
-          OPENAI_API_KEY: ""
+      - name: Wait for /readyz
         run: |
-          python -m uvicorn backend.main:app --host 127.0.0.1 --port 8891 > backend.log 2>&1 &
-          echo "$!" > backend.pid
           for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:8891/readyz; then
+            if curl -fsS "http://${API_HOST}:${API_PORT}/readyz"; then
               exit 0
             fi
             sleep 2
@@ -301,21 +319,26 @@ jobs:
           cat backend.log || true
           exit 1
 
-      - name: Run real Redis/Celery task smoke
-        env:
-          API_HOST: "127.0.0.1"
-          API_PORT: "8891"
-          REDIS_URL: "redis://127.0.0.1:6379/0"
-          CELERY_BROKER_URL: "redis://127.0.0.1:6379/0"
-          CELERY_RESULT_BACKEND: "redis://127.0.0.1:6379/1"
-          WHISPER_MODEL: "tiny"
-          OPENAI_API_KEY: ""
-        run: python scripts/run_real_integration_smoke.py --base-url http://127.0.0.1:8891
-
-      - name: Run real integration tests
+      - name: Run real CJK burn-in smoke
         env:
           RUN_CJK_BURNIN_SMOKE: "1"
-        run: python -m pytest -q -m integration -ra
+        run: python -m pytest -q -m integration tests/test_cjk_burnin_integration.py -ra
+
+      - name: Run real Redis/Celery integration smoke
+        run: python scripts/run_real_integration_smoke.py --base-url "http://${API_HOST}:${API_PORT}" 2>&1 | tee integration-smoke.log
+
+      - name: Upload integration logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-service-integration-logs
+          path: |
+            backend.log
+            celery-worker.log
+            celery-beat.log
+            integration-smoke.log
+            .integration-runtime
+          if-no-files-found: warn
 
       - name: Stop integration processes
         if: always()
@@ -326,6 +349,7 @@ jobs:
           cat backend.log || true
           cat celery-worker.log || true
           cat celery-beat.log || true
+          cat integration-smoke.log || true
 
       - name: Manual maintainer model-download tests
         run: |

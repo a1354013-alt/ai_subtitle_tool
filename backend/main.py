@@ -991,6 +991,7 @@ async def upload_video(
 
     options = {
         "business_id": task_id,
+        "source_filename": safe_filename,
         "target_langs": langs,
         "burn_subtitles": burn_subtitles,
         "subtitle_format": normalized_subtitle_format,
@@ -1182,6 +1183,7 @@ async def batch_upload_videos(
 
             options = {
                 "business_id": task_id,
+                "source_filename": safe_filename,
                 "target_langs": langs,
                 "burn_subtitles": burn_subtitles,
                 "subtitle_format": normalized_subtitle_format,

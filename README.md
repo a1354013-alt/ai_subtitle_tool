@@ -199,6 +199,29 @@ CJK burn-in integration checks are skipped by default because they require FFmpe
 RUN_CJK_BURNIN_SMOKE=1 python -m pytest -q -m integration tests/test_cjk_burnin_integration.py
 ```
 
+Real Redis/Celery integration smoke is also opt-in. The local backend default is `http://127.0.0.1:8891`; Docker-based startup uses `http://127.0.0.1:9091`. For deterministic cancellation and controlled parallel-failure coverage, start the worker with `CELERY_WORKER_CONCURRENCY=1` and enable the integration-only hooks:
+
+```bash
+export INTEGRATION_TEST_MODE=true
+export CELERY_WORKER_CONCURRENCY=1
+export UPLOAD_DIR=.integration-runtime/uploads
+export OUTPUT_DIR=.integration-runtime/outputs
+export TEMP_DIR=.integration-runtime/tmp
+export INTEGRATION_WORK_DIR=.integration-runtime/work
+python scripts/run_real_integration_smoke.py --base-url http://127.0.0.1:8891
+```
+
+The smoke script exercises:
+
+- normal upload, download, and Redis result-state recovery
+- deterministic cancellation
+- real parallel success and deterministic parallel failure cleanup
+- subtitle edit plus final-video rebuild and rebuild cancellation
+- protected download tickets for final video, ASS, SRT, VTT, and batch ZIP
+- cleanup via the registered Celery cleanup task
+
+Generated integration videos are created under `INTEGRATION_WORK_DIR`. Task artifacts and logs live under `UPLOAD_DIR`, `OUTPUT_DIR`, `TEMP_DIR`, plus the backend/worker/beat log files you choose when starting services. Remove `.integration-runtime` after the run if you want a clean slate.
+
 Benchmark smoke:
 
 ```bash
@@ -236,7 +259,7 @@ Final release procedure:
 
 1. Keep `VERSION`, `frontend/package.json`, `frontend/package-lock.json`, FastAPI metadata, `/api/config`, `CHANGELOG.md`, and release docs synchronized to the current release candidate.
 2. Run the backend, frontend, release, deterministic ZIP, Docker contract, and `docker compose config` gates listed in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
-3. Run the real Docker Compose startup, Redis/Celery, FFmpeg, CJK burn-in, download, cancellation, rebuild, recovery, and cleanup smoke checks in the checklist.
+3. Run the real Docker Compose startup, Redis/Celery, FFmpeg, CJK burn-in, download, cancellation, rebuild, recovery, and cleanup smoke checks in the checklist. Do not mark them passed until the commands actually succeed.
 4. Only after those real checks pass, create the stable `v1.0.0` tag. `1.0.0-rc3` is not the stable release tag.
 
 If backend dependencies are missing, `--full` stops before pytest with a clear preflight error such as:

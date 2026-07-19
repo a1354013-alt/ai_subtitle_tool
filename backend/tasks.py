@@ -1,6 +1,8 @@
 import logging
 import os
+import re
 import shutil
+import time
 from pathlib import Path
 
 try:
@@ -27,6 +29,85 @@ from .utils.media_process import run_media_command
 from .utils.storage_utils import get_storage_backend
 
 logger = logging.getLogger(__name__)
+_INTEGRATION_FILENAME_TOKEN_RE = re.compile(r"__integration_(?P<token>[a-z0-9_]+)")
+
+
+def _integration_mode_enabled() -> bool:
+    return os.getenv("INTEGRATION_TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _integration_filename_tokens(filename: str | None) -> set[str]:
+    if not filename:
+        return set()
+    return {match.group("token") for match in _INTEGRATION_FILENAME_TOKEN_RE.finditer(filename.lower())}
+
+
+def _task_source_filename(task_id: str | None) -> str:
+    if not task_id:
+        return ""
+    entry = _task_history().get(task_id)
+    return entry.filename if entry else ""
+
+
+def _integration_block_seconds(filename: str | None) -> int:
+    if not filename:
+        return 0
+    match = re.search(r"__integration_block_(\d+)s", filename.lower())
+    if not match:
+        return 0
+    try:
+        return max(0, int(match.group(1)))
+    except ValueError:
+        return 0
+
+
+def _integration_fail_segment_index(filename: str | None) -> int | None:
+    if not filename:
+        return None
+    match = re.search(r"__integration_fail_segment_(\d+)", filename.lower())
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _integration_block_task(task_id: str | None, filename: str | None) -> None:
+    if not _integration_mode_enabled():
+        return
+    block_seconds = _integration_block_seconds(filename)
+    if block_seconds <= 0:
+        return
+
+    from .utils.task_control_utils import is_task_canceled
+
+    upload_dir = settings.get_upload_dir()
+    deadline = time.time() + block_seconds
+    logger.info(
+        "Integration test blocking enabled for task %s using filename %s for %ss",
+        task_id,
+        filename,
+        block_seconds,
+    )
+    while time.time() < deadline:
+        if task_id and is_task_canceled(upload_dir, task_id):
+            raise RuntimeError("Task canceled")
+        time.sleep(1)
+
+
+def _integration_maybe_fail_segment(segment_data: dict) -> None:
+    if not _integration_mode_enabled():
+        return
+    source_filename = str(segment_data.get("source_filename") or "")
+    requested_index = _integration_fail_segment_index(source_filename)
+    if requested_index is None:
+        return
+    actual_index = int(segment_data.get("segment_idx", -1))
+    if actual_index == requested_index:
+        raise RuntimeError(
+            f"Integration test requested deterministic failure for segment {actual_index} via {source_filename}"
+        )
 
 
 def _task_history():
@@ -373,6 +454,7 @@ def finalize_pipeline(segment_results, video_path, options, update_state_func=No
 def transcribe_segment_task(segment_data: dict, model_size: str):
     from .utils.subtitle_utils import transcribe_video
 
+    _integration_maybe_fail_segment(segment_data)
     return transcribe_segment(segment_data, model_size, transcribe_video)
 
 
@@ -422,10 +504,12 @@ def process_video_task(self, video_path: str, options: dict = None):
 
         parallel = options.get("parallel", True)
         do_remove_silence = options.get("remove_silence", False)
+        source_filename = str(options.get("source_filename") or "")
         upload_dir = settings.get_upload_dir()
         base_path = str(settings.task_artifact_base(business_id))
 
         current_video = video_path
+        _integration_block_task(business_id, source_filename)
         if is_task_canceled(upload_dir, business_id):
             raise RuntimeError("Task canceled")
         if do_remove_silence:
@@ -463,6 +547,7 @@ def process_video_task(self, video_path: str, options: dict = None):
                 for segment in video_segments:
                     segment["business_id"] = business_id
                     segment["segments_dir"] = segments_dir
+                    segment["source_filename"] = source_filename
                 errback = parallel_pipeline_failure_task.s(business_id=business_id, segments_dir=segments_dir).set(queue=current_queue)
                 header = [
                     transcribe_segment_task.s(seg, model_size).set(queue=current_queue).on_error(errback)
@@ -539,6 +624,7 @@ def rebuild_final_video_task(self, task_id: str, lang_suffix: str, subtitle_form
 
     try:
         _record_task_state(rebuild_task_id, "PROCESSING", progress=0, message="Rebuild worker started", result_task_id=task_id)
+        _integration_block_task(rebuild_task_id, _task_source_filename(task_id))
         if is_task_canceled(upload_dir, rebuild_task_id):
             raise RuntimeError("Task canceled")
 

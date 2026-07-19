@@ -129,6 +129,23 @@ The source CI workflow is `.github/workflows/ci.yml` and is intentionally exclud
 
 Use [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) for final `1.0.0-rc3` manual smoke validation. Do not create the stable `v1.0.0` tag until the real Docker, Redis, Celery, FFmpeg, CJK burn-in, download, cancellation, cleanup, and recovery checks have passed.
 
+Real integration smoke remains opt-in. Local process startup should target `http://127.0.0.1:8891`; Docker-based smoke should target `http://127.0.0.1:9091`. For deterministic cancellation coverage, run the worker with `CELERY_WORKER_CONCURRENCY=1`. The integration-only worker hooks used by `scripts/run_real_integration_smoke.py` are disabled unless `INTEGRATION_TEST_MODE=true`.
+
+Recommended local smoke environment:
+
+```bash
+export INTEGRATION_TEST_MODE=true
+export CELERY_WORKER_CONCURRENCY=1
+export UPLOAD_DIR=.integration-runtime/uploads
+export OUTPUT_DIR=.integration-runtime/outputs
+export TEMP_DIR=.integration-runtime/tmp
+export INTEGRATION_WORK_DIR=.integration-runtime/work
+python -m pytest -q -m integration tests/test_cjk_burnin_integration.py -ra
+python scripts/run_real_integration_smoke.py --base-url http://127.0.0.1:8891
+```
+
+The CJK burn-in pytest command and the real integration smoke script are both opt-in because they require live FFmpeg, Redis, Celery, and fontconfig. Generated videos land under `INTEGRATION_WORK_DIR`; task artifacts land under `UPLOAD_DIR`, `OUTPUT_DIR`, and `TEMP_DIR`; backend, worker, and beat logs are the process log files you redirect during startup. Remove `.integration-runtime` after the run to clean the integration workspace.
+
 Local storage is the fully supported storage mode for release deployments. `STORAGE_BACKEND=s3` is experimental; rebuild-final uploads rebuilt `{task_id}_final.mp4` to object storage, subtitle edits attempt to delete stale stored final videos, and `S3_UPLOAD_REQUIRED=true` makes rebuild upload failures fail the task.
 
 If backend dependencies are missing, verification stops before pytest and prints:
