@@ -105,6 +105,17 @@ SUBTITLE_FORMATS = ("srt", "ass", "vtt")
 BATCH_UPLOAD_ENABLED = True
 
 
+def integration_test_mode_enabled() -> bool:
+    return _get_bool("INTEGRATION_TEST_MODE", False)
+
+
+def validate_runtime_configuration() -> None:
+    if ENVIRONMENT.strip().lower() == "production" and integration_test_mode_enabled():
+        raise RuntimeError(
+            "Invalid configuration: INTEGRATION_TEST_MODE=true is not allowed when ENVIRONMENT=production."
+        )
+
+
 def get_upload_dir() -> str:
     path = Path(_getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")) or (BASE_DIR / "uploads")).resolve()
     path.mkdir(parents=True, exist_ok=True)

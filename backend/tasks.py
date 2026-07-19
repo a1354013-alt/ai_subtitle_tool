@@ -29,17 +29,20 @@ from .utils.media_process import run_media_command
 from .utils.storage_utils import get_storage_backend
 
 logger = logging.getLogger(__name__)
-_INTEGRATION_FILENAME_TOKEN_RE = re.compile(r"__integration_(?P<token>[a-z0-9_]+)")
+_INTEGRATION_BLOCK_TOKEN_RE = re.compile(r"^integration_block_(\d+)s$")
+_INTEGRATION_FAIL_SEGMENT_TOKEN_RE = re.compile(r"^integration_fail_segment_(\d+)$")
+_INTEGRATION_MAX_BLOCK_SECONDS = 60
 
 
 def _integration_mode_enabled() -> bool:
-    return os.getenv("INTEGRATION_TEST_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+    return settings.integration_test_mode_enabled()
 
 
-def _integration_filename_tokens(filename: str | None) -> set[str]:
+def _integration_filename_tokens(filename: str | None) -> tuple[str, ...]:
     if not filename:
-        return set()
-    return {match.group("token") for match in _INTEGRATION_FILENAME_TOKEN_RE.finditer(filename.lower())}
+        return ()
+    stem = Path(filename).stem.lower()
+    return tuple(token for token in stem.split("__")[1:] if token)
 
 
 def _task_source_filename(task_id: str | None) -> str:
@@ -49,28 +52,44 @@ def _task_source_filename(task_id: str | None) -> str:
     return entry.filename if entry else ""
 
 
+def _parse_integration_filename_controls(filename: str | None) -> tuple[int, int | None]:
+    block_seconds = 0
+    fail_segment_index: int | None = None
+    for token in _integration_filename_tokens(filename):
+        block_match = _INTEGRATION_BLOCK_TOKEN_RE.fullmatch(token)
+        if block_match:
+            try:
+                block_seconds = int(block_match.group(1))
+            except ValueError as exc:
+                raise ValueError("Invalid integration test configuration") from exc
+            if block_seconds <= 0 or block_seconds > _INTEGRATION_MAX_BLOCK_SECONDS:
+                raise ValueError(
+                    f"Invalid integration test configuration: block duration must be 1-{_INTEGRATION_MAX_BLOCK_SECONDS} seconds."
+                )
+            continue
+
+        fail_match = _INTEGRATION_FAIL_SEGMENT_TOKEN_RE.fullmatch(token)
+        if fail_match:
+            try:
+                fail_segment_index = int(fail_match.group(1))
+            except ValueError as exc:
+                raise ValueError("Invalid integration test configuration") from exc
+            continue
+
+        if token.startswith("integration_"):
+            raise ValueError("Invalid integration test configuration")
+
+    return block_seconds, fail_segment_index
+
+
 def _integration_block_seconds(filename: str | None) -> int:
-    if not filename:
-        return 0
-    match = re.search(r"__integration_block_(\d+)s", filename.lower())
-    if not match:
-        return 0
-    try:
-        return max(0, int(match.group(1)))
-    except ValueError:
-        return 0
+    block_seconds, _ = _parse_integration_filename_controls(filename)
+    return block_seconds
 
 
 def _integration_fail_segment_index(filename: str | None) -> int | None:
-    if not filename:
-        return None
-    match = re.search(r"__integration_fail_segment_(\d+)", filename.lower())
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except ValueError:
-        return None
+    _, fail_segment_index = _parse_integration_filename_controls(filename)
+    return fail_segment_index
 
 
 def _integration_block_task(task_id: str | None, filename: str | None) -> None:
@@ -84,12 +103,7 @@ def _integration_block_task(task_id: str | None, filename: str | None) -> None:
 
     upload_dir = settings.get_upload_dir()
     deadline = time.time() + block_seconds
-    logger.info(
-        "Integration test blocking enabled for task %s using filename %s for %ss",
-        task_id,
-        filename,
-        block_seconds,
-    )
+    logger.info("Integration test blocking enabled for task %s for %ss", task_id, block_seconds)
     while time.time() < deadline:
         if task_id and is_task_canceled(upload_dir, task_id):
             raise RuntimeError("Task canceled")
@@ -105,9 +119,7 @@ def _integration_maybe_fail_segment(segment_data: dict) -> None:
         return
     actual_index = int(segment_data.get("segment_idx", -1))
     if actual_index == requested_index:
-        raise RuntimeError(
-            f"Integration test requested deterministic failure for segment {actual_index} via {source_filename}"
-        )
+        raise RuntimeError(f"Integration test requested deterministic failure for segment {actual_index}")
 
 
 def _task_history():

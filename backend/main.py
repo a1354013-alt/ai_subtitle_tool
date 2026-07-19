@@ -760,6 +760,8 @@ def check_system_dependencies():
     """Check critical dependencies on startup."""
     from .utils.error_messages import ERROR_MESSAGES
 
+    settings.validate_runtime_configuration()
+
     if settings.ENVIRONMENT.lower() == "production":
         if settings.REQUIRE_AUTH_TOKEN and not settings.AUTH_TOKEN:
             raise RuntimeError("REQUIRE_AUTH_TOKEN=true requires AUTH_TOKEN in production.")
@@ -893,6 +895,11 @@ app.router.lifespan_context = lifespan
 async def readyz():
     from .utils.error_messages import ERROR_MESSAGES
     errors: list[dict] = []
+
+    try:
+        await run_in_threadpool(settings.validate_runtime_configuration)
+    except Exception as exc:
+        errors.append({"code": "invalid_configuration", "message": str(exc)})
 
     # Upload dir check
     try:

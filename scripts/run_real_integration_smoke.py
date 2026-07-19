@@ -764,7 +764,7 @@ def main(argv: list[str] | None = None) -> int:
         preserved_upload = upload_dir / "cleanup-active_final.mp4"
         preserved_upload.write_bytes(b"keep")
         active_lock = upload_dir / "cleanup-active.lock"
-        active_lock.write_text(json.dumps({"business_id": "cleanup-active", "pid": os.getpid(), "timestamp": time.time()}), encoding="utf-8")
+        active_lock.write_text(json.dumps({"business_id": "cleanup-active", "timestamp": time.time()}), encoding="utf-8")
         batch_meta_dir = upload_dir / "batches"
         batch_meta_dir.mkdir(exist_ok=True)
         expired_batch_meta = batch_meta_dir / "cleanup-old-batch.json"
