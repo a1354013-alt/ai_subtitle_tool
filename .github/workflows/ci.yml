@@ -350,10 +350,3 @@ jobs:
           cat celery-worker.log || true
           cat celery-beat.log || true
           cat integration-smoke.log || true
-
-      - name: Manual maintainer model-download tests
-        run: |
-          cat <<'EOF'
-          Larger-model Faster-Whisper coverage is intentionally not part of the standard push/pull_request CI path.
-          Maintainers should still run the full release checklist smoke on Saturday, July 18, 2026 release candidates before final v1.0.0 acceptance when model cache/network budget is available.
-          EOF
